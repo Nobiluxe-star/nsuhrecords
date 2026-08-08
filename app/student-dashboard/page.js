@@ -1,5 +1,5 @@
 'use client';
-import { supabase } from '../lib/supabase';
+import { supabase } from '../../lib/supabase';
 import { useState, useEffect } from 'react';
 
 export default function StudentDashboard() {
