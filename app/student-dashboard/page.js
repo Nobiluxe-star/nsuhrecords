@@ -1,13 +1,46 @@
 'use client';
-import { useState } from 'react';
+import { supabase } from '@/lib/supabase'
+import { useState, useEffect } from 'react';
 
 export default function StudentDashboard() {
   const [activeTerm, setActiveTerm] = useState(1);
+  const [subjects, setSubjects] = useState([]);
+  const [marksMap, setMarksMap] = useState({});
+useEffect(() => {
+   async function loadReportData() {
+      // 1. Fetch Subjects
+      const { data: subData, error: subError } = await supabase.from('subjects').select('*');
+      console.log('Subjects Data:', subData, 'Error:', subError);
+      if (subData) setSubjects(subData);
+
+      // 2. Fetch Marks for this student and term
+      const termString = `Term ${activeTerm}`;
+      const { data: markData, error: markError } = await supabase
+        .from('marks')
+        .select('*')
+        .eq('student_matricule', 'TEF2NG100126')
+        .eq('term', termString);
+      console.log('Marks Data:', markData, 'Error:', markError);
+
+      // 3. Map scores by subject_code
+      const scoreLookup = {};
+      if (markData) {
+        markData.forEach((m) => {
+          scoreLookup[m.subject_code] = m.score;
+        });
+      }
+      setMarksMap(scoreLookup);
+    }
+
+    loadReportData();
+  }, [activeTerm]);
+    
+   
 
   const studentData = {
-    name: 'Ndoh Gilbert',
+    name: 'Muh Irene',
     code: 'TEF2NG100126',
-    school: 'Wisdom College Bamenda',
+    school: 'Wisdom College Mankon',
     academicYear: '2026 - 2027',
     section: 'Technical',
     class: 'Form 2 Technical (MARE - Automobile)',
@@ -131,18 +164,25 @@ export default function StudentDashboard() {
                     <th className="p-3">Instructor</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-200 bg-white">
-                  {marksData.map((m, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50">
-                      <td className="p-3 font-bold text-slate-900">{m.subject}</td>
-                      <td className="p-3 font-mono text-slate-500">{m.code}</td>
-                      <td className="p-3 font-bold">{m.coef}</td>
-                      <td className="p-3 font-bold text-blue-700 text-sm">{m.score.toFixed(1)}</td>
-                      <td className="p-3 font-black text-slate-800">{m.grade}</td>
-                      <td className="p-3 text-slate-500">{m.teacher}</td>
-                    </tr>
-                  ))}
-                </tbody>
+   <tbody className="divide-y divide-slate-200 bg-white">
+{subjects.map((sub) => {
+          const score = marksMap[sub.code];
+          const grade = score >= 16 ? 'A' : score >= 14 ? 'B' : score >= 12 ? 'C' : score >= 10 ? 'D' : score ? 'F' : '-';
+          return (
+            <tr key={sub.id || sub.code} className="hover:bg-slate-50">
+              <td className="p-3 font-bold text-slate-900">{sub.subject_name}</td>
+              <td className="p-3 font-mono text-slate-500">{sub.code}</td>
+              <td className="p-3 font-bold">{sub.coef}</td>
+              <td className="p-3 font-bold text-blue-700 text-sm">
+                {score !== undefined && score !== null ? `${score} / 20` : '-'}
+              </td>
+              <td className="p-3 font-black text-slate-800">{grade}</td>
+              <td className="p-3 text-slate-500">{sub.instructor || '-'}</td>
+            </tr>
+          )
+        })}
+      
+    </tbody>
               </table>
             </div>
           </div>
