@@ -1,13 +1,14 @@
 'use client';
-import { supabase } from '../../lib/supabase'
+import { supabase } from '@/lib/supabase'
 import { useState, useEffect } from 'react';
 
 export default function StudentDashboard() {
   const [activeTerm, setActiveTerm] = useState(1);
   const [subjects, setSubjects] = useState([]);
   const [marksMap, setMarksMap] = useState({});
-useEffect(() => {
-   async function loadReportData() {
+  
+  useEffect(() => {
+    async function loadReportData() {
       // 1. Fetch Subjects
       const { data: subData, error: subError } = await supabase.from('subjects').select('*');
       console.log('Subjects Data:', subData, 'Error:', subError);
@@ -34,8 +35,6 @@ useEffect(() => {
 
     loadReportData();
   }, [activeTerm]);
-    
-   
 
   const studentData = {
     name: 'Muh Irene',
@@ -53,13 +52,6 @@ useEffect(() => {
     conduct: 'Exemplary discipline and active workshop participation.',
     parentRecommendation: 'Encourage consistent revision in Applied Mechanics.'
   };
-
-  const marksData = [
-    { subject: 'Automobile Repair Mechanics', code: 'MARE101', score: 16.5, coef: 4, grade: 'A', teacher: 'Eng. Ngu' },
-    { subject: 'Applied Mathematics', code: 'MATH201', score: 14.0, coef: 3, grade: 'B', teacher: 'Mr. Nsuh' },
-    { subject: 'Workshop Technology', code: 'WTECH102', score: 15.0, coef: 4, grade: 'A', teacher: 'Mr. Che' },
-    { subject: 'English Language', code: 'ENG101', score: 12.0, coef: 2, grade: 'C', teacher: 'Mrs. Bi' },
-  ];
 
   const handleShare = () => {
     const link = `${window.location.origin}/student-dashboard?id=${studentData.code}&token=temp_exp_6h`;
@@ -164,25 +156,24 @@ useEffect(() => {
                     <th className="p-3">Instructor</th>
                   </tr>
                 </thead>
-   <tbody className="divide-y divide-slate-200 bg-white">
-{subjects.map((sub) => {
-          const score = marksMap[sub.code];
-          const grade = score >= 16 ? 'A' : score >= 14 ? 'B' : score >= 12 ? 'C' : score >= 10 ? 'D' : score ? 'F' : '-';
-          return (
-            <tr key={sub.id || sub.code} className="hover:bg-slate-50">
-              <td className="p-3 font-bold text-slate-900">{sub.subject_name}</td>
-              <td className="p-3 font-mono text-slate-500">{sub.code}</td>
-              <td className="p-3 font-bold">{sub.coef}</td>
-              <td className="p-3 font-bold text-blue-700 text-sm">
-                {score !== undefined && score !== null ? `${score} / 20` : '-'}
-              </td>
-              <td className="p-3 font-black text-slate-800">{grade}</td>
-              <td className="p-3 text-slate-500">{sub.instructor || '-'}</td>
-            </tr>
-          )
-        })}
-      
-    </tbody>
+                <tbody className="divide-y divide-slate-200 bg-white">
+                  {subjects.map((sub) => {
+                    const score = marksMap[sub.code];
+                    const grade = score >= 16 ? 'A' : score >= 14 ? 'B' : score >= 12 ? 'C' : score >= 10 ? 'D' : score !== undefined ? 'F' : '-';
+                    return (
+                      <tr key={sub.id || sub.code} className="hover:bg-slate-50">
+                        <td className="p-3 font-bold text-slate-900">{sub.subject_name}</td>
+                        <td className="p-3 font-mono text-slate-500">{sub.code}</td>
+                        <td className="p-3 font-bold">{sub.coef}</td>
+                        <td className="p-3 font-bold text-blue-700 text-sm">
+                          {score !== undefined && score !== null ? `${score} / 20` : '-'}
+                        </td>
+                        <td className="p-3 font-black text-slate-800">{grade}</td>
+                        <td className="p-3 text-slate-500">{sub.instructor || '-'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
               </table>
             </div>
           </div>
