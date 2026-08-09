@@ -30,6 +30,10 @@ export default function LandingPage() {
   const [developerPassword, setDeveloperPassword] = useState('');
   const [masterError, setMasterError] = useState('');
 
+  // Password Visibility Toggles
+  const [showStaffPassword, setShowStaffPassword] = useState(false);
+  const [showMasterPassword, setShowMasterPassword] = useState(false);
+
   // Dynamic Assigned Schools (Fetched from Master Admin / Supabase assignments)
   const [assignedSchools, setAssignedSchools] = useState([]);
 
@@ -84,8 +88,8 @@ export default function LandingPage() {
     setMasterError('');
 
     if (
-      developerEmail.trim().toLowerCase() === 'newlife8525@gmail.com' &&
-      developerPassword === '2026$NCmillions?'
+      developerEmail.trim().toLowerCase() === 'newlife8525path@gmail.com' &&
+      developerPassword === '2026$Ncmillions'
     ) {
       window.location.href = '/master-admin';
     } else {
@@ -124,6 +128,7 @@ export default function LandingPage() {
     setRolePath(path);
     setStaffId('');
     setStaffPassword('');
+    setShowStaffPassword(false);
     setActiveModal('staff');
   };
 
@@ -147,6 +152,7 @@ export default function LandingPage() {
             setMasterError('');
             setDeveloperEmail('');
             setDeveloperPassword('');
+            setShowMasterPassword(false);
             setActiveModal('master');
           }}
           className="text-xs font-semibold px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition border border-slate-700 hover:border-blue-500/50"
@@ -321,14 +327,23 @@ export default function LandingPage() {
                     Forgot Password?
                   </button>
                 </div>
-                <input
-                  type="password"
-                  placeholder="Enter password"
-                  value={staffPassword}
-                  onChange={(e) => setStaffPassword(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500"
-                  required
-                />
+                <div className="relative">
+                  <input
+                    type={showStaffPassword ? 'text' : 'password'}
+                    placeholder="Enter password"
+                    value={staffPassword}
+                    onChange={(e) => setStaffPassword(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 pr-10 text-xs text-white focus:outline-none focus:border-blue-500"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowStaffPassword(!showStaffPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-xs font-semibold"
+                  >
+                    {showStaffPassword ? 'Hide' : 'Show'}
+                  </button>
+                </div>
               </div>
 
               <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-xs transition shadow-lg shadow-blue-600/30">
@@ -369,15 +384,24 @@ export default function LandingPage() {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Master Password</label>
-                <input
-                  type="password"
-                  placeholder="••••••••••••"
-                  value={developerPassword}
-                  onChange={(e) => setDeveloperPassword(e.target.value)}
-                  autoComplete="new-password"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
-                  required
-                />
+                <div className="relative">
+                  <input
+                    type={showMasterPassword ? 'text' : 'password'}
+                    placeholder="••••••••••••"
+                    value={developerPassword}
+                    onChange={(e) => setDeveloperPassword(e.target.value)}
+                    autoComplete="new-password"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 pr-10 text-xs text-white focus:outline-none focus:border-amber-500"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowMasterPassword(!showMasterPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-xs font-semibold"
+                  >
+                    {showMasterPassword ? 'Hide' : 'Show'}
+                  </button>
+                </div>
               </div>
 
               {masterError && (
