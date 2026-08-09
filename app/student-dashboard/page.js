@@ -6,24 +6,60 @@ export default function StudentDashboard() {
   const [activeTerm, setActiveTerm] = useState(1);
   const [subjects, setSubjects] = useState([]);
   const [marksMap, setMarksMap] = useState({});
-  
+  const [schoolName, setSchoolName] = useState('No school assigned yet');
+  const [studentData, setStudentData] = useState(null);
+  const [feesRecord, setFeesRecord] = useState(null);
+  const [classAverage, setClassAverage] = useState(null);
+  const [studentRank, setStudentRank] = useState(null);
+  const [totalStudents, setTotalStudents] = useState(null);
+  const [disciplineRecord, setDisciplineRecord] = useState(null);
+  const [announcements, setAnnouncements] = useState([]);
+  const [adminRemarks, setAdminRemarks] = useState(null);
+
   useEffect(() => {
     async function loadReportData() {
-      // 1. Fetch Subjects
-      const { data: subData, error: subError } = await supabase.from('subjects').select('*');
-      console.log('Subjects Data:', subData, 'Error:', subError);
+      // 1. Fetch assigned school or reset to zero
+      const { data: schoolAssignment } = await supabase
+        .from('school_assignments')
+        .select('school_name')
+        .single();
+
+      if (schoolAssignment?.school_name) {
+        setSchoolName(schoolAssignment.school_name);
+      } else {
+        setSchoolName('No school assigned yet');
+      }
+
+      // 2. Fetch student details (left void if unassigned/unfilled)
+      const { data: profile } = await supabase
+        .from('student_profiles')
+        .select('*')
+        .single();
+
+      setStudentData(profile || null);
+
+      // 3. Fetch fees record from bursar dashboard
+      const { data: fees } = await supabase
+        .from('bursar_fees')
+        .select('*')
+        .eq('term', `Term ${activeTerm}`)
+        .single();
+
+      setFeesRecord(fees || null);
+
+      // 4. Fetch Subjects
+      const { data: subData } = await supabase.from('subjects').select('*');
       if (subData) setSubjects(subData);
 
-      // 2. Fetch Marks for this student and term
+      // 5. Fetch Marks for this student and term
       const termString = `Term ${activeTerm}`;
-      const { data: markData, error: markError } = await supabase
+      const matricule = profile?.code || 'TEF2NG100126';
+      const { data: markData } = await supabase
         .from('marks')
         .select('*')
-        .eq('student_matricule', 'TEF2NG100126')
+        .eq('student_matricule', matricule)
         .eq('term', termString);
-      console.log('Marks Data:', markData, 'Error:', markError);
 
-      // 3. Map scores by subject_code
       const scoreLookup = {};
       if (markData) {
         markData.forEach((m) => {
@@ -31,33 +67,74 @@ export default function StudentDashboard() {
         });
       }
       setMarksMap(scoreLookup);
+
+      // 6. Fetch Postgres calculated general class average
+      const { data: avgData } = await supabase
+        .rpc('calculate_class_average', { target_term: termString });
+      setClassAverage(avgData !== null ? avgData : null);
+
+      // 7. Fetch Student Rank and Total Students in Class via Postgres function or table
+      const { data: rankData } = await supabase
+        .rpc('calculate_student_rank', { student_code: matricule, target_term: termString });
+      if (rankData) {
+        setStudentRank(rankData.rank ?? null);
+        setTotalStudents(rankData.total_students ?? null);
+      }
+
+      // 8. Fetch discipline summary from discipline master dashboard
+      const { data: discipline } = await supabase
+        .from('discipline_summaries')
+        .select('*')
+        .eq('term', termString)
+        .single();
+      setDisciplineRecord(discipline || null);
+
+      // 9. Fetch principal announcements directly from principal dashboard tables
+      const { data: annos } = await supabase
+        .from('principal_announcements')
+        .select('*')
+        .order('created_at', { ascending: false });
+      setAnnouncements(annos || []);
+
+      // 10. Fetch principal remarks
+      const { data: remarks } = await supabase
+        .from('principal_remarks')
+        .select('*')
+        .eq('term', termString)
+        .single();
+      setAdminRemarks(remarks || null);
     }
 
     loadReportData();
+
+    // Real-time update check every 1 minute
+    const interval = setInterval(() => {
+      loadReportData();
+    }, 60000);
+
+    return () => clearInterval(interval);
   }, [activeTerm]);
 
-  const studentData = {
-    name: 'Muh Irene',
-    code: 'TEF2NG100126',
-    school: 'Wisdom College Mankon',
-    academicYear: '2026 - 2027',
-    section: 'Technical',
-    class: 'Form 2 Technical (MARE - Automobile)',
-    age: 14,
-    photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-    feesPaid: '125,000 FCFA',
-    feesDue: '150,000 FCFA',
-    feeBalance: '25,000 FCFA',
-    absences: 2,
-    conduct: 'Exemplary discipline and active workshop participation.',
-    parentRecommendation: 'Encourage consistent revision in Applied Mechanics.'
-  };
-
   const handleShare = () => {
-    const link = `${window.location.origin}/student-dashboard?id=${studentData.code}&token=temp_exp_6h`;
+    const link = `${window.location.origin}/student-dashboard?token=temp_exp_6h`;
     navigator.clipboard.writeText(link);
     alert('Temporary 6-Hour Encrypted View Link copied to clipboard!');
   };
+
+  // Dynamic Totals calculation
+  let totalPoints = 0;
+  let totalCoef = 0;
+  let hasAnyMarks = false;
+  subjects.forEach((sub) => {
+    const score = marksMap[sub.code];
+    if (score !== undefined && score !== null) {
+      hasAnyMarks = true;
+      totalPoints += Number(score) * (sub.coef || 1);
+      totalCoef += (sub.coef || 1);
+    }
+  });
+  const termAverage = totalCoef > 0 ? (totalPoints / totalCoef).toFixed(2) : null;
+  const termStatus = termAverage !== null ? (Number(termAverage) >= 10 ? 'Passed' : 'Failed') : 'Void';
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 p-4 sm:p-8">
@@ -85,45 +162,51 @@ export default function StudentDashboard() {
           <div className="border-b-2 border-slate-900 pb-6 flex justify-between items-start">
             <div className="flex items-center space-x-4">
               <div className="w-16 h-16 bg-blue-900 text-white font-black text-2xl rounded-2xl flex items-center justify-center">
-                WCB
+                NR
               </div>
               <div>
-                <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tight">{studentData.school}</h1>
-                <p className="text-xs text-slate-600 font-medium">Official Student Academic Registry | Year {studentData.academicYear}</p>
+                <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tight">{schoolName}</h1>
+                <p className="text-xs text-slate-600 font-medium">Official Student Academic Registry | Academic Year 2026 - 2027</p>
                 <p className="text-[10px] text-slate-400 mt-0.5">NW Region, Cameroon</p>
               </div>
             </div>
             <div className="text-right">
               <span className="text-xs font-extrabold px-3 py-1 bg-slate-100 text-slate-800 border border-slate-300 rounded-full">
-                {studentData.section} Section
+                Technical Section
               </span>
-              <p className="text-xs font-mono font-bold text-blue-600 mt-2">{studentData.code}</p>
+              <p className="text-xs font-mono font-bold text-blue-600 mt-2">{studentData?.code || 'Void'}</p>
             </div>
           </div>
 
           {/* Student Profile Overview */}
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-6 items-center bg-slate-50 p-4 rounded-2xl border border-slate-200">
-            <img src={studentData.photoUrl} alt="Student" className="w-24 h-24 rounded-2xl object-cover border-2 border-slate-300 mx-auto sm:mx-0" />
+            <div className="w-24 h-24 rounded-2xl bg-slate-200 border-2 border-slate-300 mx-auto sm:mx-0 flex items-center justify-center overflow-hidden">
+              {studentData?.photo_url ? (
+                <img src={studentData.photo_url} alt="Student" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-[10px] text-slate-500 text-center font-medium px-1">No Picture</span>
+              )}
+            </div>
             <div className="sm:col-span-3 grid grid-cols-2 sm:grid-cols-3 gap-4 text-xs">
               <div>
                 <span className="text-slate-400 block">Full Name</span>
-                <strong className="text-slate-900 text-sm">{studentData.name}</strong>
+                <strong className="text-slate-900 text-sm">{studentData?.name || 'Void'}</strong>
               </div>
               <div>
                 <span className="text-slate-400 block">Class Grade</span>
-                <strong className="text-slate-900">{studentData.class}</strong>
+                <strong className="text-slate-900">{studentData?.class_grade || 'Void'}</strong>
               </div>
               <div>
                 <span className="text-slate-400 block">Age</span>
-                <strong className="text-slate-900">{studentData.age} Years Old</strong>
+                <strong className="text-slate-900">{studentData?.age ? `${studentData.age} Years Old` : 'Void'}</strong>
               </div>
               <div>
                 <span className="text-slate-400 block">Fee Balance</span>
-                <strong className="text-red-600 font-bold">{studentData.feeBalance}</strong>
+                <strong className="text-red-600 font-bold">{feesRecord?.fee_balance ? `${feesRecord.fee_balance} FCFA` : 'Void'}</strong>
               </div>
               <div>
                 <span className="text-slate-400 block">Total Fees Paid</span>
-                <strong className="text-emerald-700">{studentData.feesPaid}</strong>
+                <strong className="text-emerald-700">{feesRecord?.fees_paid ? `${feesRecord.fees_paid} FCFA` : 'Void'}</strong>
               </div>
             </div>
           </div>
@@ -178,40 +261,68 @@ export default function StudentDashboard() {
             </div>
           </div>
 
-          {/* Summary Stats */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-blue-900 text-white p-4 rounded-2xl text-center">
+          {/* Summary Stats - 5 Column Layout including General Class Average */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 bg-blue-900 text-white p-4 rounded-2xl text-center">
             <div>
               <span className="text-[10px] text-blue-200 uppercase block">Total Points</span>
-              <strong className="text-lg">57.5 / 80</strong>
+              <strong className="text-lg">{hasAnyMarks ? `${totalPoints} / ${totalCoef * 20}` : 'Void'}</strong>
             </div>
             <div>
-              <span className="text-[10px] text-blue-200 uppercase block">Term Average</span>
-              <strong className="text-xl font-black text-amber-400">14.38 / 20</strong>
+              <span className="text-[10px] text-blue-200 uppercase block">Student Term Average</span>
+              <strong className="text-xl font-black text-amber-400">{termAverage !== null ? `${termAverage} / 20` : 'Void'}</strong>
             </div>
             <div>
               <span className="text-[10px] text-blue-200 uppercase block">Class Rank</span>
-              <strong className="text-lg">3rd out of 42</strong>
+              <strong className="text-lg">{studentRank !== null && totalStudents !== null ? `${studentRank} out of ${totalStudents}` : 'Void'}</strong>
+            </div>
+            <div>
+              <span className="text-[10px] text-blue-200 uppercase block">General Class Average</span>
+              <strong className="text-lg">{classAverage !== null ? `${classAverage} / 20` : 'Pending'}</strong>
             </div>
             <div>
               <span className="text-[10px] text-blue-200 uppercase block">Term Status</span>
-              <strong className="text-lg text-emerald-400">Passed</strong>
+              <strong className={`text-lg font-bold ${termStatus === 'Passed' ? 'text-emerald-400' : termStatus === 'Failed' ? 'text-red-400' : 'text-slate-300'}`}>
+                {termStatus}
+              </strong>
             </div>
           </div>
 
           {/* Discipline & Conduct Statements */}
           <div className="grid sm:grid-cols-2 gap-4 text-xs">
-            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl">
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-1">
               <span className="font-extrabold text-slate-900 uppercase block mb-1">Discipline & Attendance</span>
-              <p className="text-slate-600 mb-2">Unexcused Absences: <strong className="text-slate-900">{studentData.absences} Days</strong></p>
-              <p className="text-slate-700 italic">"{studentData.conduct}"</p>
+              <p className="text-slate-600">Unexcused Absences: <strong className="text-slate-900">{disciplineRecord?.absences ?? 'Void'} Days</strong></p>
+              <p className="text-slate-600">Latecomings: <strong className="text-slate-900">{disciplineRecord?.latecomings ?? 'Void'}</strong></p>
+              <p className="text-slate-700 italic mt-2">"{disciplineRecord?.punishments || 'Void'}"</p>
             </div>
-            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl">
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-1">
               <span className="font-extrabold text-slate-900 uppercase block mb-1">Administration & Principal Remark</span>
-              <p className="text-slate-700 italic">"{studentData.parentRecommendation}"</p>
+              <p className="text-slate-700 italic">"{adminRemarks?.remark_text || 'Void'}"</p>
             </div>
           </div>
 
+          {/* Principal Announcements Section */}
+          <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 text-xs">
+            <span className="font-extrabold text-slate-900 uppercase block">Principal Announcements</span>
+            {announcements.length === 0 ? (
+              <p className="text-slate-400 italic">Void</p>
+            ) : (
+              announcements.map((anno, idx) => (
+                <div key={idx} className="border-t border-slate-200 pt-2 first:border-t-0 first:pt-0">
+                  <p className="font-bold text-slate-900">{anno.title}</p>
+                  <p className="text-slate-600">{anno.content}</p>
+                </div>
+              ))
+            )}
+          </div>
+
         </div>
+
+        {/* App Credit Footer (Placed right below and outside the report card) */}
+        <div className="text-center py-2 text-xs text-slate-500 font-medium">
+          App conceived by Norbert Che Nsuh - 682491189
+        </div>
+
       </div>
     </div>
   );

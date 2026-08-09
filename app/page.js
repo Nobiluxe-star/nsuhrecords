@@ -1,6 +1,12 @@
 'use client';
 
 import React, { useState } from 'react';
+import { createClient } from '@supabase/supabase-js';
+
+// Initialize Supabase Client
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'YOUR_SUPABASE_URL';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'YOUR_SUPABASE_ANON_KEY';
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 export default function LandingPage() {
   // Student Direct Access Form State
@@ -17,41 +23,30 @@ export default function LandingPage() {
   const [staffId, setStaffId] = useState('');
   const [staffPassword, setStaffPassword] = useState('');
   const [resetEmailOrId, setResetEmailOrId] = useState('');
+  const [resetStatusMessage, setResetStatusMessage] = useState('');
 
   // Master Developer Credentials
   const [developerEmail, setDeveloperEmail] = useState('');
   const [developerPassword, setDeveloperPassword] = useState('');
   const [masterError, setMasterError] = useState('');
 
-  // Password Helper
-  const [suggestedPassword, setSuggestedPassword] = useState('');
-  const [copiedNotification, setCopiedNotification] = useState(false);
+  // Dynamic Assigned Schools (Fetched from Master Admin / Supabase assignments)
+  const [assignedSchools, setAssignedSchools] = useState([]);
 
-  // ONLY Assigned Active Schools (No random or unassigned schools)
-  const assignedSchools = [
-    { id: 'WCB', name: 'Wisdom College Bamenda' },
-    { id: 'GBHSB', name: 'Government Bilingual High School (GBHS) Bamenda' },
-    { id: 'GTHSB', name: 'Government Technical High School (GTHS) Bamenda' },
-  ];
-
-  // Auto-generate strong 16-character password
-  const generateStrongPassword = () => {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+';
-    let pass = '';
-    for (let i = 0; i < 16; i++) {
-      pass += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    setSuggestedPassword(pass);
-    setStaffPassword(pass);
-  };
-
-  const copySuggestedPassword = () => {
-    if (suggestedPassword) {
-      navigator.clipboard.writeText(suggestedPassword);
-      setCopiedNotification(true);
-      setTimeout(() => setCopiedNotification(false), 2000);
-    }
-  };
+  // Fetch assigned schools on load
+  React.useEffect(() => {
+    const fetchAssignedSchools = async () => {
+      try {
+        const { data, error } = await supabase.from('assigned_schools').select('*');
+        if (!error && data) {
+          setAssignedSchools(data);
+        }
+      } catch (err) {
+        setAssignedSchools([]);
+      }
+    };
+    fetchAssignedSchools();
+  }, []);
 
   // Handlers
   const handleStudentLogin = (e) => {
@@ -92,21 +87,36 @@ export default function LandingPage() {
       developerEmail.trim().toLowerCase() === 'newlife8525@gmail.com' &&
       developerPassword === '2026$NCmillions?'
     ) {
-      // Redirect directly to the Master Admin Dashboard
       window.location.href = '/master-admin';
     } else {
       setMasterError('Unauthorized access attempt. Invalid Master Developer credentials.');
     }
   };
 
-  const handlePasswordReset = (e) => {
+  // Supabase Password Reset Handler
+  const handlePasswordReset = async (e) => {
     e.preventDefault();
+    setResetStatusMessage('');
+
     if (!resetEmailOrId) {
-      alert('Please enter your Unique ID or Registered Email.');
+      alert('Please enter your Registered Email.');
       return;
     }
-    alert(`Password reset instructions sent for: ${resetEmailOrId}`);
-    setActiveModal('staff');
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(resetEmailOrId.trim(), {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+
+      if (error) {
+        setResetStatusMessage(`Error: ${error.message}`);
+      } else {
+        alert(`Password reset instructions have been successfully sent to: ${resetEmailOrId}`);
+        setActiveModal('staff');
+      }
+    } catch (err) {
+      setResetStatusMessage('An unexpected error occurred. Please try again.');
+    }
   };
 
   const openStaffModal = (roleName, path) => {
@@ -114,7 +124,6 @@ export default function LandingPage() {
     setRolePath(path);
     setStaffId('');
     setStaffPassword('');
-    setSuggestedPassword('');
     setActiveModal('staff');
   };
 
@@ -136,6 +145,8 @@ export default function LandingPage() {
         <button
           onClick={() => {
             setMasterError('');
+            setDeveloperEmail('');
+            setDeveloperPassword('');
             setActiveModal('master');
           }}
           className="text-xs font-semibold px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition border border-slate-700 hover:border-blue-500/50"
@@ -154,7 +165,6 @@ export default function LandingPage() {
             Eliminating paper delays across Cameroonian schools. Teachers submit sequence scores instantly, parents track live grades, and school leaders manage complete fee records—online or offline.
           </p>
           
-          {/* Explicitly standard casing heading (not forced uppercase) */}
           <div className="p-6 bg-slate-800/60 rounded-2xl border border-slate-700/60 backdrop-blur-sm space-y-2">
             <h3 className="text-sm font-bold text-slate-200 tracking-wider">
               ABOUT NsuhRecords
@@ -186,9 +196,9 @@ export default function LandingPage() {
                 className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
                 required
               >
-                <option value="">-- Choose your school --</option>
+                <option value="">{assignedSchools.length === 0 ? '-- No schools assigned yet --' : '-- Choose your school --'}</option>
                 {assignedSchools.map((school) => (
-                  <option key={school.id} value={school.name}>
+                  <option key={school.id || school.name} value={school.name}>
                     {school.name}
                   </option>
                 ))}
@@ -321,23 +331,6 @@ export default function LandingPage() {
                 />
               </div>
 
-              <div className="bg-slate-950/80 border border-slate-800 p-3 rounded-xl space-y-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-bold uppercase text-slate-400">Password Security Tool</span>
-                  <button type="button" onClick={generateStrongPassword} className="text-[10px] font-bold text-blue-400 hover:underline">
-                    Auto-Generate Password
-                  </button>
-                </div>
-                {suggestedPassword && (
-                  <div className="flex items-center justify-between bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-lg">
-                    <span className="text-xs font-mono text-emerald-400 break-all">{suggestedPassword}</span>
-                    <button type="button" onClick={copySuggestedPassword} className="ml-2 text-[10px] bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded text-slate-200 shrink-0">
-                      {copiedNotification ? 'Copied!' : 'Copy'}
-                    </button>
-                  </div>
-                )}
-              </div>
-
               <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-xs transition shadow-lg shadow-blue-600/30">
                 Login to {selectedRole} Portal
               </button>
@@ -365,9 +358,10 @@ export default function LandingPage() {
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Developer Email</label>
                 <input
                   type="email"
-                  placeholder="newlife8525@gmail.com"
+                  placeholder="Enter developer email"
                   value={developerEmail}
                   onChange={(e) => setDeveloperEmail(e.target.value)}
+                  autoComplete="off"
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
                   required
                 />
@@ -380,6 +374,7 @@ export default function LandingPage() {
                   placeholder="••••••••••••"
                   value={developerPassword}
                   onChange={(e) => setDeveloperPassword(e.target.value)}
+                  autoComplete="new-password"
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
                   required
                 />
@@ -404,23 +399,29 @@ export default function LandingPage() {
             <div className="flex justify-between items-center border-b border-slate-800 pb-4">
               <div>
                 <h3 className="text-lg font-bold text-white">Reset Staff Password</h3>
-                <p className="text-xs text-slate-400">Restore your portal access</p>
+                <p className="text-xs text-slate-400">Restore your portal access via email</p>
               </div>
               <button onClick={() => setActiveModal('staff')} className="text-slate-400 hover:text-white text-lg font-bold">✕</button>
             </div>
 
             <form onSubmit={handlePasswordReset} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Unique Staff ID or Registered Email</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Registered Email Address</label>
                 <input
-                  type="text"
-                  placeholder="Enter your ID or email"
+                  type="email"
+                  placeholder="Enter your registered email"
                   value={resetEmailOrId}
                   onChange={(e) => setResetEmailOrId(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500"
                   required
                 />
               </div>
+
+              {resetStatusMessage && (
+                <p className={`text-xs font-medium ${resetStatusMessage.startsWith('Error') ? 'text-red-400' : 'text-emerald-400'}`}>
+                  {resetStatusMessage}
+                </p>
+              )}
 
               <div className="pt-2 flex gap-3">
                 <button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-xs transition">
