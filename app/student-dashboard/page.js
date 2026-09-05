@@ -1,6 +1,7 @@
 'use client';
 import { supabase } from '../../lib/supabase';
-import { useState, useEffect } from 'react';
+export const dynamic = 'force-dynamic';
+import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 function getOrdinalSuffix(i) {
@@ -20,7 +21,7 @@ function getCurrentAcademicYear() {
     : `${currentYear - 1}-${currentYear}`;
 }
 
-export default function StudentDashboard() {
+function StudentDashboardContent() {
   const searchParams = useSearchParams();
 
   const [activeTerm, setActiveTerm] = useState(1);
@@ -505,5 +506,13 @@ export default function StudentDashboard() {
 
       </div>
     </div>
+  );
+}
+
+export default function StudentDashboard() {
+  return (
+    <Suspense fallback="Loading...">
+      <StudentDashboardContent />
+    </Suspense>
   );
 }
