@@ -1,4 +1,8 @@
 @import "tailwindcss";
+/* Hide header scrollbar */
+header, nav {
+  overflow-x: hidden !important;
+}
 
 :root {
   --background: #ffffff;
@@ -12,15 +16,42 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+/* ==========================================
+   TEACHER TIMETABLE DIRECT PRINT STYLES
+   ========================================== */
+@media print {
+  @page {
+    size: landscape;
+    margin: 5mm;
+  }
+
+  /* Hide background elements */
+  body * {
+    visibility: hidden !important;
+  }
+
+  .no-print, nav, header, sidebar {
+    display: none !important;
+  }
+
+  /* Make ONLY the printable section visible */
+  #printable-teacher-timetable,
+  #printable-teacher-timetable * {
+    visibility: visible !important;
+  }
+
+  /* Position printable area perfectly at top-left */
+  #printable-teacher-timetable {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
 }

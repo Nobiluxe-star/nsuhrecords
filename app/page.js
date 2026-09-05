@@ -49,12 +49,15 @@ export default function LandingPage() {
   }, []);
 
   // Handlers
-  const handleStudentLogin = (e) => {
+  const handleStudentLogin = async (e) => {
     e.preventDefault();
-    setErrorMessage('');
-
-    if (!selectedSchool) {
-      setErrorMessage('Please select your official school from the list first.');
+const selectedSchoolData = assignedSchools.find(s => (s.school_id || s.id) === selectedSchool);
+  if (selectedSchoolData && selectedSchoolData.status === 'Restricted') {
+    setErrorMessage('Your school has been restricted. Please contact your school administrator for more details.');
+    return;
+  }
+    if (!selectedSchool || !studentId) {
+      setErrorMessage('Please select a school and enter your Student Unique ID.');
       return;
     }
 
@@ -62,19 +65,204 @@ export default function LandingPage() {
     const isTechnical = studentId.startsWith('TE');
 
     if (!isGeneral && !isTechnical) {
-      setErrorMessage('Invalid Student ID format. ID must start with "GE" (General) or "TE" (Technical). Contact your school administrator.');
+      setErrorMessage('Invalid Student ID format. ID must start with "GE" (General) or "TE" (Technical). Contact your school administration.');
       return;
     }
 
-    window.location.href = `/student-dashboard?id=${studentId}&school=${encodeURIComponent(selectedSchool)}`;
+    setErrorMessage('');
+// Strict Tenant Isolation: Ensure the unique_code exists and belongs directly to the selected school_id
+  const tableName = isTechnical ? 'technical_education_students' : 'general_education_students';
+
+  const { data: matchedStudent, error } = await supabase
+    .from(tableName)
+    .select('id, school_id, unique_code')
+    .eq('unique_code', studentId.trim())
+    .eq('school_id', selectedSchool)
+    .maybeSingle();
+
+  if (error || !matchedStudent) {
+    setErrorMessage('Authentication Failed: Student ID not found for the selected school.');
+    return;
+  }
+    // 1. Bind active school context for multi-tenant isolation
+    localStorage.setItem('active_school_id', selectedSchool);
+    localStorage.setItem('student_unique_id', studentId.trim());
+// Store the verified student primary key ID
+localStorage.setItem('student_row_id', matchedStudent.id);
+
+// Set active school session context in PostgreSQL
+await supabase.rpc('set_active_school', { school_id: selectedSchool });
+
+// 2. Redirect to Student Dashboard with student ID, unique code, and school parameters
+const targetSchool = assignedSchools.find(s => (s.school_id || s.id) === selectedSchool);
+const schoolName = targetSchool ? (targetSchool.name || targetSchool.institution_name) : '';
+
+window.location.href = `/student-dashboard?id=${encodeURIComponent(studentId.trim())}&row_id=${encodeURIComponent(matchedStudent.id)}&school_name=${encodeURIComponent(schoolName)}&school_id=${encodeURIComponent(selectedSchool)}`;   
   };
 
-  const handleStaffLogin = (e) => {
+ const handleStaffLogin = async (e) => {
     e.preventDefault();
+
     if (!staffId || !staffPassword) {
-      alert('Please enter your Unique Staff ID and Password.');
+      alert('Please enter your credentials and password.');
       return;
     }
+
+    const inputIdentifier = staffId.trim();
+    const inputPassword = staffPassword.trim();
+    const isEmail = inputIdentifier.includes('@');
+
+   // 1. TEACHER LOGIN
+    if (selectedRole === 'Teacher') {
+      let targetEmail = inputIdentifier.toLowerCase();
+      let teacherData = null;
+
+      // Fetch teacher details AND join assigned_schools to get institution_name
+      let teacherQuery = supabase
+        .from('teachers')
+        .select('*');
+
+      if (isEmail) {
+        teacherQuery = teacherQuery.eq('email', inputIdentifier.toLowerCase());
+      } else {
+        teacherQuery = teacherQuery.eq('teacher_id', inputIdentifier);
+      }
+
+      const { data: teacher, error: teacherErr } = await teacherQuery.maybeSingle();
+
+      if (teacherErr || !teacher) {
+        alert('Invalid Email or Unique Code.');
+        return;
+      }
+
+      teacherData = teacher;
+      targetEmail = teacher.email
+        ? teacher.email.trim().toLowerCase()
+        : `${teacher.teacher_id.toLowerCase()}@nsuhrecords.internal`;
+
+      // Validate credentials against Supabase Auth
+      const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
+        email: targetEmail,
+        password: inputPassword,
+      });
+
+      if (authErr) {
+        alert('Invalid password. Please check your credentials.');
+        return;
+      }
+
+      // Store teacher identity & multi-tenant school context
+      const teacherName = teacherData.full_name || teacherData.name || teacherData.teacher_name || 'Teacher';
+      const schoolName = teacherData.assigned_schools?.institution_name || teacherData.school_name || 'Assigned School';
+
+      localStorage.setItem('active_teacher_id', teacherData.teacher_id || '');
+      localStorage.setItem('active_teacher_name', teacherName);
+      localStorage.setItem('active_school_id', teacherData.school_id || '');
+      localStorage.setItem('active_school_name', schoolName);
+
+      if (teacherData.school_id) {
+        await supabase.rpc('set_active_school', { school_id: teacherData.school_id });
+      }
+
+      window.location.href = rolePath;
+      return;
+    }
+
+   // 2. OTHER SCHOOL STAFF (Bursar, Supervisor, Discipline Master, Principal, etc.)
+    if (selectedRole !== 'Administrator') {
+      let staffQuery = supabase.from('school_personnel').select('*');
+
+      if (isEmail) {
+        staffQuery = staffQuery.eq('email', inputIdentifier.toLowerCase());
+      } else {
+        staffQuery = staffQuery.eq('unique_id', inputIdentifier);
+      }
+
+      const { data: personnel, error: personnelErr } = await staffQuery.maybeSingle();
+
+      if (personnelErr || !personnel) {
+        alert('Invalid Email or Unique Code.');
+        return;
+      }
+
+      // Resolve target email for Supabase Auth
+      const targetEmail = personnel.email
+        ? personnel.email.trim().toLowerCase()
+        : `${personnel.unique_id.toLowerCase()}@nsuhrecords.internal`;
+
+      // Authenticate password securely against Supabase Auth
+      const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
+        email: targetEmail,
+        password: inputPassword,
+      });
+
+      if (authErr) {
+        alert('Invalid password. Please check your credentials.');
+        return;
+      }
+
+      // Fetch ground-truth school details from assigned_schools table
+      let verifiedSchoolName = personnel.school_name || '';
+      if (personnel.school_id) {
+        const { data: schoolData } = await supabase
+          .from('assigned_schools')
+          .select('institution_name, name')
+          .eq('school_id', personnel.school_id)
+          .maybeSingle();
+
+        if (schoolData) {
+          verifiedSchoolName = schoolData.institution_name || schoolData.name || verifiedSchoolName;
+        }
+      }
+
+      const staffName = personnel.full_name || personnel.name || 'Staff Member';
+
+      // Persist identity and ground-truth multi-tenant context
+      localStorage.setItem('active_staff_id', personnel.unique_id || '');
+      localStorage.setItem('active_staff_name', staffName);
+
+      if (personnel.school_id) {
+        localStorage.setItem('active_school_id', personnel.school_id);
+        localStorage.setItem('active_school_name', verifiedSchoolName);
+        await supabase.rpc('set_active_school', { school_id: personnel.school_id });
+      }
+
+      window.location.href = rolePath;
+      return;
+    }
+
+    // 3. ADMINISTRATOR & FALLBACK (assigned_schools table)
+    let query = supabase.from('assigned_schools').select('*');
+
+    if (isEmail) {
+      query = query.eq('admin_email', inputIdentifier.toLowerCase());
+    } else {
+      query = query.or(`admin_code.eq.${inputIdentifier},school_id.eq.${inputIdentifier}`);
+    }
+
+    const { data: school, error } = await query.maybeSingle();
+
+    if (error || !school) {
+      alert('Invalid Email or Unique Code.');
+      return;
+    }
+
+    if (school.status === 'Restricted') {
+      alert('Access Restricted: Your school account is currently restricted. Please contact the school administrator.');
+      return;
+    }
+
+    if (school.admin_password !== inputPassword) {
+      alert('Invalid password. Please check your credentials.');
+      return;
+    }
+
+    localStorage.setItem('active_school_id', school.school_id);
+    localStorage.setItem('active_school_name', school.institution_name || '');
+    localStorage.setItem('active_school_email', school.admin_email || '');
+
+    await supabase.rpc('set_active_school', { school_id: school.school_id });
+
     window.location.href = rolePath;
   };
 
@@ -198,7 +386,7 @@ export default function LandingPage() {
               >
                 <option value="">{assignedSchools.length === 0 ? '-- No schools assigned yet --' : '-- Choose your school --'}</option>
                 {assignedSchools.map((school) => (
-                  <option key={school.id || school.name} value={school.name}>
+                 <option key={school.school_id || school.name} value={school.school_id}>
                     {school.name}
                   </option>
                 ))}
@@ -235,7 +423,7 @@ export default function LandingPage() {
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
-                onClick={() => openStaffModal('Administrator', '/admin-login')}
+                onClick={() => openStaffModal('Administrator', '/admin-dashboard')}
                 className="p-3 bg-slate-700/50 hover:bg-slate-700 border border-slate-600/50 rounded-xl text-center text-xs font-semibold text-slate-200 transition"
               >
                 Administrator Login
@@ -259,7 +447,7 @@ export default function LandingPage() {
 
               <button
                 type="button"
-                onClick={() => openStaffModal('Discipline Master', '/discipline-dashboard')}
+                onClick={() => openStaffModal('Discipline Master', '/discipline-master-dashboard')}
                 className="p-3 bg-slate-700/50 hover:bg-slate-700 border border-slate-600/50 rounded-xl text-center text-xs font-semibold text-slate-200 transition"
               >
                 Discipline Master
@@ -296,22 +484,23 @@ export default function LandingPage() {
             <div className="flex justify-between items-center border-b border-slate-800 pb-4">
               <div>
                 <h3 className="text-lg font-bold text-white">{selectedRole} Portal Access</h3>
-                <p className="text-xs text-slate-400">Enter your Unique ID and password</p>
+                <p className="text-xs text-slate-400">Enter your Email or Unique Code and password</p>
               </div>
               <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-white text-lg font-bold">✕</button>
             </div>
 
             <form onSubmit={handleStaffLogin} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Unique {selectedRole} ID</label>
-                <input
-                  type="text"
-                  placeholder="e.g. STF-2026-089"
-                  value={staffId}
-                  onChange={(e) => setStaffId(e.target.value.toUpperCase())}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500 uppercase"
-                  required
-                />
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Email or Unique {selectedRole} ID / Code</label>
+               <input
+  type="text"
+  placeholder="e.g. staff@school.cm or STF-2026-089"
+  value={staffId}
+  onChange={(e) => setStaffId(e.target.value)}
+  autoComplete="off"
+  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white"
+  required
+/>
               </div>
 
               <div>
@@ -323,12 +512,13 @@ export default function LandingPage() {
                 </div>
                 <input
                   type="password"
-                  placeholder="Enter password"
-                  value={staffPassword}
-                  onChange={(e) => setStaffPassword(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500"
-                  required
-                />
+  placeholder="Enter password"
+  value={staffPassword}
+  onChange={(e) => setStaffPassword(e.target.value)}
+  autoComplete="new-password"
+  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white"
+  required
+/>
               </div>
 
               <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-xs transition shadow-lg shadow-blue-600/30">
