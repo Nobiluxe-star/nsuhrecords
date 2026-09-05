@@ -2187,14 +2187,13 @@ setTeacherPhotoPreview(null);
           </span>
         </div>
       </header>
-
-      <nav className="bg-[#111827]/60 border-b border-gray-800 px-6 flex space-x-6 overflow-x-auto">
+<nav className="hidden md:flex bg-[#111827]/60 border-b border-gray-800 px-6 space-x-6 overflow-x-auto">
        {[
   { id: 'overview', label: 'Overview' },
   { id: 'register', label: 'Register New Member' },
-  { id: 'students', label: 'All Student List' },
+  { id: 'students', label: 'All Students List' },
   { id: 'teachers', label: 'Assign New Teacher' },
-  { id: 'teacher-list', label: 'All Teacher List' },
+  { id: 'teacher-list', label: 'All Teachers List' },
   { id: 'personnel', label: 'Other School Personnel' },
   { id: 'coefficients', label: 'Class & Coefficient Settings' },
   { id: 'master-marks', label: 'Master Mark Sheet' },
@@ -2213,13 +2212,39 @@ setTeacherPhotoPreview(null);
           </button>
         ))}
       </nav>
-
-      <main className="p-6 max-w-7xl mx-auto space-y-8">
+<div className="flex flex-col gap-2 p-3 md:hidden w-full">
+        {[
+          { id: 'overview', label: 'Overview' },
+          { id: 'register', label: 'Register New Member' },
+          { id: 'students', label: 'All Students List' },
+          { id: 'teachers', label: 'Assign New Teacher' },
+          { id: 'teacher-list', label: 'All Teachers List' },
+          { id: 'personnel', label: 'Other School Personnel' },
+          { id: 'coefficients', label: 'Class & Coefficient Settings' },
+          { id: 'master-marks', label: 'Master Mark Sheet' },
+          { id: 'details', label: 'School Details' }
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => changeTab(tab.id)}
+           className={`w-full p-4 rounded-xl border text-left font-medium text-sm transition-all duration-200 flex items-center justify-between shadow-sm ${
+  activeTab === tab.id
+    ? 'bg-amber-500/15 border-amber-500/80 text-amber-300 shadow-amber-500/10 ring-1 ring-amber-500/30'
+    : 'bg-gray-900/90 border-gray-800 text-gray-300 hover:bg-gray-800 hover:border-gray-700'
+}`}
+          >
+            <span>{tab.label}</span>
+            <span className="text-xs">{activeTab === tab.id ? '▲' : '▼'}</span>
+          </button>
+        ))}
+      </div>
+      <main className="p-3 sm:p-6 max-w-7xl mx-auto space-y-6 sm:space-y-8">
         {/* OVERVIEW TAB */}
         {activeTab === 'overview' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-              <div className="bg-[#111827] border border-gray-800 p-6 rounded-xl shadow-md">
+              <div className="bg-[#111827] border border-gray-800 p-4 sm:p-6 rounded-xl shadow-md">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Total Students</h3>
                 <p className="text-3xl font-black mt-2 text-white">{totalStudents}</p>
                 <div className="text-[11px] text-gray-400 mt-1 flex gap-2">
@@ -2256,7 +2281,28 @@ setTeacherPhotoPreview(null);
                   No teacher timetables collected yet. Assign teachers to build the master schedule.
                 </div>
               ) : (
-                <div className="overflow-x-auto">
+                <div className="hidden md:block overflow-x-auto">
+                  {/* Mobile Responsive Card Stack */}
+        <div className="grid grid-cols-1 gap-3 md:hidden">
+          {teachersList.map((t, i) => (
+            <div key={i} className="p-4 rounded-xl bg-gray-900/90 border border-gray-800 space-y-3">
+              <div className="flex items-center justify-between border-b border-gray-800 pb-2">
+                <h4 className="font-bold text-sm text-white">{t.name}</h4>
+                <span className="text-[10px] font-mono text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">{t.id}</span>
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Subjects Taught</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {t.subjects?.map((sub, sIdx) => (
+                    <span key={sIdx} className="text-xs px-2 py-1 rounded bg-blue-900/30 text-blue-300 border border-blue-700/50">
+                      {sub}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
                   <table className="w-full text-left text-xs text-gray-300 border border-gray-700">
                     <thead className="bg-[#1f2937] text-amber-400 uppercase font-semibold">
                       <tr>
@@ -2855,8 +2901,7 @@ setTeacherPhotoPreview(null);
           <button
             type="button"
             onClick={handlePrint}
-            className="bg-gray-700 hover:bg-gray-600 text-white font-semibold text-xs px-3 py-1.5 rounded border border-gray-600 flex items-center gap-1.5 transition"
-          >
+className="w-full sm:w-auto bg-gray-700 hover:bg-gray-600 text-white font-semibold text-xs px-3 py-1.5 rounded border border-gray-600 flex items-center justify-center gap-1.5"          >
             🖨️ Print List
           </button>
         </div>
@@ -2864,7 +2909,7 @@ setTeacherPhotoPreview(null);
     <button
       type="button"
       onClick={handleExportExcel}
-      className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded font-medium text-xs transition flex items-center gap-1.5"
+      className="w-full sm:w-auto px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded font-medium text-xs transition flex items-center justify-center gap-1.5"
     >
       📊 Export to Excel
     </button>
@@ -2872,7 +2917,7 @@ setTeacherPhotoPreview(null);
     <button
       type="button"
       onClick={handleExportPDF}
-      className="px-3 py-1.5 bg-rose-700 hover:bg-rose-600 text-white rounded font-medium text-xs transition flex items-center gap-1.5"
+      className="w-full sm:w-auto px-3 py-1.5 bg-rose-700 hover:bg-rose-600 text-white rounded font-medium text-xs transition flex items-center justify-center gap-1.5"
     >
       📄 Download PDF
     </button>
