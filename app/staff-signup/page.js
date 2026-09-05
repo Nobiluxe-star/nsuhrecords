@@ -2,10 +2,8 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
-
+import { supabase } from "../../lib/supabase";
 function StaffSignupContent() {
-  const supabase = createClientComponentClient();
   const searchParams = useSearchParams();
   const router = useRouter();
 
