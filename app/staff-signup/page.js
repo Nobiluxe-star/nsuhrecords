@@ -47,18 +47,19 @@ function StaffSignupContent() {
           setActiveSchoolName(storedSchool);
 
           // Fetch matching school UUID from assigned_schools table
-          const { data: school, error } = await supabase
+         const { data: school, error } = await supabase
             .from("assigned_schools")
-            .select("id, school_name")
-            .ilike("school_name", storedSchool.trim())
+            .select("school_id, name")
+          .ilike("name", storedSchool.trim())
             .maybeSingle();
 
           if (error) {
             console.error("Supabase school lookup error:", error.message);
           }
 
-          if (school && school.id) {
-            setSchoolId(school.id);
+          const resolvedId = school?.school_id || school?.id;
+          if (resolvedId) {
+            setSchoolId(resolvedId);
           }
         }
       } catch (err) {
@@ -163,9 +164,9 @@ function StaffSignupContent() {
         text: "Account setup successful! Redirecting to login page...",
       });
 
-      setTimeout(() => {
-        router.push("/");
-      }, 2000);
+     setTimeout(() => {
+      router.push("/");
+    }, 2000);
     } catch (err) {
       setMessage({ type: "error", text: err.message });
     } finally {

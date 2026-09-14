@@ -30,7 +30,7 @@
     "**/*.mts",
     "**/*.ts",
     "**/*.tsx"
-  ],
+, "app/master-admin/page.js", "app/master-admin/page.js"  ],
   "exclude": [
     "node_modules"
   ]

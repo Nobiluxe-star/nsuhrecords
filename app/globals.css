@@ -1,12 +1,8 @@
 @import "tailwindcss";
-/* Hide header scrollbar */
-header, nav {
-  overflow-x: hidden !important;
-}
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0b1329;
+  --foreground: #ffffff;
 }
 
 @theme inline {

@@ -24,6 +24,19 @@ import {
   Eye,
   Filter
 } from 'lucide-react';
+import {
+  GENERAL_CLASSES_CATALOG,
+  GENERAL_LOWER_CLASSES,
+  TECHNICAL_COMMERCIAL_CATALOG,
+  TECHNICAL_INDUSTRIAL_CATALOG,
+  GENERAL_SERIES_CATALOG,
+  COMMERCIAL_TRADE_SERIES,
+  INDUSTRIAL_TRADE_SERIES,
+  ALL_AVAILABLE_CLASSES,
+  DAYS_OF_WEEK,
+  getAcademicYear,
+  ALL_SUBJECTS_LIST
+} from '../admin-dashboard/page';
 
 export default function SupervisorDashboard() {
   const [loading, setLoading] = useState(true);
@@ -40,7 +53,11 @@ export default function SupervisorDashboard() {
   const [selectedSection, setSelectedSection] = useState('All');
   const [selectedClassFilter, setSelectedClassFilter] = useState('All');
   const [viewingProfileStudent, setViewingProfileStudent] = useState(null);
-  
+  // Cascading class, trade, and series filter states
+  const [section, setSection] = useState('');
+  const [classLevel, setClassLevel] = useState('');
+  const [masterClass, setMasterClass] = useState('');
+  const [selectedSeries, setSelectedSeries] = useState('');
   const [activeTab, setActiveTab] = useState('overview');
 
   // Simulated live fetch from school admin portal & Supabase database tables
@@ -375,56 +392,140 @@ export default function SupervisorDashboard() {
         {/* Tab 3: Student Registry & Fees with Automatic Cameroon Class Groupings */}
         {activeTab === 'students' && (
           <div className="space-y-6">
-            {/* Filter controls with automatic Cameroon classes pooled based on selected section */}
-            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-wrap gap-4 items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <Filter className="h-4 w-4 text-blue-600" />
-                <span className="text-sm font-bold text-slate-700">Filter By Section:</span>
-                <select 
-                  value={selectedSection} 
-                  onChange={(e) => {
-                    setSelectedSection(e.target.value);
-                    setSelectedClassFilter('All'); // Reset class filter when section changes
-                  }}
-                  className="bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-semibold focus:outline-none focus:border-blue-600"
-                >
-                  <option value="All">All Sections</option>
-                  <option value="Technical">Technical Education</option>
-                  <option value="General">General Education</option>
-                </select>
-              </div>
+            {/* CASCADING CLASS & TRADE FILTER CONTEXT */}
+      <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-4 mb-6">
+        <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+          <Filter className="h-4 w-4 text-blue-600" />
+          Filter Students by Class & Trade Context
+        </h4>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 
-              <div className="flex items-center space-x-3">
-                <span className="text-sm font-bold text-slate-700">Class Group:</span>
-                <select 
-                  value={selectedClassFilter} 
-                  onChange={(e) => setSelectedClassFilter(e.target.value)}
-                  className="bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-semibold focus:outline-none focus:border-blue-600"
-                >
-                  <option value="All">All Classes (Combined)</option>
-                  {selectedSection === 'Technical' && cameroonClasses.Technical.map((cls, idx) => (
-                    <option key={idx} value={cls}>{cls}</option>
-                  ))}
-                  {selectedSection === 'General' && cameroonClasses.General.map((cls, idx) => (
-                    <option key={idx} value={cls}>{cls}</option>
-                  ))}
-                  {selectedSection === 'All' && (
-                    <>
-                      <optgroup label="General Education Classes">
-                        {cameroonClasses.General.map((cls, idx) => (
-                          <option key={`gen-${idx}`} value={cls}>{cls}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Technical Education Classes">
-                        {cameroonClasses.Technical.map((cls, idx) => (
-                          <option key={`tech-${idx}`} value={cls}>{cls}</option>
-                        ))}
-                      </optgroup>
-                    </>
-                  )}
-                </select>
-              </div>
-            </div>
+          {/* 1. SECTION SELECT */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              Section <span className="text-rose-500">*</span>
+            </label>
+            <select
+              value={section || ''}
+              onChange={(e) => {
+                const newSec = e.target.value;
+                setSection(newSec);
+                setClassLevel('');
+                setMasterClass('');
+                setSelectedSeries('');
+              }}
+              className="w-full bg-white border border-slate-300 text-slate-900 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">-- Select Section --</option>
+              <option value="General Education">General Education</option>
+              <option value="Technical Commercial (STT)">Technical Commercial (STT)</option>
+              <option value="Technical Industrial (IND)">Technical Industrial (IND)</option>
+            </select>
+          </div>
+
+          {/* 2. CLASS LEVEL SELECT */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              Class Level <span className="text-rose-500">*</span>
+            </label>
+            <select
+              value={classLevel || ''}
+              onChange={(e) => {
+                const val = e.target.value;
+                setClassLevel(val);
+                if (section === 'General Education' && typeof GENERAL_LOWER_CLASSES !== 'undefined' && GENERAL_LOWER_CLASSES.includes(val)) {
+                  setMasterClass('N/A');
+                } else {
+                  setMasterClass('');
+                }
+              }}
+              className="w-full bg-white border border-slate-300 text-slate-900 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:text-slate-400"
+              disabled={!section}
+            >
+              <option value="">-- Select Class Level --</option>
+
+              {section === 'General Education' && typeof GENERAL_CLASSES_CATALOG !== 'undefined' && GENERAL_CLASSES_CATALOG.map((cls) => (
+                <option key={cls} value={cls}>{cls}</option>
+              ))}
+
+              {section === 'Technical Commercial (STT)' && typeof TECHNICAL_COMMERCIAL_CATALOG !== 'undefined' && TECHNICAL_COMMERCIAL_CATALOG.map((cls) => (
+                <option key={cls} value={cls}>{cls}</option>
+              ))}
+
+              {section === 'Technical Industrial (IND)' && typeof TECHNICAL_INDUSTRIAL_CATALOG !== 'undefined' && TECHNICAL_INDUSTRIAL_CATALOG.map((cls) => (
+                <option key={cls} value={cls}>{cls}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* 3. DYNAMIC TRADE / SERIES DROPDOWN */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              Trade / Series
+            </label>
+
+            {section === 'General Education' && classLevel && (classLevel.includes('Sixth') || classLevel.includes('U6') || classLevel.includes('L6')) ? (
+              <select
+                value={masterClass || ''}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setMasterClass(val);
+                  setSelectedSeries(val);
+                }}
+                className="w-full bg-white border border-slate-300 text-slate-900 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">-- Select Series --</option>
+                {typeof GENERAL_SERIES_CATALOG !== 'undefined' && (classLevel.includes('Arts') || classLevel.includes('L6A') || classLevel.includes('U6A')
+                  ? GENERAL_SERIES_CATALOG.ARTS
+                  : GENERAL_SERIES_CATALOG.SCIENCE
+                ).map((seriesCode) => (
+                  <option key={seriesCode} value={seriesCode}>
+                    Series {seriesCode}
+                  </option>
+                ))}
+              </select>
+            ) : section === 'General Education' ? (
+              <input
+                type="text"
+                disabled
+                value="N/A"
+                className="w-full bg-slate-100 border border-slate-300 text-slate-400 rounded-lg px-3 py-2 text-xs cursor-not-allowed"
+              />
+            ) : section === 'Technical Commercial (STT)' ? (
+              <select
+                value={masterClass || ''}
+                onChange={(e) => setMasterClass(e.target.value)}
+                className="w-full bg-white border border-slate-300 text-slate-900 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">-- Select Commercial Trade --</option>
+                {typeof COMMERCIAL_TRADE_SERIES !== 'undefined' && COMMERCIAL_TRADE_SERIES.map((trade) => (
+                  <option key={trade} value={trade}>{trade}</option>
+                ))}
+              </select>
+            ) : section === 'Technical Industrial (IND)' ? (
+              <select
+                value={masterClass || ''}
+                onChange={(e) => setMasterClass(e.target.value)}
+                className="w-full bg-white border border-slate-300 text-slate-900 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">-- Select Industrial Trade --</option>
+                {typeof INDUSTRIAL_TRADE_SERIES !== 'undefined' && INDUSTRIAL_TRADE_SERIES.map((trade) => (
+                  <option key={trade} value={trade}>{trade}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                disabled
+                value=""
+                placeholder="Select a section first"
+                className="w-full bg-slate-100 border border-slate-300 text-slate-400 rounded-lg px-3 py-2 text-xs cursor-not-allowed"
+              />
+            )}
+          </div>
+
+        </div>
+      </div>
 
             {/* Students Table */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">

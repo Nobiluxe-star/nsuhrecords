@@ -1,625 +1,1334 @@
 'use client';
 
+import { createClient } from '@supabase/supabase-js';
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
 import React, { useState, useEffect } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-
-// All 10 Regions of Cameroon as requested
-const CAMEROON_REGIONS = [
-  'Northwest',
-  'Southwest',
-  'Littoral',
-  'Centre',
-  'West',
-  'Adamawa',
-  'East',
-  'Far North',
-  'North',
-  'South'
-];
-
-export default function MasterDeveloperPortal() {
-  const router = useRouter();
-  const [activeTab, setActiveTab] = useState('schools');
-  const [currentTime, setCurrentTime] = useState(null);
-
-  // Master Developer Authentication State
-  const [developerEmail, setDeveloperEmail] = useState('');
-  const [developerPassword, setDeveloperPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [isDeveloperAuthenticated, setIsDeveloperAuthenticated] = useState(false);
-  const [loginError, setLoginError] = useState('');
-
-  // Assigned schools list including initial and mock tenants
-  const [schools, setSchools] = useState([
-    {
-      id: 'SCH-001',
-      name: 'Nsuh High School Bamenda',
-      region: 'Northwest',
-      contactEmail: 'contact@nsuhhigh.cm',
-      contactPhone: '670000001',
-      status: 'Active',
-      isDeleted: false,
-      plan: 'Enterprise',
-      students: [
-        { id: 'TEF1NG100026', name: 'Nformi Brian', contact: '680111222', guardianName: 'Nformi Senior', guardianContact: '670222333', className: 'Form 1' },
-        { id: 'GEU6NG100126', name: 'Mbiydzenyuy Clarise', contact: '680333444', guardianName: 'Mbiydzenyuy Paul', guardianContact: '670444555', className: 'Upper Sixth' }
-      ],
-      teachers: [
-        { name: 'Mr. Tikum Emmanuel', contact: '671111222', subjects: 'Mathematics F1-F3' },
-        { name: 'Mrs. Nji Cynthia', contact: '672222333', subjects: 'Chemistry U6' }
-      ]
-    },
-    {
-      id: 'SCH-002',
-      name: 'Assurance Bilingual Academy',
-      region: 'Northwest',
-      contactEmail: 'info@assuranceacademy.cm',
-      contactPhone: '670000002',
-      status: 'Active',
-      isDeleted: false,
-      plan: 'Standard',
-      students: [
-        { id: 'GEF2AG100026', name: 'Che Roland', contact: '678999888', guardianName: 'Che Grace', guardianContact: '678111222', className: 'Form 2' }
-      ],
-      teachers: [
-        { name: 'Mr. Nsuh Norbert', contact: '682491189', subjects: 'Computer Science F1-U6' }
-      ]
-    },
-    {
-      id: 'SCH-003',
-      name: 'Mankon Comprehensive College',
-      region: 'Northwest',
-      contactEmail: 'mankoncc@nsuhrecords.cm',
-      contactPhone: '670000003',
-      status: 'Active',
-      isDeleted: false,
-      plan: 'Basic',
-      students: [],
-      teachers: []
-    }
-  ]);
-
-  // Selected school for deep student & teacher auditing
-  const [selectedSchoolId, setSelectedSchoolId] = useState(null);
-
-  // Form state for assigning a new school
-  const [newSchoolName, setNewSchoolName] = useState('');
-  const [newSchoolEmail, setNewSchoolEmail] = useState('');
-  const [newSchoolPhone, setNewSchoolPhone] = useState('');
-  const [newSchoolRegion, setNewSchoolRegion] = useState('Northwest');
-  const [newSchoolPlan, setNewSchoolPlan] = useState('Standard');
+import {
+  GENERAL_CLASSES_CATALOG,
+  GENERAL_LOWER_CLASSES,
+  TECHNICAL_COMMERCIAL_CATALOG,
+  TECHNICAL_INDUSTRIAL_CATALOG,
+  GENERAL_SERIES_CATALOG,
+  COMMERCIAL_TRADE_SERIES,
+  INDUSTRIAL_TRADE_SERIES
+} from '../admin-dashboard/page';
+export default function BursarDashboard() {
+  const [formattedDate, setFormattedDate] = useState('');
 
   useEffect(() => {
-    setCurrentTime(new Date());
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
+    setFormattedDate(
+      new Date().toLocaleDateString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      })
+    );
   }, []);
 
-  const handleDeveloperLogin = (e) => {
-    e.preventDefault();
-    if (developerPassword === '2026$Ncmillions') {
-      setIsDeveloperAuthenticated(true);
-      setLoginError('');
-    } else {
-      setLoginError('Invalid Master Developer Password. Access Denied.');
+  const [activeTab, setActiveTab] = useState('registry'); // 'registry', 'receive', 'expense'
+  const [searchQuery, setSearchQuery] = useState('');
+  // Cascading Section, Class, and Trade Context States
+const [section, setSection] = useState('');
+const [classLevel, setClassLevel] = useState('');
+const [masterClass, setMasterClass] = useState('');
+const [selectedSeries, setSelectedSeries] = useState('');
+// --- FEE SETUP STATE ---
+  const [feeSetupForm, setFeeSetupForm] = useState({
+    section: '',
+    classLevel: '',
+    trade: '',
+    tuitionFee: '',
+    ptaFee: '',
+    medicalFee: ''
+  });
+
+  // --- LIVE DATABASE STATES FROM SUPABASE ---
+  const [registeredStudents, setRegisteredStudents] = useState([]);
+  const [payments, setPayments] = useState([]);
+  const [expenses, setExpenses] = useState([]);
+  const [loadingStudents, setLoadingStudents] = useState(true);
+
+  // --- ANCILLARY REVENUE STATE (Dynamic & Multi-Tenant) ---
+  const [otherRevenues, setOtherRevenues] = useState([]);
+  const [ancillaryForm, setAncillaryForm] = useState({
+    category: 'PTA Levy',
+    customCategory: '',
+    description: '',
+    amount: '',
+    date: new Date().toISOString().split('T')[0],
+  });
+
+// --- SINGLE SOURCE OF TRUTH LOOKUPS ---
+  const getFeeClasses = () => {
+    if (feeSetupForm.section === 'General Education') {
+      return GENERAL_CLASSES_CATALOG || [];
     }
+    if (feeSetupForm.section === 'Technical Commercial (STT)') {
+      return TECHNICAL_COMMERCIAL_CATALOG || [];
+    }
+    if (feeSetupForm.section === 'Technical Industrial (IND)') {
+      return TECHNICAL_INDUSTRIAL_CATALOG || [];
+    }
+    return [];
   };
 
-  // Direct programmatic hard navigation to root application login / main home interface
-  const handleReturnHome = (e) => {
+ const getFeeSeries = () => {
+    const section = feeSetupForm.section;
+    const classLevel = feeSetupForm.classLevel;
+
+    if (!section || !classLevel) return [];
+
+    if (section === 'General Education') {
+      // Lower classes (Form 1 to Form 5) return ['N/A']
+      if (GENERAL_LOWER_CLASSES && GENERAL_LOWER_CLASSES.includes(classLevel)) {
+        return ['N/A'];
+      }
+      // Upper/Lower Sixth return General Series
+      return Array.isArray(GENERAL_SERIES_CATALOG) ? GENERAL_SERIES_CATALOG : [];
+    }
+
+    if (section === 'Technical Commercial (STT)') {
+      return Array.isArray(COMMERCIAL_TRADE_SERIES) ? COMMERCIAL_TRADE_SERIES : [];
+    }
+
+    if (section === 'Technical Industrial (IND)') {
+      return Array.isArray(INDUSTRIAL_TRADE_SERIES) ? INDUSTRIAL_TRADE_SERIES : [];
+    }
+
+    return [];
+  };
+  
+  // Dynamic Ancillary Submission (Preset Dropdown OR Manual Custom Fill)
+  // Dynamic Ancillary Submission
+  const handleAddAncillary = (e) => {
     e.preventDefault();
-    setIsDeveloperAuthenticated(false);
-    setSelectedSchoolId(null);
-    window.location.replace('/');
+    if (!ancillaryForm.amount || !ancillaryForm.description) return;
+
+    const finalCategory =
+      ancillaryForm.category === 'Custom / Other'
+        ? ancillaryForm.customCategory || 'Other Revenue'
+        : ancillaryForm.category;
+
+    setOtherRevenues((prev) => [
+      {
+        id: Date.now(),
+        category: finalCategory,
+        description: ancillaryForm.description,
+        amount: Number(ancillaryForm.amount),
+        date: ancillaryForm.date,
+        recordedBy: 'Bursar',
+      },
+      ...prev,
+    ]);
+
+    setAncillaryForm({
+      category: 'PTA Levy',
+      customCategory: '',
+      description: '',
+      amount: '',
+      date: '',
+    });
   };
 
-  // Toggle school active/restricted access status
-  const toggleSchoolRestriction = (schoolId) => {
-    setSchools(prev => prev.map(sch => {
-      if (sch.id === schoolId) {
-        const newStatus = sch.status === 'Active' ? 'Restricted' : 'Active';
-        return { ...sch, status: newStatus };
-      }
-      return sch;
-    }));
-  };
-
-  // Soft Delete: School disappears completely from active dashboard but records/tokens are safely kept in trash
-  const handleSoftDeleteSchool = (schoolId) => {
-    setSchools(prev => prev.map(sch => {
-      if (sch.id === schoolId) {
-        return { ...sch, isDeleted: true };
-      }
-      return sch;
-    }));
-    if (selectedSchoolId === schoolId) setSelectedSchoolId(null);
-  };
-
-  // Restore school and its records back to the dashboard if deleted by mistake
-  const handleRestoreSchool = (schoolId) => {
-    setSchools(prev => prev.map(sch => {
-      if (sch.id === schoolId) {
-        return { ...sch, isDeleted: false };
-      }
-      return sch;
-    }));
-  };
-
-  // Assign a new school with name, contact number, email, and region
-  const handleAddSchool = (e) => {
+  // Class Fee Configuration Handler
+ const handleSaveFeeSetup = (e) => {
     e.preventDefault();
-    if (!newSchoolName.trim() || !newSchoolEmail.trim() || !newSchoolPhone.trim()) return;
+    if (!feeSetupForm.classLevel) return;
 
-    const nextIdNum = schools.length + 1;
-    const formattedId = `SCH-00${nextIdNum}`;
+    setFeeConfigurations((prev) => [
+      {
+        id: Date.now(),
+        section: feeSetupForm.section,
+        classLevel: feeSetupForm.classLevel,
+        trade: feeSetupForm.trade || 'N/A',
+        tuitionFee: Number(feeSetupForm.amount || feeSetupForm.tuitionFee) || 0,
+        ptaFee: Number(feeSetupForm.ptaFee) || 0,
+        medicalFee: Number(feeSetupForm.medicalFee) || 0,
+      },
+      ...prev.filter(
+        (item) =>
+          !(
+            item.section === feeSetupForm.section &&
+            item.classLevel === feeSetupForm.classLevel &&
+            item.trade === (feeSetupForm.trade || 'N/A')
+          )
+      ),
+    ]);
 
-    const newSchoolObj = {
-      id: formattedId,
-      name: newSchoolName.trim(),
-      region: newSchoolRegion,
-      contactEmail: newSchoolEmail.trim(),
-      contactPhone: newSchoolPhone.trim(),
-      status: 'Active',
-      isDeleted: false,
-      plan: newSchoolPlan,
-      students: [],
-      teachers: []
+    setFeeSetupForm({
+      section: '',
+      classLevel: '',
+      trade: '',
+      feeType: 'Tuition',
+      amount: '',
+      tuitionFee: '',
+      ptaFee: '',
+      medicalFee: ''
+    });
+  };
+  // Fetch all live data from Supabase tables
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      setLoadingStudents(true);
+      try {
+        // 1. Fetch live registered students
+        const { data: studentsData, error: studentsErr } = await supabase
+          .from('students')
+          .select('*');
+        if (!studentsErr && studentsData) setRegisteredStudents(studentsData);
+
+        // 2. Fetch live payments history
+        const { data: paymentsData, error: paymentsErr } = await supabase
+          .from('payments')
+          .select('*');
+        if (!paymentsErr && paymentsData) setPayments(paymentsData);
+
+        // 3. Fetch live recorded expenses
+        const { data: expensesData, error: expensesErr } = await supabase
+          .from('expenses')
+          .select('*');
+        if (!expensesErr && expensesData) setExpenses(expensesData);
+
+      } catch (err) {
+        console.error('Unexpected error loading dashboard data:', err);
+      } finally {
+        setLoadingStudents(false);
+      }
     };
 
-    setSchools(prev => [...prev, newSchoolObj]);
-    setNewSchoolName('');
-    setNewSchoolEmail('');
-    setNewSchoolPhone('');
-    setActiveTab('schools');
-    alert(`School "${newSchoolName}" successfully assigned and activated across NsuhRecords with link identifier: nsuhrecords.com/school/${formattedId.toLowerCase()}`);
+    fetchDashboardData();
+  }, []);
+
+  // --- FILTER STATES FOR RECEIVE PAYMENT TAB ---
+  const [paySection, setPaySection] = useState('');
+  const [payClassLevel, setPayClassLevel] = useState('');
+  const [payTrade, setPayTrade] = useState('');
+  const [selectedStudentId, setSelectedStudentId] = useState('');
+
+  // --- FILTER STATES FOR FEE REGISTRY TAB ---
+  const [regSection, setRegSection] = useState('');
+  const [regClassLevel, setRegClassLevel] = useState('');
+  const [regTrade, setRegTrade] = useState('');
+  const [regStudentId, setRegStudentId] = useState('');
+  // Payment Form State
+  const [paymentForm, setPaymentForm] = useState({
+    feeType: 'Tuition',
+    amountPaid: '',
+    totalFee: '',
+    paymentMethod: 'Cash',
+  });
+
+  // Expense Form State
+  const [expenseForm, setExpenseForm] = useState({
+    description: '',
+    category: 'Operational',
+    amount: '',
+    recipient: '',
+  });
+
+  // Reset secondary cascading dropdowns
+  useEffect(() => {
+    setPayClassLevel('');
+    setPayTrade('');
+    setSelectedStudentId('');
+  }, [paySection]);
+
+  useEffect(() => {
+    setRegClassLevel('');
+    setRegTrade('');
+  }, [regSection]);
+// Clear Trade if Class changes to a General Lower Class (Forms 1-5)
+  useEffect(() => {
+    if (regSection === 'General Education' && GENERAL_LOWER_CLASSES.includes(regClassLevel)) {
+      setRegTrade('');
+    }
+  }, [regClassLevel, regSection]);
+ // Auto-fill Student Info when selected in Receive Payment Tab
+  const activeStudentObj = registeredStudents.find((s) => s.id === selectedStudentId);
+
+  // Clear payment form totalFee if no student is active
+  useEffect(() => {
+    if (!activeStudentObj) {
+      setPaymentForm((prev) => ({ ...prev, totalFee: '' }));
+    }
+  }, [selectedStudentId, activeStudentObj]);
+  // Aggregation Summary
+  const todayStr = new Date().toISOString().split('T')[0];
+  const todaysRevenue = payments.filter((p) => p.date === todayStr).reduce((sum, p) => sum + Number(p.amountPaid), 0);
+  const todaysExpenses = expenses.filter((e) => e.date === todayStr).reduce((sum, e) => sum + Number(e.amount), 0);
+  const totalTuitionCollected = payments.filter((p) => p.feeType === 'Tuition').reduce((sum, p) => sum + Number(p.amountPaid), 0);
+  const totalOtherRevenue = payments.filter((p) => p.feeType !== 'Tuition').reduce((sum, p) => sum + Number(p.amountPaid), 0);
+
+  // Form Submissions
+  const handlePaymentSubmit = (e) => {
+    e.preventDefault();
+    if (!activeStudentObj) {
+      alert('Please filter and select a student from the system before submitting.');
+      return;
+    }
+    if (!paymentForm.amountPaid || !paymentForm.totalFee) {
+      alert('Please state amount paid and total expected fee.');
+      return;
+    }
+
+    const newPayment = {
+      id: `REC-2026-00${payments.length + 1}`,
+      studentName: activeStudentObj.name,
+      studentId: activeStudentObj.id,
+      department: activeStudentObj.department,
+      class: activeStudentObj.class,
+      trade: activeStudentObj.trade,
+      feeType: paymentForm.feeType,
+      amountPaid: Number(paymentForm.amountPaid),
+      totalFee: Number(paymentForm.totalFee),
+      method: paymentForm.paymentMethod,
+      date: todayStr,
+    };
+
+    setPayments([newPayment, ...payments]);
+    setPaymentForm({ feeType: 'Tuition', amountPaid: '', totalFee: '', paymentMethod: 'Cash' });
+    setSelectedStudentId('');
+    setActiveTab('registry');
   };
 
-  if (!isDeveloperAuthenticated) {
-    return (
-      <div className="min-h-screen bg-[#07090e] text-white flex items-center justify-center p-6 font-sans relative">
-        {/* Absolute Back Button on Login Screen */}
-        <button 
-          onClick={handleReturnHome}
-          className="absolute top-6 left-6 bg-amber-600 hover:bg-amber-500 text-white text-xs px-4 py-2.5 rounded-lg font-bold transition-colors flex items-center gap-1.5 shadow-xl cursor-pointer z-50"
-        >
-          ← Back to Root App Home
-        </button>
+  const handleExpenseSubmit = (e) => {
+    e.preventDefault();
+    if (!expenseForm.description || !expenseForm.amount) {
+      alert('Please specify description and amount.');
+      return;
+    }
 
-        <div className="bg-[#0f172a] border border-gray-800 p-8 rounded-2xl shadow-2xl max-w-md w-full space-y-6 mt-10">
-          <div className="text-center space-y-2">
-            <div className="inline-block bg-amber-500/10 text-amber-400 border border-amber-500/30 text-[10px] uppercase font-mono px-3 py-1 rounded-full mb-1">
-              Master Developer Restricted Area
-            </div>
-            <h1 className="text-xl font-bold tracking-tight text-white">NsuhRecords Core Control</h1>
-            <p className="text-xs text-gray-400">Authenticate to manage platform access & authorized schools</p>
-          </div>
+    const newExpense = {
+      id: `EXP-${100 + expenses.length + 1}`,
+      description: expenseForm.description,
+      category: expenseForm.category,
+      amount: Number(expenseForm.amount),
+      recipient: expenseForm.recipient || 'N/A',
+      date: todayStr,
+    };
 
-          <form onSubmit={handleDeveloperLogin} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Developer Email</label>
-              <input 
-                type="email" 
-                value={developerEmail}
-                onChange={(e) => setDeveloperEmail(e.target.value)}
-                placeholder="Type your developer email..."
-                required
-                className="w-full bg-[#1e293b] border border-gray-700 rounded-lg p-3 text-sm text-white focus:outline-none focus:border-amber-500 transition-colors"
-              />
-            </div>
+    setExpenses([newExpense, ...expenses]);
+    setExpenseForm({ description: '', category: 'Operational', amount: '', recipient: '' });
+    setActiveTab('registry');
+  };
 
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Master Password</label>
-              <div className="relative">
-                <input 
-                  type={showPassword ? "text" : "password"} 
-                  value={developerPassword}
-                  onChange={(e) => setDeveloperPassword(e.target.value)}
-                  placeholder="Enter master password..."
-                  required
-                  className="w-full bg-[#1e293b] border border-gray-700 rounded-lg p-3 pr-10 text-sm text-white font-mono focus:outline-none focus:border-amber-500 transition-colors"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-xs font-medium focus:outline-none"
-                >
-                  {showPassword ? '👁️‍🗨️' : '👁️'}
-                </button>
-              </div>
-            </div>
+  // Receive Payment Student Options Filter Logic
+const eligibleStudentsForPayment = registeredStudents.filter((s) => {
+  // Normalize student department/section matching
+  const studentDept = (s.department || s.section || '').trim();
+ const matchSection = !paySection || 
+      studentDept.toLowerCase() === paySection.toLowerCase() ||
+      (paySection.toLowerCase().includes('technical') && studentDept.toLowerCase().includes('technical'));
 
-            {loginError && (
-              <p className="text-xs text-red-400 bg-red-950/50 border border-red-800 p-2.5 rounded-lg text-center font-medium">
-                {loginError}
-              </p>
-            )}
+  const studentClass = (s.class || s.classLevel || '').trim();
+  const matchClass = !payClassLevel || studentClass.toLowerCase() === payClassLevel.toLowerCase();
 
-            <button 
-              type="submit"
-              className="w-full bg-amber-600 hover:bg-amber-500 text-white font-semibold py-3 rounded-lg shadow-lg transition-colors text-sm"
-            >
-              Verify Developer Credentials
-            </button>
-          </form>
+  const studentTrade = (s.trade || s.trades_series || '').trim();
+  const matchTrade = !payTrade || studentTrade.toLowerCase() === payTrade.toLowerCase();
 
-          <div className="text-center text-[11px] text-gray-500 pt-2 border-t border-gray-800">
-            Norbert Che Nsuh — Master Infrastructure Portal
-          </div>
-        </div>
-      </div>
-    );
-  }
+  return matchSection && matchClass && matchTrade;
+});
 
-  const activeSchools = schools.filter(s => !s.isDeleted);
-  const deletedSchools = schools.filter(s => s.isDeleted);
-  const selectedSchool = schools.find(s => s.id === selectedSchoolId);
+// Fee Registry Table Filter Logic
+const filteredRegistryPayments = payments.filter((p) => {
+  const matchesSearch =
+    !searchQuery ||
+    p.studentName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    p.studentId?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    p.class?.toLowerCase().includes(searchQuery.toLowerCase());
 
-  // Total system registration count calculation across all records
-  const totalRegisteredUsers = schools.reduce((acc, s) => acc + s.students.length + s.teachers.length + 1, 0);
+  const dept = (p.department || p.section || '').trim();
+  const matchesSection = !regSection || 
+    dept.toLowerCase() === regSection.toLowerCase() ||
+    (regSection.toLowerCase().includes('technical') && dept.toLowerCase().includes('technical'));
+
+  const cls = (p.class || p.classLevel || '').trim();
+  const matchesClass = !regClassLevel || cls.toLowerCase() === regClassLevel.toLowerCase();
+
+  const trd = (p.trade || p.trades_series || '').trim();
+  const matchesTrade = !regTrade || trd.toLowerCase() === regTrade.toLowerCase();
+
+  const matchesId = !regStudentId || p.studentId?.toLowerCase().includes(regStudentId.trim().toLowerCase());
+
+  return matchesSearch && matchesSection && matchesClass && matchesTrade && matchesId;
+});
 
   return (
-    <div className="min-h-screen bg-[#07090e] text-white font-sans">
-      {/* Header with Back to Root App Home interface link pointing directly to root */}
-      <header className="bg-[#0f172a] border-b border-gray-800 px-6 py-4 flex justify-between items-center shadow-lg">
-        <div className="flex items-center gap-4">
-          <button 
-            onClick={handleReturnHome}
-            className="bg-amber-600 hover:bg-amber-500 text-white text-xs px-3.5 py-2 rounded-lg font-bold transition-colors flex items-center gap-1.5 shadow-md cursor-pointer"
-          >
-            ← Back to Root App Home
-          </button>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold tracking-tight text-white">NsuhRecords</h1>
-              <span className="bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] font-mono px-2 py-0.5 rounded">
-                Master Developer Console
-              </span>
+    <div className="min-h-screen bg-[#FDFBF7] text-stone-800 flex flex-col justify-between font-sans">
+      {/* Header */}
+      <header className="bg-[#1b4332] text-white px-6 py-6 shadow-md">
+        <div className="max-w-7xl mx-auto w-full flex flex-wrap justify-between items-center gap-4">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center font-black text-xl text-white shadow-inner">
+              NR
             </div>
-            <p className="text-xs text-gray-400 mt-0.5">Global Tenant Management & School Access Control</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="text-right hidden sm:block">
-            <div className="text-xs font-mono text-amber-400 font-semibold">
-              {currentTime ? currentTime.toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' }) : ''}
-            </div>
-            <div className="text-xs font-mono text-gray-400">
-              {currentTime ? currentTime.toLocaleTimeString() : ''}
+            <div>
+              <h1 className="text-xl font-bold tracking-tight text-white">NsuhRecords</h1>
+              <p className="text-xs text-emerald-200 font-medium">
+                Wisdom College — Financial Records Management (2026 - 2027)
+              </p>
             </div>
           </div>
-          <button 
-            onClick={() => setIsDeveloperAuthenticated(false)}
-            className="bg-red-950/60 hover:bg-red-900 text-red-300 border border-red-800 text-xs px-3 py-1.5 rounded-lg font-semibold transition-colors"
-          >
-            Lock Session
-          </button>
+
+          <div className="flex items-center space-x-4">
+            <div className="text-right hidden sm:block">
+              <p className="text-xs font-bold text-emerald-100">Welcome, Mankah Mary (Bursar)</p>
+              <p className="text-[11px] text-emerald-300">{formattedDate}</p>
+            </div>
+            <a
+              href="/"
+              className="text-xs font-semibold px-4 py-2 bg-[#2d6a4f] hover:bg-[#40916c] text-white rounded-lg transition border border-emerald-600/50"
+            >
+              Exit Portal
+            </a>
+          </div>
         </div>
       </header>
 
-      {/* Navigation tabs */}
-      <nav className="bg-[#0f172a]/60 border-b border-gray-800 px-6 flex space-x-6 overflow-x-auto">
-        {[
-          { id: 'schools', label: 'Assigned Schools & Dashboard' },
-          { id: 'register', label: 'Assign / Onboard School' },
-          { id: 'bin', label: `Trash / Restore (${deletedSchools.length})` }
-        ].map((tab) => (
+      {/* Main Body */}
+      <main className="max-w-7xl mx-auto px-6 py-8 w-full space-y-6">
+        
+        {/* Aggregation Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white border border-stone-200 p-5 rounded-2xl shadow-sm">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 bg-emerald-100 px-2.5 py-1 rounded-md">
+              Today's Revenue
+            </span>
+            <h3 className="text-2xl font-black text-stone-800 mt-3">
+              {todaysRevenue.toLocaleString()} <span className="text-xs text-stone-500 font-normal">XAF</span>
+            </h3>
+            <p className="text-[11px] text-stone-500 mt-1">Live payments recorded today</p>
+          </div>
+
+          <div className="bg-white border border-stone-200 p-5 rounded-2xl shadow-sm">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-rose-800 bg-rose-100 px-2.5 py-1 rounded-md">
+              Today's Expenses
+            </span>
+            <h3 className="text-2xl font-black text-stone-800 mt-3">
+              {todaysExpenses.toLocaleString()} <span className="text-xs text-stone-500 font-normal">XAF</span>
+            </h3>
+            <p className="text-[11px] text-stone-500 mt-1">Disbursements logged today</p>
+          </div>
+
+          <div className="bg-white border border-stone-200 p-5 rounded-2xl shadow-sm">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-blue-800 bg-blue-100 px-2.5 py-1 rounded-md">
+              Tuition Registry
+            </span>
+            <h3 className="text-2xl font-black text-stone-800 mt-3">
+              {totalTuitionCollected.toLocaleString()} <span className="text-xs text-stone-500 font-normal">XAF</span>
+            </h3>
+            <p className="text-[11px] text-stone-500 mt-1">Cumulated tuition collection</p>
+          </div>
+
+          <div className="bg-white border border-stone-200 p-5 rounded-2xl shadow-sm">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 bg-amber-100 px-2.5 py-1 rounded-md">
+              Other Revenues
+            </span>
+            <h3 className="text-2xl font-black text-stone-800 mt-3">
+              {totalOtherRevenue.toLocaleString()} <span className="text-xs text-stone-500 font-normal">XAF</span>
+            </h3>
+            <p className="text-[11px] text-stone-500 mt-1">PTA, GCE, Uniforms & Badges</p>
+          </div>
+        </div>
+
+        {/* Tab Selection */}
+        <div className="bg-white border border-stone-200 p-4 rounded-2xl flex flex-wrap items-center justify-between gap-4 shadow-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setActiveTab('registry')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
+                activeTab === 'registry' ? 'bg-[#1b4332] text-white shadow-md' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+              }`}
+            >
+              Fee Registry Table
+            </button>
+            <button
+              onClick={() => setActiveTab('receive')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
+                activeTab === 'receive' ? 'bg-[#1b4332] text-white shadow-md' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+              }`}
+            >
+              [ + ] Receive Payment
+            </button>
+            <button
+              onClick={() => setActiveTab('expense')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
+                activeTab === 'expense' ? 'bg-[#1b4332] text-white shadow-md' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+              }`}
+            >
+              [ - ] Record Expense / Disbursements
+            </button>
+            {/* NEW TAB: Ancillary Revenue */}
           <button
-            key={tab.id}
-            onClick={() => { setActiveTab(tab.id); setSelectedSchoolId(null); }}
-            className={`py-3 text-sm font-semibold border-b-2 transition-colors whitespace-nowrap ${
-              activeTab === tab.id
-                ? 'border-amber-500 text-amber-400'
-                : 'border-transparent text-gray-400 hover:text-white'
+            onClick={() => setActiveTab('ancillary')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
+              activeTab === 'ancillary' ? 'bg-[#1b4332] text-white shadow-md' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
             }`}
           >
-            {tab.label}
+            [ + ] Ancillary Revenue
           </button>
-        ))}
-      </nav>
 
-      <main className="p-6 max-w-7xl mx-auto space-y-6">
-        {/* DETAILED SCHOOL AUDIT VIEW (Triggered when a school is clicked) */}
-        {selectedSchool ? (
-          <div className="space-y-6">
-            <div className="flex justify-between items-center bg-[#0f172a] border border-amber-500/40 p-5 rounded-xl shadow-lg">
+          {/* TAB 5: FINANCIAL AUDIT & REPORTS */}
+            <button
+              onClick={() => setActiveTab('reports')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
+                activeTab === 'reports' ? 'bg-[#1b4332] text-white shadow-md' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+              }`}
+            >
+              [ 📊 ] Financial Audit & Reports
+            </button>
+            {/* TAB 6: CLASS FEE SETTINGS BUTTON */}
+  <button
+    onClick={() => setActiveTab('fee-setup')}
+    className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
+      activeTab === 'fee-setup'
+        ? 'bg-[#1b4332] text-white shadow-md'
+        : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+    }`}
+  >
+    ⚙️ Class Fee Settings
+  </button>
+          </div>
+
+          {activeTab === 'registry' && (
+            <div className="w-full sm:w-72">
+              <input
+                type="text"
+                placeholder="Quick Search Name or ID..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-[#FDFBF7] border border-stone-300 rounded-xl px-3 py-2 text-xs text-stone-800 placeholder-stone-400 focus:outline-none focus:border-emerald-600"
+              />
+            </div>
+          )}
+        </div>
+
+        {/* --- TAB 1: FEE REGISTRY TABLE --- */}
+        {activeTab === 'registry' && (
+          <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm space-y-6">
+            
+            {/* EMBEDDED FILTER FOR REGISTRY */}
+<div className="bg-[#FDFBF7] border border-stone-200 rounded-xl p-4 space-y-3">
+  <div className="flex justify-between items-center">
+    <span className="text-xs font-bold text-[#1b4332] uppercase tracking-wider">
+      🔍 Filter Financial Records
+    </span>
+    <button
+      onClick={() => {
+        setRegSection('');
+        setRegClassLevel('');
+        setRegTrade('');
+        setRegStudentId('');
+      }}
+      className="text-xs text-emerald-700 font-semibold hover:underline"
+    >
+      Clear Filters
+    </button>
+  </div>
+
+  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+    {/* 1. SECTION */}
+    <div>
+      <label className="block text-[11px] font-bold text-stone-600 mb-1">Section</label>
+      <select
+        value={regSection}
+        onChange={(e) => {
+          setRegSection(e.target.value);
+          setRegClassLevel('');
+          setRegTrade('');
+        }}
+        className="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-xs text-stone-800 focus:ring-1 focus:ring-emerald-700 focus:outline-none"
+      >
+        <option value="">All Sections</option>
+        <option value="General Education">General Education</option>
+        <option value="Technical Commercial (STT)">Technical Commercial (STT)</option>
+        <option value="Technical Industrial (IND)">Technical Industrial (IND)</option>
+      </select>
+    </div>
+
+   {/* 2. CLASS LEVEL */}
+        <div>
+          <label className="block text-[11px] font-bold text-stone-600 mb-1">Class Level</label>
+          <select
+            value={regClassLevel}
+            onChange={(e) => {
+              setRegClassLevel(e.target.value);
+              setRegTrade(''); // Reset series/trade on class change
+            }}
+            disabled={!regSection}
+            className="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-xs text-stone-800 disabled:bg-stone-100"
+          >
+            <option value="">All Classes</option>
+            {regSection === 'General Education' && 
+              GENERAL_CLASSES_CATALOG.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))
+            }
+            {regSection === 'Technical Commercial (STT)' && 
+              TECHNICAL_COMMERCIAL_CATALOG.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))
+            }
+            {regSection === 'Technical Industrial (IND)' && 
+              TECHNICAL_INDUSTRIAL_CATALOG.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))
+            }
+          </select>
+        </div>
+
+        {/* 3. TRADE / SERIES */}
+        <div>
+          <label className="block text-[11px] font-bold text-stone-600 mb-1">Trade / Series</label>
+          <select
+            value={regTrade}
+            onChange={(e) => setRegTrade(e.target.value)}
+            disabled={
+              !regSection || 
+              (regSection === 'General Education' && GENERAL_LOWER_CLASSES.includes(regClassLevel))
+            }
+            className="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-xs text-stone-800 disabled:bg-stone-100"
+          >
+            <option value="">All Trades / Series</option>
+            
+            {/* General High School Series (L6A, L6S, U6A, U6S, etc.) */}
+            {regSection === 'General Education' && regClassLevel.includes('Arts') &&
+              (GENERAL_SERIES_CATALOG.series?.ARTS || []).map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))
+            }
+            {regSection === 'General Education' && regClassLevel.includes('Science') &&
+              (GENERAL_SERIES_CATALOG.series?.SCIENCE || []).map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))
+            }
+
+            {/* Technical Commercial Trades */}
+            {regSection === 'Technical Commercial (STT)' &&
+              COMMERCIAL_TRADE_SERIES.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))
+            }
+
+            {/* Technical Industrial Trades */}
+            {regSection === 'Technical Industrial (IND)' &&
+              INDUSTRIAL_TRADE_SERIES.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))
+            }
+          </select>
+        </div>
+
+    {/* 4. STUDENT UNIQUE ID / NAME SEARCH */}
+    <div>
+      <label className="block text-[11px] font-bold text-stone-600 mb-1">Student Search</label>
+      <input
+        type="text"
+        placeholder="Search ID or Name..."
+        value={regStudentId}
+        onChange={(e) => setRegStudentId(e.target.value)}
+        className="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-xs text-stone-800 focus:ring-1 focus:ring-emerald-700 focus:outline-none"
+      />
+    </div>
+  </div>
+</div>
+            <div className="flex flex-wrap justify-between items-center gap-4">
               <div>
-                <span className="text-xs font-mono text-amber-400 uppercase font-bold tracking-wider">Active Audit View — School ID: {selectedSchool.id}</span>
-                <h2 className="text-2xl font-bold text-white mt-1">{selectedSchool.name}</h2>
-                <p className="text-xs text-gray-400 mt-1">Region: {selectedSchool.region} | Email: {selectedSchool.contactEmail} | Phone: {selectedSchool.contactPhone}</p>
+                <h2 className="text-lg font-bold text-[#1b4332]">Live School Fee & Financial Registry</h2>
+                <p className="text-xs text-stone-500">Showing verified student transaction records</p>
               </div>
-              <button 
-                onClick={() => setSelectedSchoolId(null)}
-                className="bg-gray-800 hover:bg-gray-700 text-gray-200 px-4 py-2.5 rounded-lg text-xs font-semibold shadow transition-colors"
+              <button
+                onClick={() => alert('Downloading official NsuhRecords Financial Statement PDF...')}
+                className="px-4 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 border border-stone-300 rounded-xl text-xs font-semibold transition"
               >
-                ← Back to All Schools Dashboard
+                Download Financial Statement
               </button>
             </div>
 
-            {/* Metrics cards showing total students and teachers */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-[#0f172a] border border-gray-800 p-5 rounded-xl">
-                <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">Total Registered Students</span>
-                <p className="text-4xl font-black mt-2 text-emerald-400">{selectedSchool.students.length}</p>
-                <p className="text-[11px] text-gray-500 mt-1">Full verified student roster and guardian contacts</p>
-              </div>
-              <div className="bg-[#0f172a] border border-gray-800 p-5 rounded-xl">
-                <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">Total Registered Teachers</span>
-                <p className="text-4xl font-black mt-2 text-blue-400">{selectedSchool.teachers.length}</p>
-                <p className="text-[11px] text-gray-500 mt-1">Complete faculty directory and phone contacts</p>
-              </div>
-            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-stone-700">
+                <thead className="bg-[#1b4332] text-white font-semibold">
+                  <tr>
+                    <th className="p-3.5 rounded-l-xl">Receipt ID</th>
+                    <th className="p-3.5">Student Name</th>
+                    <th className="p-3.5">Unique ID</th>
+                    <th className="p-3.5">Dept / Class</th>
+                    <th className="p-3.5">Trade / Specialty</th>
+                    <th className="p-3.5">Fee Category</th>
+                    <th className="p-3.5">Paid / Total</th>
+                    <th className="p-3.5">Balance</th>
+                    <th className="p-3.5">Status</th>
+                    <th className="p-3.5 rounded-r-xl">Date</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-200">
+                 {loadingStudents ? (
+  <tr>
+    <td colSpan="10" className="p-6 text-center text-stone-500 font-medium text-xs">
+      Loading live student records from All Students List...
+    </td>
+  </tr>
+) : filteredRegistryPayments.length === 0 ? (
+  <tr>
+    <td colSpan="10" className="p-6 text-center text-stone-500 font-medium text-xs">
+      No student records found matching your active filter choices.
+    </td>
+  </tr>
+) : (
+  filteredRegistryPayments.map((payment) => {
+    // Payment defaults (0.00 / 0 XAF until fee records are linked)
+    const amountPaid = payment.amountPaid || 0;
+    const totalFee = payment.totalFee || 0;
+    const balance = totalFee - amountPaid;
+    const isComplete = totalFee > 0 && balance <= 0;
+    const receiptId = student.unique_code ? `REC-${student.unique_code.slice(-6)}` : 'N/A';
+    const todayDate = new Date().toISOString().split('T')[0];
 
-            {/* Students Table */}
-            <div className="bg-[#0f172a] border border-gray-800 rounded-xl overflow-hidden shadow-xl">
-              <div className="p-4 border-b border-gray-800 bg-[#1e293b]/50 flex justify-between items-center">
-                <h3 className="text-sm font-bold text-amber-400 uppercase tracking-wider">Student Records & Guardian Contacts</h3>
-                <span className="text-xs text-gray-400 font-mono">Count: {selectedSchool.students.length}</span>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs text-gray-300">
-                  <thead className="bg-[#1e293b] text-gray-400 uppercase">
-                    <tr>
-                      <th className="p-3.5">Unique ID</th>
-                      <th className="p-3.5">Student Name</th>
-                      <th className="p-3.5">Class</th>
-                      <th className="p-3.5">Student Contact</th>
-                      <th className="p-3.5">Guardian Name</th>
-                      <th className="p-3.5">Guardian Contact</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-800">
-                    {selectedSchool.students.length === 0 ? (
-                      <tr><td colSpan="6" className="p-8 text-center text-gray-500">No students registered yet under this school.</td></tr>
-                    ) : (
-                      selectedSchool.students.map((stu, i) => (
-                        <tr key={i} className="hover:bg-gray-800/40">
-                          <td className="p-3.5 font-mono text-amber-400 font-bold">{stu.id}</td>
-                          <td className="p-3.5 font-semibold text-white">{stu.name}</td>
-                          <td className="p-3.5">{stu.className}</td>
-                          <td className="p-3.5 font-mono">{stu.contact}</td>
-                          <td className="p-3.5">{stu.guardianName}</td>
-                          <td className="p-3.5 font-mono">{stu.guardianContact}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+    return (
+      <tr key={student.id || student.unique_code} className="hover:bg-stone-50 transition">
+        {/* Receipt ID */}
+        <td className="p-3.5 font-mono font-bold text-emerald-800">
+          {receiptId}
+        </td>
 
-            {/* Teachers Table */}
-            <div className="bg-[#0f172a] border border-gray-800 rounded-xl overflow-hidden shadow-xl">
-              <div className="p-4 border-b border-gray-800 bg-[#1e293b]/50 flex justify-between items-center">
-                <h3 className="text-sm font-bold text-amber-400 uppercase tracking-wider">Teacher Directory & Phone Contacts</h3>
-                <span className="text-xs text-gray-400 font-mono">Count: {selectedSchool.teachers.length}</span>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs text-gray-300">
-                  <thead className="bg-[#1e293b] text-gray-400 uppercase">
-                    <tr>
-                      <th className="p-3.5">Teacher Name</th>
-                      <th className="p-3.5">Contact Number</th>
-                      <th className="p-3.5">Assigned Subjects</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-800">
-                    {selectedSchool.teachers.length === 0 ? (
-                      <tr><td colSpan="3" className="p-8 text-center text-gray-500">No teachers registered yet under this school.</td></tr>
-                    ) : (
-                      selectedSchool.teachers.map((tch, i) => (
-                        <tr key={i} className="hover:bg-gray-800/40">
-                          <td className="p-3.5 font-semibold text-white">{tch.name}</td>
-                          <td className="p-3.5 font-mono text-blue-400">{tch.contact}</td>
-                          <td className="p-3.5 text-gray-300">{tch.subjects || 'General Curriculum'}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        ) : activeTab === 'schools' ? (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="bg-[#0f172a] border border-gray-800 p-5 rounded-xl shadow">
-                <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">Total Assigned Schools</span>
-                <p className="text-2xl font-black mt-2 text-white">{activeSchools.length}</p>
-              </div>
-              <div className="bg-[#0f172a] border border-gray-800 p-5 rounded-xl shadow">
-                <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">Active Access Portals</span>
-                <p className="text-2xl font-black mt-2 text-emerald-400">{activeSchools.filter(s => s.status === 'Active').length}</p>
-              </div>
-              <div className="bg-[#0f172a] border border-gray-800 p-5 rounded-xl shadow">
-                <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">Restricted Portals</span>
-                <p className="text-2xl font-black mt-2 text-red-400">{activeSchools.filter(s => s.status === 'Restricted').length}</p>
-              </div>
-              <div className="bg-[#0f172a] border border-gray-800 p-5 rounded-xl shadow">
-                <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">Total Project Users</span>
-                <p className="text-2xl font-black mt-2 text-amber-400">{totalRegisteredUsers}</p>
-              </div>
-            </div>
+        {/* Student Name */}
+        <td className="p-3.5 font-bold text-stone-900">
+          {student.fullName || 'N/A'}
+        </td>
 
-            <div className="bg-[#0f172a] border border-gray-800 rounded-xl shadow-xl overflow-hidden">
-              <div className="p-5 border-b border-gray-800 flex justify-between items-center">
-                <h3 className="text-sm font-bold uppercase tracking-wider text-amber-400">Assigned Educational Institutions (Main Dashboard)</h3>
-                <span className="text-xs text-amber-300 font-semibold bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/30">Click any school row below to view full student & teacher records</span>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs text-gray-300">
-                  <thead className="bg-[#1e293b] text-gray-400 uppercase font-semibold">
-                    <tr>
-                      <th className="p-3.5">School ID</th>
-                      <th className="p-3.5">Institution Name</th>
-                      <th className="p-3.5">Region</th>
-                      <th className="p-3.5">Contact Email / Phone</th>
-                      <th className="p-3.5">Status</th>
-                      <th className="p-3.5 text-center">Toggle Access</th>
-                      <th className="p-3.5 text-center">Remove / Trash</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-800">
-                    {activeSchools.length === 0 ? (
-                      <tr><td colSpan="7" className="p-8 text-center text-gray-500">No schools assigned yet. Use the "Assign / Onboard School" tab to add one.</td></tr>
-                    ) : (
-                      activeSchools.map((sch) => (
-                        <tr 
-                          key={sch.id} 
-                          onClick={() => setSelectedSchoolId(sch.id)}
-                          className="hover:bg-amber-500/10 cursor-pointer transition-colors group"
-                        >
-                          <td className="p-3.5 font-mono text-amber-400 font-bold">{sch.id}</td>
-                          <td className="p-3.5 font-semibold text-white group-hover:text-amber-300 underline decoration-dotted">{sch.name}</td>
-                          <td className="p-3.5 text-gray-300">{sch.region}</td>
-                          <td className="p-3.5 font-mono text-gray-400">{sch.contactEmail}<br/>{sch.contactPhone}</td>
-                          <td className="p-3.5">
-                            <span className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${
-                              sch.status === 'Active' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-red-950 text-red-400 border border-red-800'
-                            }`}>
-                              {sch.status}
-                            </span>
-                          </td>
-                          <td className="p-3.5 text-center">
-                            <button
-                              onClick={(e) => { e.stopPropagation(); toggleSchoolRestriction(sch.id); }}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold shadow transition-colors ${
-                                sch.status === 'Active' 
-                                  ? 'bg-amber-950/60 hover:bg-amber-900 text-amber-300 border border-amber-800' 
-                                  : 'bg-emerald-950/60 hover:bg-emerald-900 text-emerald-300 border border-emerald-800'
-                              }`}
-                            >
-                              {sch.status === 'Active' ? 'Restrict School' : 'Lift Restriction'}
-                            </button>
-                          </td>
-                          <td className="p-3.5 text-center">
-                            <button
-                              onClick={(e) => { e.stopPropagation(); handleSoftDeleteSchool(sch.id); }}
-                              className="px-3 py-1.5 bg-red-950/40 hover:bg-red-900 text-red-300 border border-red-800 rounded-lg text-xs font-semibold"
-                            >
-                              Delete
-                            </button>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        ) : activeTab === 'register' ? (
-          <div className="bg-[#0f172a] border border-gray-800 p-8 rounded-xl max-w-xl mx-auto shadow-2xl space-y-6">
-            <h2 className="text-lg font-bold text-white border-b border-gray-800 pb-3">Assign New School & Activate Profile</h2>
+        {/* Unique ID */}
+        <td className="p-3.5 font-mono uppercase text-stone-500">
+          {student.unique_code || 'N/A'}
+        </td>
 
-            <form onSubmit={handleAddSchool} className="space-y-4 text-sm">
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">School / Institution Name</label>
-                <input 
-                  type="text" 
-                  value={newSchoolName}
-                  onChange={(e) => setNewSchoolName(e.target.value)}
-                  placeholder="e.g., Bamenda High School" 
-                  required
-                  className="w-full bg-[#1e293b] border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:border-amber-500"
-                />
-              </div>
+        {/* Dept / Class */}
+        <td className="p-3.5">
+          <span className="text-stone-800 font-medium">{student.classLevel || 'N/A'}</span>
+          <span className="text-[10px] block text-stone-500">
+            {student.section || 'General Education'} • {student.academicYear || '2025/2026'}
+          </span>
+        </td>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">School Contact Email</label>
-                  <input 
-                    type="email" 
-                    value={newSchoolEmail}
-                    onChange={(e) => setNewSchoolEmail(e.target.value)}
-                    placeholder="admin@school.cm" 
-                    required
-                    className="w-full bg-[#1e293b] border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">School Contact Number</label>
-                  <input 
-                    type="text" 
-                    value={newSchoolPhone}
-                    onChange={(e) => setNewSchoolPhone(e.target.value)}
-                    placeholder="670000000" 
-                    required
-                    className="w-full bg-[#1e293b] border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-              </div>
+        {/* Trade / Specialty */}
+        <td className="p-3.5 text-stone-600">
+          {student.trades_series || student.trade || 'N/A'}
+        </td>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Region of Cameroon</label>
-                  <select 
-                    value={newSchoolRegion}
-                    onChange={(e) => setNewSchoolRegion(e.target.value)}
-                    className="w-full bg-[#1e293b] border border-gray-700 rounded-lg p-3 text-white"
-                  >
-                    {CAMEROON_REGIONS.map(reg => (
-                      <option key={reg} value={reg}>{reg}</option>
-                    ))}
-                  </select>
-                </div>
+        {/* Fee Category */}
+        <td className="p-3.5 font-medium text-stone-700">
+          Tuition
+        </td>
 
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Subscription Plan</label>
-                  <select 
-                    value={newSchoolPlan}
-                    onChange={(e) => setNewSchoolPlan(e.target.value)}
-                    className="w-full bg-[#1e293b] border border-gray-700 rounded-lg p-3 text-white"
-                  >
-                    <option value="Basic">Basic Plan</option>
-                    <option value="Standard">Standard Plan</option>
-                    <option value="Enterprise">Enterprise Plan</option>
-                  </select>
-                </div>
-              </div>
+        {/* Paid / Total */}
+        <td className="p-3.5 font-semibold text-stone-900">
+          {amountPaid.toLocaleString()} / {totalFee.toLocaleString()} XAF
+        </td>
 
-              <button 
-                type="submit"
-                className="w-full bg-amber-600 hover:bg-amber-500 text-white font-semibold py-3 rounded-lg shadow-lg transition-colors mt-2"
-              >
-                Assign & Activate School on Main Dashboard
-              </button>
-            </form>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            <div className="bg-[#0f172a] border border-gray-800 rounded-xl shadow-xl overflow-hidden p-6">
-              <h3 className="text-sm font-bold uppercase tracking-wider text-amber-400 mb-2">Deleted Schools Trash & Safe Recovery</h3>
-              <p className="text-xs text-gray-400 mb-6">Schools deleted here are hidden from the active dashboard, but all underlying student rosters, teacher directories, and database records are preserved safely. You can restore them instantly if deleted by mistake.</p>
-              
-              {deletedSchools.length === 0 ? (
-                <p className="text-xs text-gray-500 bg-[#1e293b]/40 p-4 rounded-lg border border-gray-800 text-center">Trash is currently empty.</p>
-              ) : (
-                <div className="space-y-3">
-                  {deletedSchools.map(sch => (
-                    <div key={sch.id} className="flex justify-between items-center bg-[#1e293b] p-4 rounded-lg border border-gray-700 shadow">
-                      <div>
-                        <span className="text-xs font-mono text-amber-400 font-bold">{sch.id}</span>
-                        <h4 className="font-bold text-white text-sm mt-0.5">{sch.name}</h4>
-                        <p className="text-[11px] text-gray-400 mt-0.5">{sch.region} Region | Students: {sch.students.length} | Teachers: {sch.teachers.length}</p>
-                      </div>
-                      <button
-                        onClick={() => handleRestoreSchool(sch.id)}
-                        className="bg-emerald-700 hover:bg-emerald-600 text-white text-xs px-4 py-2 rounded-lg font-semibold transition-colors"
-                      >
-                        Restore School & Records
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
+        {/* Balance */}
+        <td className="p-3.5 font-mono text-rose-700 font-bold">
+          {balance > 0 ? `${balance.toLocaleString()} XAF` : '0 XAF'}
+        </td>
+
+        {/* Status */}
+        <td className="p-3.5">
+          <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+            isComplete 
+              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' 
+              : 'bg-amber-100 text-amber-800 border border-amber-300'
+          }`}>
+            {isComplete ? 'Complete' : 'Pending'}
+          </span>
+        </td>
+
+        {/* Date */}
+        <td className="p-3.5 text-stone-500 font-mono">
+          {student.created_at ? new Date(student.created_at).toISOString().split('T')[0] : todayDate}
+        </td>
+      </tr>
+    );
+  })
+)}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
+
+        {/* --- TAB 2: RECEIVE PAYMENT FORM WITH FILTER LOGIC --- */}
+        {activeTab === 'receive' && (
+          <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm max-w-3xl mx-auto space-y-6">
+            <div>
+              <h2 className="text-lg font-bold text-[#1b4332]">Post Student Fee Payment</h2>
+              <p className="text-xs text-stone-500">Filter and select an officially registered student to record payment</p>
+            </div>
+
+            {/* CASCADING FILTER INTEGRATED IN PAYMENT VIEW */}
+            <div className="bg-[#FDFBF7] border border-stone-200 p-4 rounded-xl space-y-3">
+              <h3 className="text-xs font-bold text-[#1b4332] uppercase tracking-wider">
+                Step 1: Filter & Select Enrolled Student
+              </h3>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+  {/* 1. SECTION */}
+  <div>
+    <label className="block text-[11px] font-bold text-stone-600 mb-1">Section *</label>
+    <select
+      value={paySection}
+      onChange={(e) => {
+        setPaySection(e.target.value);
+        setPayClassLevel('');
+        setPayTrade('');
+        setSelectedStudentId('');
+      }}
+      className="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-xs text-stone-800 focus:ring-1 focus:ring-emerald-700 focus:outline-none"
+    >
+      <option value="">-- All Sections --</option>
+      <option value="General Education">General Education</option>
+      <option value="Technical Commercial (STT)">Technical Commercial (STT)</option>
+      <option value="Technical Industrial (IND)">Technical Industrial (IND)</option>
+    </select>
+  </div>
+
+  {/* 2. CLASS LEVEL */}
+  <div>
+    <label className="block text-[11px] font-bold text-stone-600 mb-1">Class Level *</label>
+    <select
+      value={payClassLevel}
+      onChange={(e) => {
+        setPayClassLevel(e.target.value);
+        setSelectedStudentId('');
+      }}
+      disabled={!paySection}
+      className="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-xs text-stone-800 disabled:bg-stone-100 disabled:text-stone-400 focus:ring-1 focus:ring-emerald-700 focus:outline-none"
+    >
+      <option value="">-- Select Class Level --</option>
+      {paySection === 'General Education' && generalClasses.map((c) => (
+        <option key={c} value={c}>{c}</option>
+      ))}
+      {(paySection === 'Technical Commercial (STT)' || paySection === 'Technical Industrial (IND)') && technicalClasses.map((c) => (
+        <option key={c} value={c}>{c}</option>
+      ))}
+    </select>
+  </div>
+
+  {/* 3. TRADE / SERIES */}
+        <div>
+          <label className="block text-[11px] font-bold text-stone-600 mb-1">Trade / Series</label>
+          <select
+            value={payTrade}
+            onChange={(e) => {
+              setPayTrade(e.target.value);
+              setSelectedStudentId('');
+            }}
+            disabled={
+              !paySection || 
+              (paySection === 'General Education' && GENERAL_LOWER_CLASSES.includes(payClassLevel))
+            }
+            className="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-xs text-stone-800 disabled:bg-stone-100"
+          >
+            <option value="">-- Select Trade / Series --</option>
+
+            {/* General High School Series */}
+            {paySection === 'General Education' && payClassLevel.includes('Arts') &&
+              (GENERAL_SERIES_CATALOG.series?.ARTS || []).map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))
+            }
+            {paySection === 'General Education' && payClassLevel.includes('Science') &&
+              (GENERAL_SERIES_CATALOG.series?.SCIENCE || []).map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))
+            }
+
+            {/* Technical Commercial Trades */}
+            {paySection === 'Technical Commercial (STT)' &&
+              COMMERCIAL_TRADE_SERIES.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))
+            }
+
+            {/* Technical Industrial Trades */}
+            {paySection === 'Technical Industrial (IND)' &&
+              INDUSTRIAL_TRADE_SERIES.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))
+            }
+          </select>
+        </div>
+</div>
+
+              {/* Student Dropdown auto-populated by filter */}
+              <div>
+                <label className="block text-[11px] font-bold text-stone-600 mb-1">Select Student *</label>
+                <select
+                  value={selectedStudentId}
+                  onChange={(e) => setSelectedStudentId(e.target.value)}
+                  className="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-xs font-semibold text-stone-800 focus:outline-none focus:border-emerald-600"
+                >
+                 <option value="">-- Click to Select Student from Filtered List --</option>
+{eligibleStudentsForPayment.map((st) => (
+  <option key={st.id} value={st.id}>
+    {st.name} ({st.id}) - {st.class} {st.trade || st.trades_series ? `(${st.trade || st.trades_series})` : ''}
+  </option>
+))}
+                </select>
+              </div>
+            </div>
+
+            {/* STEP 2: PAYMENT ENTRY FORM */}
+            <form onSubmit={handlePaymentSubmit} className="space-y-4 border-t border-stone-100 pt-4">
+              <h3 className="text-xs font-bold text-[#1b4332] uppercase tracking-wider">
+                Step 2: Payment Details
+              </h3>
+
+              {activeStudentObj && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-900 flex justify-between items-center">
+                  <div>
+                    <p className="font-bold">{activeStudentObj.name} ({activeStudentObj.id})</p>
+                    <p className="text-[11px] text-emerald-700">{activeStudentObj.department} — {activeStudentObj.class} ({activeStudentObj.trade})</p>
+                  </div>
+                  <span className="text-[10px] bg-emerald-200 text-emerald-800 font-bold px-2 py-0.5 rounded">Verified Student</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">Fee Type *</label>
+                  <select
+                    value={paymentForm.feeType}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, feeType: e.target.value })}
+                    className="w-full bg-[#FDFBF7] border border-stone-300 rounded-xl px-3 py-2 text-sm text-stone-800 focus:outline-none focus:border-emerald-600"
+                  >
+                    <option value="Tuition">Tuition / School Fees</option>
+                    <option value="Registration">Registration Fee</option>
+                    <option value="PTA">PTA Contribution</option>
+                    <option value="Transport">Transport Fee</option>
+                    <option value="GCE Registration">GCE Registration</option>
+                    <option value="Examination">Examination Fee</option>
+                    <option value="Uniform">Uniform & Badge</option>
+                    <option value="Other">Other Contribution</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">Payment Method</label>
+                  <select
+                    value={paymentForm.paymentMethod}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, paymentMethod: e.target.value })}
+                    className="w-full bg-[#FDFBF7] border border-stone-300 rounded-xl px-3 py-2 text-sm text-stone-800 focus:outline-none focus:border-emerald-600"
+                  >
+                    <option value="Cash">Cash Handed</option>
+                    <option value="MoMo">MTN Mobile Money</option>
+                    <option value="Orange Money">Orange Money</option>
+                    <option value="Bank Transfer">Bank Transfer / Deposit</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">Amount Paid (XAF) *</label>
+                  <input
+                    type="number"
+                    placeholder="e.g. 25000"
+                    value={paymentForm.amountPaid}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, amountPaid: e.target.value })}
+                    className="w-full bg-[#FDFBF7] border border-stone-300 rounded-xl px-3 py-2 text-sm text-stone-800 focus:outline-none focus:border-emerald-600"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">Total Fee Expected *</label>
+                  <input
+                    type="number"
+                    placeholder="e.g. 60000"
+                    value={paymentForm.totalFee}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, totalFee: e.target.value })}
+                    className="w-full bg-[#FDFBF7] border border-stone-300 rounded-xl px-3 py-2 text-sm text-stone-800 focus:outline-none focus:border-emerald-600"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex gap-3">
+                <button
+                  type="submit"
+                  disabled={!activeStudentObj}
+                  className="flex-1 bg-[#1b4332] hover:bg-[#2d6a4f] disabled:bg-stone-300 text-white font-bold py-3 rounded-xl text-sm transition shadow-md"
+                >
+                  Post Payment & Issue Receipt
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('registry')}
+                  className="px-5 bg-stone-200 hover:bg-stone-300 text-stone-700 font-semibold py-3 rounded-xl text-sm transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* --- TAB 3: EXPENSE REGISTRY TABLE & DISBURSEMENT LOG --- */}
+        {activeTab === 'expense' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            {/* Record Expense Form */}
+            <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm lg:col-span-1 space-y-4">
+              <h2 className="text-base font-bold text-[#1b4332]">Record New Expense</h2>
+              <p className="text-xs text-stone-500">Log administrative disbursements</p>
+
+              <form onSubmit={handleExpenseSubmit} className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">Description *</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Office Stationery"
+                    value={expenseForm.description}
+                    onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })}
+                    className="w-full bg-[#FDFBF7] border border-stone-300 rounded-xl px-3 py-2 text-xs text-stone-800 focus:outline-none focus:border-emerald-600"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">Category</label>
+                  <select
+                    value={expenseForm.category}
+                    onChange={(e) => setExpenseForm({ ...expenseForm, category: e.target.value })}
+                    className="w-full bg-[#FDFBF7] border border-stone-300 rounded-xl px-3 py-2 text-xs text-stone-800 focus:outline-none focus:border-emerald-600"
+                  >
+                    <option value="Operational">Classroom & Operational</option>
+                    <option value="Utilities">Utilities (Water/Electricity)</option>
+                    <option value="Maintenance">Maintenance & Repairs</option>
+                    <option value="Transport">Staff Transportation</option>
+                    <option value="Other">Other Expense</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">Amount Spent (XAF) *</label>
+                  <input
+                    type="number"
+                    placeholder="e.g. 15000"
+                    value={expenseForm.amount}
+                    onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })}
+                    className="w-full bg-[#FDFBF7] border border-stone-300 rounded-xl px-3 py-2 text-xs text-stone-800 focus:outline-none focus:border-emerald-600"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">Vendor / Recipient</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Local Station"
+                    value={expenseForm.recipient}
+                    onChange={(e) => setExpenseForm({ ...expenseForm, recipient: e.target.value })}
+                    className="w-full bg-[#FDFBF7] border border-stone-300 rounded-xl px-3 py-2 text-xs text-stone-800 focus:outline-none focus:border-emerald-600"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-rose-700 hover:bg-rose-800 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-md mt-2"
+                >
+                  Log Disbursement Entry
+                </button>
+              </form>
+            </div>
+
+            {/* Expense Registry Table */}
+            <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm lg:col-span-2 space-y-4">
+              <h2 className="text-base font-bold text-[#1b4332]">School Expense Ledger</h2>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-stone-700">
+                  <thead className="bg-[#1b4332] text-white font-semibold">
+                    <tr>
+                      <th className="p-3 rounded-l-xl">Exp ID</th>
+                      <th className="p-3">Description</th>
+                      <th className="p-3">Category</th>
+                      <th className="p-3">Recipient</th>
+                      <th className="p-3">Amount</th>
+                      <th className="p-3 rounded-r-xl">Date</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-200">
+                    {expenses.map((exp) => (
+                      <tr key={exp.id} className="hover:bg-stone-50 transition">
+                        <td className="p-3 font-mono font-bold text-rose-800">{exp.id}</td>
+                        <td className="p-3 font-semibold text-stone-900">{exp.description}</td>
+                        <td className="p-3 text-stone-600">{exp.category}</td>
+                        <td className="p-3 text-stone-600">{exp.recipient}</td>
+                        <td className="p-3 font-mono font-bold text-rose-700">
+                          {exp.amount.toLocaleString()} XAF
+                        </td>
+                        <td className="p-3 text-stone-500 font-mono">{exp.date}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+          </div>
+        )}
+      {/* TAB 4: ANCILLARY REVENUE & OTHER SOURCES */}
+      {activeTab === 'ancillary' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm lg:col-span-1 space-y-4">
+            <h2 className="text-base font-bold text-[#1b4332]">Record Ancillary Revenue</h2>
+            <p className="text-xs text-stone-500">Log PTA levies, exam fees, donations, and custom funds.</p>
+
+            <form onSubmit={handleAddAncillary} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-stone-700 mb-1">Category *</label>
+                <select
+                  value={ancillaryForm.category}
+                  onChange={(e) => setAncillaryForm({ ...ancillaryForm, category: e.target.value })}
+                  className="w-full bg-[#FDFBF7] border border-stone-300 rounded-xl px-3 py-2 text-xs text-stone-800"
+                >
+                  <option value="PTA Levy">PTA Levy</option>
+                  <option value="Uniform / Badge">Uniform / Badge</option>
+                  <option value="Motive / Exam Fee">Motive / Exam Fee</option>
+                  <option value="ID Card Replacement">ID Card Replacement</option>
+                  <option value="Custom / Other">Custom / Other</option>
+                </select>
+              </div>
+
+              {ancillaryForm.category === 'Custom / Other' && (
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">Custom Category Name *</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Hall Rental"
+                    value={ancillaryForm.customCategory}
+                    onChange={(e) => setAncillaryForm({ ...ancillaryForm, customCategory: e.target.value })}
+                    className="w-full bg-[#FDFBF7] border border-stone-300 rounded-xl px-3 py-2 text-xs text-stone-800"
+                    required
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-stone-700 mb-1">Description *</label>
+                <input
+                  type="text"
+                  placeholder="e.g. PTA Annual Contribution"
+                  value={ancillaryForm.description}
+                  onChange={(e) => setAncillaryForm({ ...ancillaryForm, description: e.target.value })}
+                  className="w-full bg-[#FDFBF7] border border-stone-300 rounded-xl px-3 py-2 text-xs text-stone-800"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">Amount (XAF) *</label>
+                  <input
+                    type="number"
+                    placeholder="e.g. 5000"
+                    value={ancillaryForm.amount}
+                    onChange={(e) => setAncillaryForm({ ...ancillaryForm, amount: e.target.value })}
+                    className="w-full bg-[#FDFBF7] border border-stone-300 rounded-xl px-3 py-2 text-xs text-stone-800"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">Date</label>
+                  <input
+                    type="date"
+                    value={ancillaryForm.date}
+                    onChange={(e) => setAncillaryForm({ ...ancillaryForm, date: e.target.value })}
+                    className="w-full bg-[#FDFBF7] border border-stone-300 rounded-xl px-3 py-2 text-xs text-stone-800"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full bg-[#1b4332] hover:bg-[#2d6a4f] text-white font-bold py-2.5 rounded-xl text-xs transition"
+              >
+                + Save Ancillary Entry
+              </button>
+            </form>
+          </div>
+
+          <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm lg:col-span-2 space-y-4">
+            <h2 className="text-base font-bold text-[#1b4332]">Ancillary Revenue Log</h2>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-stone-700">
+                <thead className="bg-[#1b4332] text-white font-semibold">
+                  <tr>
+                    <th className="p-3 rounded-l-xl">Category</th>
+                    <th className="p-3">Description</th>
+                    <th className="p-3">Amount</th>
+                    <th className="p-3 rounded-r-xl">Date</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-200">
+                  {otherRevenues.length === 0 ? (
+                    <tr>
+                      <td colSpan="4" className="p-6 text-center text-stone-400">
+                        No ancillary revenue entries recorded yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    otherRevenues.map((rev) => (
+                      <tr key={rev.id} className="hover:bg-stone-50 transition">
+                        <td className="p-3 font-semibold text-stone-800">{rev.category}</td>
+                        <td className="p-3">{rev.description}</td>
+                        <td className="p-3 font-mono font-bold text-emerald-700">
+                          {rev.amount.toLocaleString()} XAF
+                        </td>
+                        <td className="p-3 font-mono text-stone-500">{rev.date || 'N/A'}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}  
+{/* TAB 5: FINANCIAL AUDIT & REPORTS */}
+      {activeTab === 'reports' && (
+        <div className="space-y-6">
+          <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div>
+                <h2 className="text-base font-bold text-[#1b4332]">Financial Summary & Balance Audit</h2>
+                <p className="text-xs text-stone-500">Real-time aggregate cash flow analytics for the institution.</p>
+              </div>
+              <button
+                onClick={() => window.print()}
+                className="bg-stone-100 hover:bg-stone-200 text-stone-700 font-semibold px-4 py-2 rounded-xl text-xs transition"
+              >
+                🖨️ Print Financial Statement
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+              <div className="bg-[#FDFBF7] border border-stone-200 rounded-xl p-4">
+                <p className="text-xs font-semibold text-stone-500">Total Income (Fees + Ancillary)</p>
+                <p className="text-xl font-black text-emerald-700 font-mono mt-1">
+                  {(
+                    payments.reduce((acc, curr) => acc + (Number(curr.amountPaid) || 0), 0) +
+                    otherRevenues.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0)
+                  ).toLocaleString()} XAF
+                </p>
+              </div>
+
+              <div className="bg-[#FDFBF7] border border-stone-200 rounded-xl p-4">
+                <p className="text-xs font-semibold text-stone-500">Total Operational Expenses</p>
+                <p className="text-xl font-black text-rose-700 font-mono mt-1">
+                  {expenses.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0).toLocaleString()} XAF
+                </p>
+              </div>
+
+              <div className="bg-[#FDFBF7] border border-stone-200 rounded-xl p-4">
+                <p className="text-xs font-semibold text-stone-500">Net Liquid Treasury Balance</p>
+                <p className="text-xl font-black text-[#1b4332] font-mono mt-1">
+                  {(
+                    payments.reduce((acc, curr) => acc + (Number(curr.amountPaid) || 0), 0) +
+                    otherRevenues.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0) -
+                    expenses.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0)
+                  ).toLocaleString()} XAF
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* TAB 6: CLASS FEE SETTINGS CONTENT */}
+      {activeTab === 'fee-setup' && (
+        <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm space-y-6">
+          <div>
+            <h2 className="text-base font-bold text-[#1b4332]">Class Fee Configuration</h2>
+            <p className="text-xs text-stone-500">Define baseline expected tuition & fee amounts per section, level, and trade/series.</p>
+          </div>
+
+          {/* Section / Class / Trade Selector Filters */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-[#FDFBF7] p-4 rounded-xl border border-stone-200">
+            <div>
+              <label className="block text-[11px] font-bold text-stone-600 mb-1">Section</label>
+              <select
+                 value={feeSetupForm.section}
+            onChange={(e) => {
+              setFeeSetupForm({
+                ...feeSetupForm,
+                section: e.target.value,
+                classLevel: '',
+                trade: ''
+              });
+            }}
+                  className="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-xs text-stone-800 focus:outline-none focus:ring-2 focus:ring-[#1b4332]"
+                >
+                  <option value="">Select Section...</option>
+                  <option value="General Education">General Education</option>
+                  <option value="Technical Commercial (STT)">Technical Commercial (STT)</option>
+                  <option value="Technical Industrial (IND)">Technical Industrial (IND)</option>
+                </select>
+            </div>
+
+            <div>
+             {/* Dynamic Class Level Selector */}
+              <div>
+                <label className="block text-[11px] font-bold text-stone-600 mb-1">Class Level</label>
+                <select
+                  value={feeSetupForm.classLevel}
+                  disabled={!feeSetupForm.section}
+                  onChange={(e) => {
+              const selectedClass = e.target.value;
+              const isGeneralLower = feeSetupForm.section === 'General Education' && GENERAL_LOWER_CLASSES?.includes(selectedClass);
+              
+              setFeeSetupForm({
+                ...feeSetupForm,
+                classLevel: selectedClass,
+                trade: isGeneralLower ? 'N/A' : ''
+              });
+            }}
+                  className="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-xs text-stone-800 disabled:bg-stone-100 focus:outline-none focus:ring-2 focus:ring-[#1b4332]"
+                >
+                  <option value="">Select Class...</option>
+                  {getFeeClasses().map((cls) => (
+                    <option key={cls} value={cls}>{cls}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Dynamic Trade / Series Selector */}
+              <div>
+          <label className="block text-[11px] font-bold text-stone-600 mb-1">Trade / Series</label>
+          <select
+            value={feeSetupForm.trade || ''}
+            disabled={!feeSetupForm.classLevel}
+            onChange={(e) => setFeeSetupForm({ ...feeSetupForm, trade: e.target.value })}
+            className="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-xs text-stone-800 focus:ring-2 focus:ring-emerald-600 focus:outline-none disabled:bg-stone-100 disabled:text-stone-400"
+          >
+            <option value="">Select Trade / Series...</option>
+            {Array.isArray(getFeeSeries()) && getFeeSeries().map((trd) => (
+              <option key={trd} value={trd}>{trd}</option>
+            ))}
+          </select>
+        </div>
+            </div>
+          </div>
+        </div>
+      )}
       </main>
 
-      <footer className="text-center py-6 text-xs text-gray-500 border-t border-gray-800 mt-12">
-        App conceived by Norbert Che Nsuh — 682491189
+      {/* Footer */}
+      <footer className="p-6 border-t border-stone-200 flex flex-col items-center justify-center space-y-1 bg-white">
+        <p className="text-xs text-stone-500">&copy; {new Date().getFullYear()} NsuhRecords. All rights reserved.</p>
+        <p className="text-[10px] text-stone-400 font-mono">App conceived by Norbert Che Nsuh - 682491189</p>
       </footer>
     </div>
   );

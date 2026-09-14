@@ -4729,7 +4729,7 @@ setTeacherPhotoPreview(null);
       school_id: currentSchoolId,
       section: selectedSection,
       classLevel: selectedClass.trim(),
-      trades_series: selectedTradeSeries || null,
+      trades_series: GENERAL_LOWER_CLASSES.includes(selectedClass.trim()) ? 'N/A' : (selectedTradeSeries || null),
       subject_code: s.subject_code || (s.name ? s.name.substring(0, 4).toUpperCase() : 'SUBJ'),
       subject_name: s.name || s.subject_name,
       category: s.category || 'General Core Subjects',
@@ -4800,7 +4800,7 @@ if (payload.length > 0) {
   const newSec = e.target.value;
   setSelectedSection(newSec);
   setSelectedTradeSeries('');
-  if (newSec === 'General Education') setSelectedClass('Form 1 (F1)');
+  if (newSec === 'General Education') setSelectedClass('Form 1A (F1A)');
   else if (newSec === 'Technical Commercial (STT)') setSelectedClass('First Year Commercial (Y1Com)');
   else if (newSec === 'Technical Industrial (IND)') setSelectedClass('First Year Industrial (Y1Ind)');
 }}

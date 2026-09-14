@@ -27,7 +27,7 @@ export async function POST(req) {
     
     // 1. Target table based on role (teachers or general school_personnel)
     const targetTable = assignedRole === "teacher" ? "teachers" : "school_personnel";
-    const idColumn = assignedRole === "teacher" ? "teacher_id" : "staff_id";
+const idColumn = assignedRole === "teacher" ? "teacher_id" : "unique_id";
 
     // 2. Build record verification query
     let query = supabase.from(targetTable).select("*");
@@ -38,7 +38,6 @@ export async function POST(req) {
       query = query.eq("email", email.trim().toLowerCase());
     }
 
-    // Scrape multi-tenant isolation by school_id if provided
     if (school_id) {
       query = query.eq("school_id", school_id);
     }
@@ -52,7 +51,7 @@ export async function POST(req) {
       );
     }
 
-    // 3. Optional token validation (if token field exists in DB)
+    // 3. Optional token validation
     if (token && staffMember.token && staffMember.token !== token) {
       return NextResponse.json(
         { error: "Invalid verification token." },
@@ -66,6 +65,9 @@ export async function POST(req) {
       ? staffMember.email.trim().toLowerCase()
       : `${resolvedStaffId.toLowerCase()}@nsuhrecords.internal`;
 
+    const fullName = staffMember.name || staffMember.full_name || staffMember.teacher_name || "";
+    const resolvedSchoolId = staffMember.school_id || school_id || null;
+
     // 5. Provision User in Supabase Auth
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email: targetEmail,
@@ -74,8 +76,8 @@ export async function POST(req) {
         data: {
           role: assignedRole,
           staff_id: resolvedStaffId,
-          school_id: staffMember.school_id || school_id || null,
-          full_name: staffMember.name || staffMember.full_name || staffMember.teacher_name || "",
+          school_id: resolvedSchoolId,
+          full_name: fullName,
         },
       },
     });
@@ -84,14 +86,39 @@ export async function POST(req) {
       return NextResponse.json({ error: authError.message }, { status: 400 });
     }
 
-    // 6. Update staff table record to active status and bind user_id
+    const userId = authData.user?.id;
+
+    // 6. Save directly into public.users table
+    if (userId) {
+      const { error: userInsertError } = await supabase
+        .from("users")
+        .upsert(
+        {
+            id: userId,
+            email: targetEmail,
+            staff_id: resolvedStaffId,
+            role: assignedRole,
+            school_id: resolvedSchoolId,
+            academic_year: staffMember.academic_year || null,
+            full_name: fullName,
+            is_active: true,
+            created_at: new Date().toISOString(),
+          },
+          { onConflict: "id" }
+        );
+
+      if (userInsertError) {
+        console.error("Failed to insert into public.users:", userInsertError.message);
+      }
+    }
+
+    // 7. Update staff table record to active status and bind user_id
     const { error: updateError } = await supabase
       .from(targetTable)
-      .update({
-        status: "active",
-        is_active: true,
-        user_id: authData.user?.id,
-      })
+     .update({
+          is_active: true,
+          user_id: userId,
+        })
       .eq("id", staffMember.id);
 
     if (updateError) {

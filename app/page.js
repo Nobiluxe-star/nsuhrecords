@@ -15,7 +15,7 @@ export default function LandingPage() {
   const [errorMessage, setErrorMessage] = useState('');
 
   // Authentication Modals State
-  const [activeModal, setActiveModal] = useState(null); // 'master' | 'staff' | 'forgot_password' | null
+  const [activeModal, setActiveModal] = useState(null); // 'staff' | 'forgot_password' | null
   const [selectedRole, setSelectedRole] = useState('');
   const [rolePath, setRolePath] = useState('');
 
@@ -24,11 +24,6 @@ export default function LandingPage() {
   const [staffPassword, setStaffPassword] = useState('');
   const [resetEmailOrId, setResetEmailOrId] = useState('');
   const [resetStatusMessage, setResetStatusMessage] = useState('');
-
-  // Master Developer Credentials
-  const [developerEmail, setDeveloperEmail] = useState('');
-  const [developerPassword, setDeveloperPassword] = useState('');
-  const [masterError, setMasterError] = useState('');
 
   // Dynamic Assigned Schools (Fetched from Master Admin / Supabase assignments)
   const [assignedSchools, setAssignedSchools] = useState([]);
@@ -51,11 +46,11 @@ export default function LandingPage() {
   // Handlers
   const handleStudentLogin = async (e) => {
     e.preventDefault();
-const selectedSchoolData = assignedSchools.find(s => (s.school_id || s.id) === selectedSchool);
-  if (selectedSchoolData && selectedSchoolData.status === 'Restricted') {
-    setErrorMessage('Your school has been restricted. Please contact your school administrator for more details.');
-    return;
-  }
+    const selectedSchoolData = assignedSchools.find(s => (s.school_id || s.id) === selectedSchool);
+    if (selectedSchoolData && selectedSchoolData.status === 'Restricted') {
+      setErrorMessage('Your school has been restricted. Please contact your school administrator for more details.');
+      return;
+    }
     if (!selectedSchool || !studentId) {
       setErrorMessage('Please select a school and enter your Student Unique ID.');
       return;
@@ -70,37 +65,37 @@ const selectedSchoolData = assignedSchools.find(s => (s.school_id || s.id) === s
     }
 
     setErrorMessage('');
-// Strict Tenant Isolation: Ensure the unique_code exists and belongs directly to the selected school_id
-  const tableName = isTechnical ? 'technical_education_students' : 'general_education_students';
+    // Strict Tenant Isolation: Ensure the unique_code exists and belongs directly to the selected school_id
+    const tableName = isTechnical ? 'technical_education_students' : 'general_education_students';
 
-  const { data: matchedStudent, error } = await supabase
-    .from(tableName)
-    .select('id, school_id, unique_code')
-    .eq('unique_code', studentId.trim())
-    .eq('school_id', selectedSchool)
-    .maybeSingle();
+    const { data: matchedStudent, error } = await supabase
+      .from(tableName)
+      .select('id, school_id, unique_code')
+      .eq('unique_code', studentId.trim())
+      .eq('school_id', selectedSchool)
+      .maybeSingle();
 
-  if (error || !matchedStudent) {
-    setErrorMessage('Authentication Failed: Student ID not found for the selected school.');
-    return;
-  }
+    if (error || !matchedStudent) {
+      setErrorMessage('Authentication Failed: Student ID not found for the selected school.');
+      return;
+    }
     // 1. Bind active school context for multi-tenant isolation
     localStorage.setItem('active_school_id', selectedSchool);
     localStorage.setItem('student_unique_id', studentId.trim());
-// Store the verified student primary key ID
-localStorage.setItem('student_row_id', matchedStudent.id);
+    // Store the verified student primary key ID
+    localStorage.setItem('student_row_id', matchedStudent.id);
 
-// Set active school session context in PostgreSQL
-await supabase.rpc('set_active_school', { school_id: selectedSchool });
+    // Set active school session context in PostgreSQL
+    await supabase.rpc('set_active_school', { school_id: selectedSchool });
 
-// 2. Redirect to Student Dashboard with student ID, unique code, and school parameters
-const targetSchool = assignedSchools.find(s => (s.school_id || s.id) === selectedSchool);
-const schoolName = targetSchool ? (targetSchool.name || targetSchool.institution_name) : '';
+    // 2. Redirect to Student Dashboard with student ID, unique code, and school parameters
+    const targetSchool = assignedSchools.find(s => (s.school_id || s.id) === selectedSchool);
+    const schoolName = targetSchool ? (targetSchool.name || targetSchool.institution_name) : '';
 
-window.location.href = `/student-dashboard?id=${encodeURIComponent(studentId.trim())}&row_id=${encodeURIComponent(matchedStudent.id)}&school_name=${encodeURIComponent(schoolName)}&school_id=${encodeURIComponent(selectedSchool)}`;   
+    window.location.href = `/student-dashboard?id=${encodeURIComponent(studentId.trim())}&row_id=${encodeURIComponent(matchedStudent.id)}&school_name=${encodeURIComponent(schoolName)}&school_id=${encodeURIComponent(selectedSchool)}`;   
   };
 
- const handleStaffLogin = async (e) => {
+  const handleStaffLogin = async (e) => {
     e.preventDefault();
 
     if (!staffId || !staffPassword) {
@@ -112,7 +107,7 @@ window.location.href = `/student-dashboard?id=${encodeURIComponent(studentId.tri
     const inputPassword = staffPassword.trim();
     const isEmail = inputIdentifier.includes('@');
 
-   // 1. TEACHER LOGIN
+    // 1. TEACHER LOGIN
     if (selectedRole === 'Teacher') {
       let targetEmail = inputIdentifier.toLowerCase();
       let teacherData = null;
@@ -168,7 +163,7 @@ window.location.href = `/student-dashboard?id=${encodeURIComponent(studentId.tri
       return;
     }
 
-   // 2. OTHER SCHOOL STAFF (Bursar, Supervisor, Discipline Master, Principal, etc.)
+    // 2. OTHER SCHOOL STAFF (Bursar, Supervisor, Discipline Master, Principal, etc.)
     if (selectedRole !== 'Administrator') {
       let staffQuery = supabase.from('school_personnel').select('*');
 
@@ -227,6 +222,11 @@ window.location.href = `/student-dashboard?id=${encodeURIComponent(studentId.tri
         await supabase.rpc('set_active_school', { school_id: personnel.school_id });
       }
 
+      // SAFEGUARD OVERRIDE FOR BURSAR
+      if (personnel?.role && personnel.role.toLowerCase().trim() === 'bursar') {
+        window.location.href = '/bursar-dashboard';
+        return;
+      }
       window.location.href = rolePath;
       return;
     }
@@ -264,21 +264,6 @@ window.location.href = `/student-dashboard?id=${encodeURIComponent(studentId.tri
     await supabase.rpc('set_active_school', { school_id: school.school_id });
 
     window.location.href = rolePath;
-  };
-
-  // Hardcoded Master Developer Authentication Check
-  const handleMasterDevLogin = (e) => {
-    e.preventDefault();
-    setMasterError('');
-
-    if (
-      developerEmail.trim().toLowerCase() === 'newlife8525@gmail.com' &&
-      developerPassword === '2026$NCmillions?'
-    ) {
-      window.location.href = '/master-admin';
-    } else {
-      setMasterError('Unauthorized access attempt. Invalid Master Developer credentials.');
-    }
   };
 
   // Supabase Password Reset Handler
@@ -328,19 +313,6 @@ window.location.href = `/student-dashboard?id=${encodeURIComponent(studentId.tri
             <p className="text-xs text-slate-400">Academic Year 2026 - 2027</p>
           </div>
         </div>
-        
-        {/* Master Developer Access Trigger */}
-        <button
-          onClick={() => {
-            setMasterError('');
-            setDeveloperEmail('');
-            setDeveloperPassword('');
-            setActiveModal('master');
-          }}
-          className="text-xs font-semibold px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition border border-slate-700 hover:border-blue-500/50"
-        >
-          Master Developer Link
-        </button>
       </header>
 
       {/* Hero Content Area */}
@@ -386,7 +358,7 @@ window.location.href = `/student-dashboard?id=${encodeURIComponent(studentId.tri
               >
                 <option value="">{assignedSchools.length === 0 ? '-- No schools assigned yet --' : '-- Choose your school --'}</option>
                 {assignedSchools.map((school) => (
-                 <option key={school.school_id || school.name} value={school.school_id}>
+                  <option key={school.school_id || school.name} value={school.school_id}>
                     {school.name}
                   </option>
                 ))}
@@ -492,15 +464,15 @@ window.location.href = `/student-dashboard?id=${encodeURIComponent(studentId.tri
             <form onSubmit={handleStaffLogin} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Email or Unique {selectedRole} ID / Code</label>
-               <input
-  type="text"
-  placeholder="e.g. staff@school.cm or STF-2026-089"
-  value={staffId}
-  onChange={(e) => setStaffId(e.target.value)}
-  autoComplete="off"
-  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white"
-  required
-/>
+                <input
+                  type="text"
+                  placeholder="e.g. staff@school.cm or STF-2026-089"
+                  value={staffId}
+                  onChange={(e) => setStaffId(e.target.value)}
+                  autoComplete="off"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white"
+                  required
+                />
               </div>
 
               <div>
@@ -512,70 +484,17 @@ window.location.href = `/student-dashboard?id=${encodeURIComponent(studentId.tri
                 </div>
                 <input
                   type="password"
-  placeholder="Enter password"
-  value={staffPassword}
-  onChange={(e) => setStaffPassword(e.target.value)}
-  autoComplete="new-password"
-  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white"
-  required
-/>
+                  placeholder="Enter password"
+                  value={staffPassword}
+                  onChange={(e) => setStaffPassword(e.target.value)}
+                  autoComplete="new-password"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white"
+                  required
+                />
               </div>
 
               <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-xs transition shadow-lg shadow-blue-600/30">
                 Login to {selectedRole} Portal
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MASTER DEVELOPER AUTHENTICATION MODAL */}
-      {activeModal === 'master' && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-amber-500/30 rounded-3xl p-6 sm:p-8 max-w-md w-full space-y-6 shadow-2xl relative">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-4">
-              <div>
-                <span className="text-[10px] font-black uppercase tracking-widest text-amber-400 bg-amber-950/80 px-2 py-0.5 rounded border border-amber-800/50">
-                  Restricted Access
-                </span>
-                <h3 className="text-lg font-bold text-white mt-1">Master Developer Portal</h3>
-              </div>
-              <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-white text-lg font-bold">✕</button>
-            </div>
-
-            <form onSubmit={handleMasterDevLogin} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Developer Email</label>
-                <input
-                  type="email"
-                  placeholder="Enter developer email"
-                  value={developerEmail}
-                  onChange={(e) => setDeveloperEmail(e.target.value)}
-                  autoComplete="off"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Master Password</label>
-                <input
-                  type="password"
-                  placeholder="••••••••••••"
-                  value={developerPassword}
-                  onChange={(e) => setDeveloperPassword(e.target.value)}
-                  autoComplete="new-password"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
-                  required
-                />
-              </div>
-
-              {masterError && (
-                <p className="text-xs text-red-400 font-medium">{masterError}</p>
-              )}
-
-              <button type="submit" className="w-full bg-amber-600 hover:bg-amber-500 text-white font-bold py-3 rounded-xl text-xs transition shadow-lg shadow-amber-600/20">
-                Authenticate & Access Master Dashboard
               </button>
             </form>
           </div>

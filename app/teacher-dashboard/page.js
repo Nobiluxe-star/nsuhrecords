@@ -1,7 +1,63 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
+// Calculates academic year based on September 1st rollover rule
+function getCalculatedAcademicYear() {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth(); // 0 = Jan, 8 = Sept
+
+  if (currentMonth >= 8) {
+    return `${currentYear}/${currentYear + 1}`;
+  } else {
+    return `${currentYear - 1}/${currentYear}`;
+  }
+}
+const FORMULA_LIBRARY = {
+  math: [
+    { label: 'Fraction', symbol: '$$\\frac{a}{b}$$' },
+    { label: 'Square Root', symbol: '$$\\sqrt{x}$$' },
+    { label: 'Exponent', symbol: '$$x^n$$' },
+    { label: 'Subscript', symbol: '$$x_i$$' },
+    { label: 'Integral', symbol: '$$\\int_{a}^{b} x \\, dx$$' },
+    { label: 'Summation', symbol: '$$\\sum_{i=1}^{n} x_i$$' },
+    { label: 'Quadratic', symbol: '$$x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$$' },
+    { label: 'Pi / Theta', symbol: '$$\\pi, \\theta, \\alpha, \\beta$$' }
+  ],
+  physics: [
+    { label: 'Newton 2nd Law', symbol: '$$F = m \\cdot a$$' },
+    { label: 'Kinematics', symbol: '$$v = u + at$$' },
+    { label: 'Work / Energy', symbol: '$$W = F \\cdot d \\cdot \\cos(\\theta)$$' },
+    { label: 'Kinetic Energy', symbol: '$$E_k = \\frac{1}{2} m v^2$$' },
+    { label: 'Ohm\'s Law', symbol: '$$V = I \\cdot R$$' },
+    { label: 'Power', symbol: '$$P = I^2 \\cdot R = \\frac{V^2}{R}$$' }
+  ],
+  chemistry: [
+    { label: 'Reaction Arrow', symbol: '$$\\rightarrow$$' },
+    { label: 'Equilibrium', symbol: '$$\\rightleftharpoons$$' },
+    { label: 'Concentration', symbol: '$$C = \\frac{n}{V}$$' },
+    { label: 'Ideal Gas', symbol: '$$P V = n R T$$' },
+    { label: 'pH Formula', symbol: '$$\\text{pH} = -\\log[H^+]$$' }
+  ],
+  electrical: [
+    { label: 'AC Impedance', symbol: '$$Z = \\sqrt{R^2 + (X_L - X_C)^2}$$' },
+    { label: 'Transformer Ratio', symbol: '$$\\frac{V_p}{V_s} = \\frac{N_p}{N_s} = \\frac{I_s}{I_p}$$' },
+    { label: 'Apparent Power', symbol: '$$S = V \\cdot I \\quad \\text{(VA)}$$' },
+    { label: 'Frequency', symbol: '$$f = \\frac{1}{2\\pi \\sqrt{L C}}$$' }
+  ],
+  mechanical: [
+    { label: 'Torque', symbol: '$$\\tau = r \\cdot F \\cdot \\sin(\\theta)$$' },
+    { label: 'Stress (Sigma)', symbol: '$$\\sigma = \\frac{F}{A}$$' },
+    { label: 'Strain (Epsilon)', symbol: '$$\\epsilon = \\frac{\\Delta L}{L_0}$$' },
+    { label: 'Gear Ratio', symbol: '$$i = \\frac{Z_2}{Z_1} = \\frac{N_1}{N_2}$$' }
+  ],
+  building_construction: [
+    { label: 'Bending Moment', symbol: '$$M_{max} = \\frac{w \\cdot L^2}{8}$$' },
+    { label: 'Concrete Mix Ratio', symbol: '$$1 : 2 : 4 \\quad \\text{(Cement : Sand : Aggregate)}$$' },
+    { label: 'Slenderness Ratio', symbol: '$$\\lambda = \\frac{L_{eff}}{r}$$' }
+  ]
+};
 export default function TeacherDashboardPage() {
   const [activeTab, setActiveTab] = useState('overview');
   const [navigationHistory, setNavigationHistory] = useState(['overview']);
@@ -14,6 +70,100 @@ const [selectedClassLog, setSelectedClassLog] = useState(/** @type {any} */ (nul
     author: "Nelson Mandela"
   });
 
+ // 1. ALL HOOKS & REFS MUST BE AT THE TOP
+  const canvasRef = useRef(null);
+  const [isMounted, setIsMounted] = useState(false);
+  const [savedLocalDocs, setSavedLocalDocs] = useState([]);
+  const [showCanvas, setShowCanvas] = useState(false);
+  const [isSyncingToSupabase, setIsSyncingToSupabase] = useState(false);
+  const [lastSavedTime, setLastSavedTime] = useState('');
+  const [isDrawing, setIsDrawing] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  // 2. HANDLER FUNCTIONS
+  const saveCanvasDrawing = () => {
+    if (!canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const dataUrl = canvas.toDataURL('image/png');
+    
+    // Convert drawing into markdown image tag and append to document content
+    setDocContent((prev) => prev + `\n\n![Canvas Diagram](${dataUrl})\n\n`);
+    alert("Drawing attached successfully to your document draft!");
+  };
+
+  const clearCanvas = () => {
+    if (!canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  };
+const startDrawing = (e) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const rect = canvas.getBoundingClientRect();
+    ctx.beginPath();
+    ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
+    setIsDrawing(true);
+  };
+
+  const draw = (e) => {
+    if (!isDrawing) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const rect = canvas.getBoundingClientRect();
+    ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+    ctx.stroke();
+  };
+
+  const stopDrawing = () => {
+    setIsDrawing(false);
+  };
+  const syncDraftToSupabase = async () => {
+    if (!docTitle.trim() || !docContent.trim()) {
+      alert("Please enter a title and document content before syncing.");
+      return;
+    }
+
+    setIsSyncingToSupabase(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("User not authenticated");
+
+      const documentPayload = {
+        school_id: teacherProfile?.school_id || 'DEFAULT_SCHOOL',
+        teacher_id: user.id,
+        academic_year: currentAcademicYear,
+        title: docTitle,
+        doc_type: selectedDocType,
+        subject: selectedSubjectForAction,
+        classLevel: selectedClassForAction,
+        section: selectedSection,
+        content: docContent,
+        drawing_data: canvasRef.current ? canvasRef.current.toDataURL() : null,
+        updated_at: new Date().toISOString()
+      };
+
+      const { error } = await supabase
+        .from('teacher_documents')
+        .upsert([documentPayload]);
+
+      if (error) throw error;
+
+      setLastSavedTime(`Synced: ${new Date().toLocaleTimeString()}`);
+      alert(`Document successfully synced for Academic Year ${currentAcademicYear}!`);
+    } catch (err) {
+      console.error("Cloud Sync Error:", err);
+      alert(`Sync failed: ${err.message}`);
+    } finally {
+      setIsSyncingToSupabase(false);
+    }
+  };
+
   const quotesList = [
     { quote: "Education is the most powerful weapon which you can use to change the world.", author: "Nelson Mandela" },
     { quote: "The art of teaching is the art of assisting discovery.", author: "Mark Van Doren" },
@@ -24,6 +174,9 @@ const [selectedClassLog, setSelectedClassLog] = useState(/** @type {any} */ (nul
   // Dynamically assigned Teacher Profile with real-world assignment data (reset/empty states for new assignments)
  const [schoolName, setSchoolName] = useState('Loading School...');
  const [selectedTerm, setSelectedTerm] = useState('Term 1');
+  const [selectedClassForAction, setSelectedClassForAction] = useState('');
+  const [selectedSubjectForAction, setSelectedSubjectForAction] = useState('');
+  const [selectedSection, setSelectedSection] = useState('General');
 const [teacherProfile, setTeacherProfile] = useState({
   school_id: '',
   id: '',
@@ -35,11 +188,232 @@ const [teacherProfile, setTeacherProfile] = useState({
   subjects: [],
   schedules: {}
 });
+const [assignedClassesForSubject, setAssignedClassesForSubject] = useState([]);
 const [lessonText, setLessonText] = useState('');
   const [isSavingLog, setIsSavingLog] = useState(false);
 const [logsList, setLogsList] = useState([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
 const [isMarksLocked, setIsMarksLocked] = useState(false);
+// Lesson Notes & Test Bank Workspace State
+  const [notesAndTests, setNotesAndTests] = useState([]);
+  const [selectedDocType, setSelectedDocType] = useState('note'); // 'note' or 'test'
+  const [activeDocIndex, setActiveDocIndex] = useState(0);
+  const [docTitle, setDocTitle] = useState('');
+  const [docContent, setDocContent] = useState('');
+  const [selectedFormulaCategory, setSelectedFormulaCategory] = useState('math');
+  // Canvas, Drawing & Subject-Specific State
+  const [activeDrawingTool, setActiveDrawingTool] = useState('select');
+  const [frenchAccentMode, setFrenchAccentMode] = useState(false);
+  const [canvasShapes, setCanvasShapes] = useState([]);
+  const [selectedShapeId, setSelectedShapeId] = useState(null);
+
+  // Helper to insert formula symbols or accents into text
+  const insertSymbolIntoContent = (symbol) => {
+    setDocContent((prev) => prev + ' ' + symbol);
+  };
+
+  // Helper to add interactive shapes/diagrams with customizable labels
+  const addShapeToCanvas = (type) => {
+    const newShape = {
+      id: Date.now(),
+      type, // 'rectangle', 'circle', 'dimension_line', 'angle_arc', 'gear'
+      x: 50,
+      y: 50,
+      width: 120,
+      height: 80,
+      label: type === 'rectangle' ? 'L = 10m' : 'Label',
+      labelPosition: 'right', // 'top', 'bottom', 'left', 'right', 'inside'
+    };
+    setCanvasShapes((prev) => [...prev, newShape]);
+    // Offline Local Draft & Supabase Sync Handlers
+  const [isSavingLocal, setIsSavingLocal] = useState(false);
+  const [lastSavedTime, setLastSavedTime] = useState(null);
+  const [isSyncingToSupabase, setIsSyncingToSupabase] = useState(false);
+
+  // Save current work to browser storage instantly (works offline)
+  const saveDraftLocally = () => {
+    setIsSavingLocal(true);
+    const draftData = {
+      docTitle,
+      docContent,
+      selectedDocType,
+      canvasShapes,
+      updatedAt: new Date().toISOString(),
+    };
+    localStorage.setItem('nsuhrecords_lesson_draft', JSON.stringify(draftData));
+    setLastSavedTime(new Date().toLocaleTimeString());
+    setTimeout(() => setIsSavingLocal(false), 400);
+  };
+
+  // Sync draft from local cache to Supabase database
+  const syncDraftToSupabase = async () => {
+    setIsSyncingToSupabase(true);
+    try {
+      const localData = localStorage.getItem('nsuhrecords_lesson_draft');
+      const payload = localData ? JSON.parse(localData) : {
+        docTitle,
+        docContent,
+        selectedDocType,
+        canvasShapes,
+      };
+
+      // Push to Supabase 'lesson_notes_tests' table
+      const { error } = await supabase.from('lesson_notes_tests').upsert([
+        {
+          teacher_id: teacherProfile?.id,
+          subject: selectedSubjectForAction,
+          class_name: selectedClassForAction,
+          doc_type: payload.selectedDocType,
+          title: payload.docTitle,
+          content: payload.docContent,
+          canvas_data: payload.canvasShapes,
+          updated_at: new Date().toISOString(),
+        }
+      ]);
+
+      if (!error) {
+        setLastSavedTime(new Date().toLocaleTimeString() + ' (Synced)');
+      }
+    } catch (err) {
+      console.error('Supabase Sync Error:', err);
+    } finally {
+      setIsSyncingToSupabase(false);
+    }
+  };
+  };
+  // Helper: auto-detect tools (formulas, shapes, french accents) based on active subject
+  const getSubjectToolConfig = (subjectName) => {
+    const sub = (subjectName || '').toLowerCase();
+    if (sub.includes('math')) return { category: 'math', showCanvas: true, showAccents: false };
+    if (sub.includes('phys') || sub.includes('elect')) return { category: 'physics', showCanvas: true, showAccents: false };
+    if (sub.includes('chem')) return { category: 'chemistry', showCanvas: true, showAccents: false };
+    if (sub.includes('mech') || sub.includes('build') || sub.includes('draw')) return { category: 'mechanical', showCanvas: true, showAccents: false };
+    if (sub.includes('french') || sub.includes('français')) return { category: 'none', showCanvas: false, showAccents: true };
+    return { category: 'math', showCanvas: true, showAccents: true };
+  };
+  // Save document directly to phone/device local document list
+  const saveDocumentToDevice = () => {
+    if (!docTitle.trim()) {
+      alert('Please enter a document title before saving.');
+      return;
+    }
+    const newDoc = {
+      id: 'doc_' + Date.now(),
+      title: docTitle,
+      content: docContent,
+      type: selectedDocType,
+      shapes: canvasShapes,
+      savedAt: new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString(),
+    };
+
+    const existingDocs = JSON.parse(localStorage.getItem('nsuhrecords_saved_docs') || '[]');
+    const updatedDocs = [newDoc, ...existingDocs.filter(d => d.id !== newDoc.id)];
+    
+    localStorage.setItem('nsuhrecords_saved_docs', JSON.stringify(updatedDocs));
+    setNotesAndTests(updatedDocs);
+    setLastSavedTime('Saved to phone at ' + new Date().toLocaleTimeString());
+  };
+
+  // Open a saved offline document into the editor
+  const openLocalDocument = (doc) => {
+    setDocTitle(doc.title || '');
+    setDocContent(doc.content || '');
+    setSelectedDocType(doc.type || 'note');
+    setCanvasShapes(doc.shapes || []);
+  };
+  // Export document as Microsoft Word compatible file (.doc)
+  const exportToWord = () => {
+    if (!docTitle.trim() && !docContent.trim()) {
+      alert('Document is empty. Please add a title or content before exporting.');
+      return;
+    }
+
+    const fileName = (docTitle || 'Lesson_Note').replace(/[^a-z0-9]/gi, '_').toLowerCase() + '.doc';
+    
+    const htmlContent = `
+      <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+      <head>
+        <meta charset='utf-8'>
+        <title>${docTitle || 'Lesson Note'}</title>
+        <style>
+          body { font-family: 'Calibri', 'Segoe UI', sans-serif; margin: 1in; font-size: 12pt; line-height: 1.5; color: #1a1a1a; }
+          h1 { color: #1b4332; border-bottom: 2px solid #1b4332; padding-bottom: 5px; font-size: 18pt; }
+          .meta-info { font-style: italic; color: #555; margin-bottom: 20px; }
+          .shape-box { border: 1px dashed #666; padding: 10px; margin: 15px 0; background-color: #f9f9f9; }
+        </style>
+      </head>
+      <body>
+        <h1>${docTitle || 'Untitled Document'}</h1>
+        <div class="meta-info">
+          <p><strong>Type:</strong> ${selectedDocType === 'note' ? 'Lesson Note' : 'Test Paper / Exam'}</p>
+          <p><strong>Subject:</strong> ${selectedSubjectForAction || 'General'} | <strong>Class:</strong> ${selectedClassForAction || 'N/A'}</p>
+          <p><strong>Generated:</strong> ${new Date().toLocaleDateString()}</p>
+        </div>
+        <hr/>
+        <div class="content">
+          ${docContent.replace(/\n/g, '<br/>')}
+        </div>
+        ${canvasShapes.length > 0 ? `
+          <div class="shape-box">
+            <h3>Diagrams & Shape Labels Included (${canvasShapes.length})</h3>
+            <ul>
+              ${canvasShapes.map(s => `<li><strong>${s.type.toUpperCase()}:</strong> ${s.label || 'No label'} (Position: X:${s.x}, Y:${s.y})</li>`).join('')}
+            </ul>
+          </div>
+        ` : ''}
+      </body>
+      </html>
+    `;
+
+    const blob = new Blob(['\ufeff' + htmlContent], { type: 'application/msword' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // Export as Plain Text File (.txt)
+  const exportToText = () => {
+    const fileName = (docTitle || 'Document').replace(/[^a-z0-9]/gi, '_').toLowerCase() + '.txt';
+    const textContent = `TITLE: ${docTitle}\nTYPE: ${selectedDocType}\nSUBJECT: ${selectedSubjectForAction}\nDATE: ${new Date().toLocaleDateString()}\n\n${docContent}`;
+    
+    const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // Trigger Native Print / PDF Save Dialog
+  const triggerPrintPDF = () => {
+    window.print();
+  };
+useEffect(() => {
+  if (!selectedSubjectForAction || !teacherProfile?.schedules) {
+    setAssignedClassesForSubject([]);
+    return;
+  }
+
+  const slots = teacherProfile.schedules[selectedSubjectForAction] || [];
+  if (Array.isArray(slots)) {
+    const uniqueClasses = [...new Set(slots.map((s) => s.className).filter(Boolean))];
+    setAssignedClassesForSubject(uniqueClasses);
+
+    if (uniqueClasses.length > 0) {
+      setSelectedClassForAction(uniqueClasses[0]);
+    } else {
+      setSelectedClassForAction('');
+    }
+  }
+}, [selectedSubjectForAction, teacherProfile?.schedules]);
   useEffect(() => {
     if (!selectedClassLog || !teacherProfile?.school_id) return;
 
@@ -65,6 +439,7 @@ const [isMarksLocked, setIsMarksLocked] = useState(false);
 
     fetchClassLogs();
   }, [selectedClassLog, teacherProfile?.school_id]);
+
   const handleSaveLessonLog = async () => {
     if (!lessonText.trim() || !selectedClassLog) {
       alert('Please enter lesson remarks before saving.');
@@ -136,9 +511,7 @@ useEffect(() => {
   }, [teacherProfile?.school_id]);
   // Attendance & Marks State
   
-  const [selectedClassForAction, setSelectedClassForAction] = useState('');
-  const [selectedSubjectForAction, setSelectedSubjectForAction] = useState('');
-const [selectedSection, setSelectedSection] = useState('General');
+  // Attendance & Marks State
   // Clean student list initialized for the assigned class with zero/empty initial marks
   const [classStudents, setClassStudents] = useState([]);
 
@@ -168,6 +541,11 @@ const [selectedSection, setSelectedSection] = useState('General');
       }
     }
   }, [teacherProfile]);
+  const getActiveSeqKeys = (term) => {
+  if (term === 'Term 2') return { key1: 'seq3_mark', key2: 'seq4_mark', label1: 'SEQ 3', label2: 'SEQ 4' };
+  if (term === 'Term 3') return { key1: 'seq5_mark', key2: 'seq6_mark', label1: 'SEQ 5', label2: 'SEQ 6' };
+  return { key1: 'seq1_mark', key2: 'seq2_mark', label1: 'SEQ 1', label2: 'SEQ 2' };
+};
   // Fetch students filtered by active school and selected class
   const fetchStudents = async () => {
     const activeSchoolId = localStorage.getItem('active_school_id') || teacherProfile?.school_id;
@@ -179,11 +557,12 @@ const [selectedSection, setSelectedSection] = useState('General');
 
     const { data, error } = await supabase
       .from('students')
-      .select('id, full_name, gender, roll_number, class_name, school_id')
-      .eq('school_id', activeSchoolId)
-      .eq('class_name', selectedClassForAction);
+      .select('*')
+.eq('school_id', activeSchoolId)
+.eq('classLevel', selectedClassForAction);
 
     if (data && !error) {
+     
       setClassStudents(data);
     } else {
       setClassStudents([]);
@@ -192,7 +571,7 @@ const [selectedSection, setSelectedSection] = useState('General');
 
   useEffect(() => {
     fetchStudents();
-  }, [selectedClassForAction, teacherProfile?.school_id]);
+  }, [selectedClassForAction, selectedTerm, selectedSubjectForAction, teacherProfile?.school_id]);
   useEffect(() => {
     setCurrentTime(new Date());
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -264,30 +643,32 @@ const [selectedSection, setSelectedSection] = useState('General');
 
       const { data, error } = await supabase
         .from('marks')
-        .select('student_id, seq1_mark, seq2_mark, seq3_mark, seq4_mark, seq5_mark, seq6_mark, edit_count')
+        // Replace line 294 with this updated select statement:
+.select('student_id, seq1_mark, seq2_mark, seq3_mark, seq4_mark, seq5_mark, seq6_mark, seq1_edit_count, seq2_edit_count, seq3_edit_count, seq4_edit_count, seq5_edit_count, seq6_edit_count')
         .eq('school_id', activeSchoolId)
-        .eq('class_name', selectedClassForAction)
-        .eq('subject', selectedSubjectForAction)
+        .eq('classLevel', selectedClassForAction)
+        .eq('subject_name', selectedSubjectForAction)
         .eq('term', selectedTerm);
 
-      if (error) {
-        console.error('Error fetching existing marks:', error);
-        return;
-      }
+     if (error) {
+  console.error('Error fetching existing marks:', error.message || error.details || JSON.stringify(error));
+  return;
+}
 
-      if (data) {
-        const hasBeenEdited = data.some(item => (item.edit_count || 0) >= 1);
-setIsMarksLocked(hasBeenEdited);
+     if (data) {
+  const activeSeqKey = selectedTerm === 'Term 1' ? 'seq1_edit_count' : selectedTerm === 'Term 2' ? 'seq3_edit_count' : 'seq5_edit_count';
+  const hasBeenEdited = data.some(item => (item[activeSeqKey] || 0) >= 2);
+  setIsMarksLocked(hasBeenEdited);
         const loadedMarks = {};
         data.forEach(item => {
-          loadedMarks[item.student_id] = {
-            seq1: item.seq1_mark !== null ? item.seq1_mark : '',
-            seq2: item.seq2_mark !== null ? item.seq2_mark : '',
-            seq3: item.seq3_mark !== null ? item.seq3_mark : '',
-            seq4: item.seq4_mark !== null ? item.seq4_mark : '',
-            seq5: item.seq5_mark !== null ? item.seq5_mark : '',
-            seq6: item.seq6_mark !== null ? item.seq6_mark : ''
-          };
+         loadedMarks[item.student_id] = {
+  seq1_mark: item.seq1_mark !== null ? item.seq1_mark : '',
+  seq2_mark: item.seq2_mark !== null ? item.seq2_mark : '',
+  seq3_mark: item.seq3_mark !== null ? item.seq3_mark : '',
+  seq4_mark: item.seq4_mark !== null ? item.seq4_mark : '',
+  seq5_mark: item.seq5_mark !== null ? item.seq5_mark : '',
+  seq6_mark: item.seq6_mark !== null ? item.seq6_mark : ''
+};
         });
         setMarksRecords(loadedMarks);
       }
@@ -307,7 +688,7 @@ useEffect(() => {
       .eq('school_id', teacherProfile.school_id);
 
     if (error) {
-      console.error('Error fetching tenant students:', error);
+      console.error('Error fetching tenant students:', error.message || error.details || JSON.stringify(error));
     } else if (data) {
       setClassStudents(data);
     }
@@ -317,6 +698,11 @@ useEffect(() => {
 
   fetchTenantStudents();
 }, [teacherProfile?.school_id]);
+
+if (!isMounted) {
+    return null;
+  }
+
 // Helper to get sequence labels based on selected term
   const getSequenceLabels = (term) => {
     switch (term) {
@@ -424,7 +810,16 @@ useEffect(() => {
 
   // 3. Prepare base subject key
   const rawSubName = (selectedSubjectForAction || '').toString().trim().toLowerCase();
+  const activeSeqKey = selectedTerm === 'Term 1' ? 'seq1_edit_count' : selectedTerm === 'Term 2' ? 'seq3_edit_count' : 'seq5_edit_count';
+  const isLocked = classStudents.some(student => {
+    const count = marksRecords[student.id]?.[activeSeqKey] || 0;
+    return count >= 2;
+  });
 
+  if (isLocked) {
+    alert(`You have already reached the maximum limit of 2 edits for this sequence.`);
+    return;
+  }
   const recordsToInsert = classStudents.map((student) => {
     const studentEntry = marksRecords[student.id] || {};
 
@@ -435,27 +830,27 @@ useEffect(() => {
                                 selectedSubjectForAction;
 
     // Parse individual sequence fields if present in UI state
-    const s1 = studentEntry.seq1 !== '' && studentEntry.seq1 !== undefined ? parseFloat(studentEntry.seq1) : null;
-    const s2 = studentEntry.seq2 !== '' && studentEntry.seq2 !== undefined ? parseFloat(studentEntry.seq2) : null;
-    const s3 = studentEntry.seq3 !== '' && studentEntry.seq3 !== undefined ? parseFloat(studentEntry.seq3) : null;
-    const s4 = studentEntry.seq4 !== '' && studentEntry.seq4 !== undefined ? parseFloat(studentEntry.seq4) : null;
-    const s5 = studentEntry.seq5 !== '' && studentEntry.seq5 !== undefined ? parseFloat(studentEntry.seq5) : null;
-    const s6 = studentEntry.seq6 !== '' && studentEntry.seq6 !== undefined ? parseFloat(studentEntry.seq6) : null;
-
+    const s1 = studentEntry.seq1_mark !== '' && studentEntry.seq1_mark !== undefined ? parseFloat(studentEntry.seq1_mark) : null;
+const s2 = studentEntry.seq2_mark !== '' && studentEntry.seq2_mark !== undefined ? parseFloat(studentEntry.seq2_mark) : null;
+const s3 = studentEntry.seq3_mark !== '' && studentEntry.seq3_mark !== undefined ? parseFloat(studentEntry.seq3_mark) : null;
+const s4 = studentEntry.seq4_mark !== '' && studentEntry.seq4_mark !== undefined ? parseFloat(studentEntry.seq4_mark) : null;
+const s5 = studentEntry.seq5_mark !== '' && studentEntry.seq5_mark !== undefined ? parseFloat(studentEntry.seq5_mark) : null;
+const s6 = studentEntry.seq6_mark !== '' && studentEntry.seq6_mark !== undefined ? parseFloat(studentEntry.seq6_mark) : null;
     const record = {
-      school_id: activeSchoolId,
-      teacher_id: teacherId,
-      student_id: student.id,
-      unique_code: student.unique_code,
-      section: student.section,
-      class_name: selectedClassForAction,
-      subject: resolvedSubjectName,
-      trades_series: student?.trades_series || student?.series || '',
-      coefficient: selectedSubjectCoeff || 1, // Attaches class specific coefficient
-      term: selectedTerm,
-      date_recorded: currentDateStr,
-      edit_count: 1
-    };
+  school_id: activeSchoolId,
+  teacher_id: teacherId,
+  student_id: student.id,
+  unique_code: student.unique_code || student.matricule || null,
+  classLevel: selectedClassForAction,
+  section: student.section || null,
+  subject_name: resolvedSubjectName,
+  subject: resolvedSubjectName,
+  trades_series: student?.trades_series || student?.series || '',
+  term: selectedTerm,
+  academic_year: activeSchool?.academic_year || teacherProfile?.academic_year || getAcademicYear(),
+  date_recorded: currentDateStr,
+  [activeSeqKey]: (existingMarksMap?.[student.id]?.[activeSeqKey] || 0) + 1
+};
 
     // Only attach non-null sequence values so existing DB sequence values are preserved on upsert
     if (s1 !== null) record.seq1_mark = s1;
@@ -554,6 +949,7 @@ useEffect(() => {
           { id: 'attendance', label: 'Mark Attendance' },
           { id: 'grades', label: 'Fill Student Marks' },
           { id: 'progression', label: 'Lesson Logs & Progression' },
+          { id: 'notes_tests', label: 'Lesson Notes & Test Bank' },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -677,6 +1073,251 @@ useEffect(() => {
             </div>
           </div>
         )}
+        {/* LESSON NOTES & TEST BANK TAB */}
+      {activeTab === 'notes_tests' && (
+        <div className="space-y-6">
+          {/* Action Toolbar: Local Device Save, Supabase Sync, and Exports */}
+          <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg bg-emerald-900 text-white shadow-md">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={saveDocumentToDevice}
+                className="px-3 py-1.5 text-xs font-semibold rounded bg-emerald-600 hover:bg-emerald-500 transition-colors shadow-sm"
+              >
+                💾 Save to Phone
+              </button>
+              <button
+                onClick={syncDraftToSupabase}
+                disabled={isSyncingToSupabase}
+                className="px-3 py-1.5 text-xs font-semibold rounded bg-amber-600 hover:bg-amber-500 transition-colors shadow-sm disabled:opacity-50"
+              >
+                {isSyncingToSupabase ? 'Syncing...' : '☁️ Sync to Cloud'}
+              </button>
+              {lastSavedTime && (
+                <span className="text-[11px] text-emerald-200 font-mono italic ml-2">
+                  {lastSavedTime}
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={exportToWord}
+                className="px-3 py-1.5 text-xs font-semibold rounded bg-blue-700 hover:bg-blue-600 transition-colors shadow-sm"
+              >
+                📄 Export .DOC
+              </button>
+              <button
+                onClick={exportToText}
+                className="px-3 py-1.5 text-xs font-semibold rounded bg-slate-700 hover:bg-slate-600 transition-colors shadow-sm"
+              >
+                📝 Export .TXT
+              </button>
+              <button
+                onClick={triggerPrintPDF}
+                className="px-3 py-1.5 text-xs font-semibold rounded bg-slate-800 hover:bg-slate-700 transition-colors shadow-sm"
+              >
+                🖨️ Print / PDF
+              </button>
+            </div>
+          </div>
+          {/* Document Header & Subject Selector */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 rounded-xl bg-slate-900 border border-slate-800 shadow-sm">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Document Type</label>
+              <select
+                value={selectedDocType}
+                onChange={(e) => setSelectedDocType(e.target.value)}
+                className="w-full bg-slate-800 text-white text-xs rounded-lg p-2.5 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              >
+                <option value="note">📚 Lesson Note / Coverage Plan</option>
+                <option value="test">📝 Test / Exam / Quiz Paper</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Subject</label>
+              <select
+                value={selectedSubjectForAction}
+                onChange={(e) => setSelectedSubjectForAction(e.target.value)}
+                className="w-full bg-slate-800 text-white text-xs rounded-lg p-2.5 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              >
+                {teacherProfile?.subjects?.map((sub) => (
+                  <option key={sub} value={sub}>{sub}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Assigned Class</label>
+              <select
+                value={selectedClassForAction}
+                onChange={(e) => setSelectedClassForAction(e.target.value)}
+                className="w-full bg-slate-800 text-white text-xs rounded-lg p-2.5 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              >
+                {assignedClassesForSubject?.map((cls) => (
+                  <option key={cls} value={cls}>{cls}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="md:col-span-3">
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Document Title / Topic</label>
+              <input
+                type="text"
+                placeholder="e.g. Chapter 3: Quadratic Equations & Applications..."
+                value={docTitle}
+                onChange={(e) => setDocTitle(e.target.value)}
+                className="w-full bg-slate-800 text-white text-sm rounded-lg p-2.5 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+          </div>
+          {/* Dynamic Subject Quick-Insert Tools (STEM Formulas & Accents) */}
+          {selectedSubjectForAction && (
+            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-amber-400">
+                  ⚡ {selectedSubjectForAction} Quick Tools
+                </span>
+                <span className="text-[10px] text-slate-400 italic">
+                  Click any item to insert directly into document content
+                </span>
+              </div>
+
+              {/* STEM Math & Physics Formulas */}
+              {['math', 'physics', 'chemistry', 'mechanical'].includes(getSubjectToolConfig(selectedSubjectForAction).category) && (
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {(getSubjectToolConfig(selectedSubjectForAction).category === 'math' ? [
+                    '√x', 'x²', 'xⁿ', '∫', '∑', 'π', 'θ', '±', '≠', '≤', '≥', '∞', 'f(x)', 'lim'
+                  ] : getSubjectToolConfig(selectedSubjectForAction).category === 'physics' ? [
+                    'F = ma', 'V = IR', 'E = mc²', 'v = u + at', 's = ut + ½at²', 'P = VI', 'λ', 'Ω', 'μ', 'ρ'
+                  ] : [
+                    'H₂O', 'CO₂', 'H₂SO₄', 'NaCl', 'O₂', 'N₂', 'pH', 'mol/L', 'ΔH', '⇌'
+                  ]).map((item, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setDocContent(prev => prev + ' ' + item)}
+                      className="px-2.5 py-1 text-xs font-mono font-medium rounded bg-slate-800 text-amber-300 hover:bg-slate-700 hover:text-white border border-slate-700 transition-colors"
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* French Special Character Accents */}
+              {getSubjectToolConfig(selectedSubjectForAction).showAccents && (
+                <div className="flex flex-wrap gap-1.5 pt-1 border-t border-slate-800">
+                  {['é', 'è', 'ê', 'ë', 'à', 'â', 'ù', 'û', 'î', 'ï', 'ô', 'ç', 'œ', '«', '»'].map((char, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setDocContent(prev => prev + char)}
+                      className="px-2.5 py-1 text-xs font-semibold rounded bg-slate-800 text-emerald-300 hover:bg-slate-700 hover:text-white border border-slate-700 transition-colors"
+                    >
+                      {char}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {/* Main A4 Document Text Editor Area */}
+          <div className="p-4 sm:p-6 rounded-xl bg-slate-900 border border-slate-800 space-y-4 shadow-inner">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+                ✍️ Document Editor Canvas
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowCanvas(!showCanvas)}
+                className="px-3 py-1.5 text-xs font-semibold rounded bg-indigo-700 hover:bg-indigo-600 text-white transition-colors shadow-sm flex items-center gap-1.5 active:scale-95"
+              >
+                🎨 {showCanvas ? 'Hide Canvas' : 'Attach Diagram'}
+              </button>
+            </div>
+
+            <textarea
+              rows={12}
+              value={docContent}
+              onChange={(e) => setDocContent(e.target.value)}
+              placeholder="Type lesson note body, questions, exam instructions, or pasted text here..."
+              className="w-full p-3 sm:p-4 text-xs sm:text-sm font-sans bg-slate-950 text-slate-100 rounded-lg border border-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/50 leading-relaxed resize-y min-h-[250px] sm:min-h-[350px]"
+            />
+          </div>
+          {/* Interactive Diagram Canvas Component */}
+          {showCanvas && (
+            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-indigo-400">
+                  🎨 Interactive Diagram / Canvas
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={clearCanvas}
+                    className="px-2.5 py-1 text-xs rounded bg-red-900/40 text-red-300 hover:bg-red-800/60 border border-red-800/50 transition-colors"
+                  >
+                    🗑️ Clear Canvas
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveCanvasDrawing}
+                    className="px-2.5 py-1 text-xs rounded bg-indigo-600 hover:bg-indigo-500 text-white font-semibold shadow-sm transition-colors"
+                  >
+                    💾 Attach Drawing
+                  </button>
+                </div>
+              </div>
+
+              <div className="border border-slate-700 rounded-lg bg-white overflow-hidden touch-none">
+                <canvas
+                  ref={canvasRef}
+                  width={600}
+                  height={250}
+                  onMouseDown={startDrawing}
+                  onMouseMove={draw}
+                  onMouseUp={stopDrawing}
+                  onMouseLeave={stopDrawing}
+                  onTouchStart={startDrawing}
+                  onTouchMove={draw}
+                  onTouchEnd={stopDrawing}
+                  className="w-full h-[200px] sm:h-[250px] cursor-crosshair block"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Local Saved Documents History */}
+          {savedLocalDocs.length > 0 && (
+            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                📁 Saved Local Drafts on Device ({savedLocalDocs.length})
+              </h4>
+              <div className="divide-y divide-slate-800 max-h-48 overflow-y-auto pr-1">
+                {savedLocalDocs.map((doc) => (
+                  <div key={doc.id} className="py-2.5 flex items-center justify-between gap-3 text-xs">
+                    <div className="truncate">
+                      <p className="font-semibold text-amber-400 truncate">{doc.title || 'Untitled Document'}</p>
+                      <p className="text-[10px] text-slate-400">
+                        {doc.subject} • {doc.className} • {doc.type === 'note' ? 'Lesson Note' : 'Test/Exam'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => loadLocalDocument(doc)}
+                      className="px-2.5 py-1 text-[11px] font-medium rounded bg-slate-800 text-slate-200 hover:bg-slate-700 hover:text-white border border-slate-700 transition-colors whitespace-nowrap active:scale-95"
+                    >
+                      📖 Open Draft
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
 {/* LESSON LOGS & PROGRESSION TAB */}
       {activeTab === 'progression' && (
         <div className="space-y-6">
@@ -869,8 +1510,8 @@ useEffect(() => {
                   onChange={(e) => setSelectedClassForAction(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm text-white"
                 >
-                  {teacherProfile?.classes && teacherProfile.classes.length > 0 ? (
-  teacherProfile.classes.map((cls, i) => (
+                 {assignedClassesForSubject && assignedClassesForSubject.length > 0 ? (
+  assignedClassesForSubject.map((cls, i) => (
     <option key={i} value={cls}>{cls}</option>
   ))
 ) : (
@@ -1000,13 +1641,13 @@ useEffect(() => {
                 onChange={(e) => setSelectedClassForAction(e.target.value)}
                 className="w-full bg-[#1f2937] border border-gray-700 rounded-lg p-3 text-sm text-white font-bold focus:outline-none focus:border-amber-400"
               >
-                {teacherProfile?.classes && teacherProfile.classes.length > 0 ? (
-                  teacherProfile.classes.map((cls, i) => (
-                    <option key={i} value={cls}>{cls}</option>
-                  ))
-                ) : (
-                  <option value="">No Classes Assigned</option>
-                )}
+                {assignedClassesForSubject && assignedClassesForSubject.length > 0 ? (
+  assignedClassesForSubject.map((cls, i) => (
+    <option key={i} value={cls}>{cls}</option>
+  ))
+) : (
+  <option value="">No Classes Assigned</option>
+)}
               </select>
             </div>
           </div>
@@ -1021,86 +1662,208 @@ useEffect(() => {
             </div>
           ) : (
             <>
-              {/* DESKTOP VIEW: Large, Computer-Friendly Table */}
-              <div className="hidden md:block overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                   <tr className="bg-[#fffdf0] text-gray-900 text-xs font-bold uppercase tracking-wider border-b border-amber-200">
-                    <th className="p-3.5">ID</th>
-                    <th className="p-3.5">Student Name</th>
-                    <th className="p-3.5 text-center">{getSequenceLabels(selectedTerm).seq1Label}</th>
-                    <th className="p-3.5 text-center">{getSequenceLabels(selectedTerm).seq2Label}</th>
-                    <th className="p-3.5 text-center">Term Avg</th>
-                    </tr>
-                  </thead>
-                 <tbody className="bg-[#fffdf0] text-gray-900 divide-y divide-amber-200 text-sm">
-            {classStudents.map((stu) => (
-              <tr key={stu.id} className="hover:bg-[#fef9e7] transition-colors">
-                <td className="p-3.5 text-gray-900 font-mono font-bold">{stu.id}</td>
-                <td className="p-3.5 text-gray-900 font-semibold">{stu.fullName || stu.name}</td>
-                <td className="p-2 text-center">
-                  <input
-                    type="number"
-                    min="0"
-                    max="20"
-                    step="0.5"
-                    placeholder={getSequenceLabels(selectedTerm).seq1Label}
-                    value={marksRecords[stu.id]?.seq1 ?? ''}
-onChange={(e) => handleMarkChange(stu.id, 'seq1', e.target.value)}
-                    className="w-20 bg-white border border-amber-300 rounded px-2 py-1 text-center font-bold text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                  />
-                </td>
-                <td className="p-2 text-center">
-                  <input
-                    type="number"
-                    min="0"
-                    max="20"
-                    step="0.5"
-                    placeholder={getSequenceLabels(selectedTerm).seq2Label}
-                    value={marksRecords[stu.id]?.seq2 ?? ''}
-onChange={(e) => handleMarkChange(stu.id, 'seq2', e.target.value)}
-                    className="w-20 bg-white border border-amber-300 rounded px-2 py-1 text-center font-bold text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                  />
-                </td>
-                <td className="p-3.5 text-center font-extrabold text-amber-900">
-                  -
-                </td>
-              </tr>
-            ))}
-          </tbody>
-                </table>
-              </div>
+              {/* Forest Green Header Table with Dynamic Sequence Mapping */}
+  {(() => {
+    const activeKeys = getActiveSeqKeys ? getActiveSeqKeys(selectedTerm) : {
+      key1: selectedTerm === 'Term 2' ? 'seq3' : selectedTerm === 'Term 3' ? 'seq5' : 'seq1',
+      key2: selectedTerm === 'Term 2' ? 'seq4' : selectedTerm === 'Term 3' ? 'seq6' : 'seq2',
+      label1: selectedTerm === 'Term 2' ? 'SEQ 3' : selectedTerm === 'Term 3' ? 'SEQ 5' : 'SEQ 1',
+      label2: selectedTerm === 'Term 2' ? 'SEQ 4' : selectedTerm === 'Term 3' ? 'SEQ 6' : 'SEQ 2',
+    };
+    const { key1, key2, label1, label2 } = activeKeys;
+const calculateSeqAverage = (seqKey) => {
+    const marks = classStudents
+      .map(s => parseFloat(marksRecords[s.id]?.[seqKey]))
+      .filter(m => !isNaN(m));
+    if (marks.length === 0) return '-';
+    const avg = marks.reduce((acc, curr) => acc + curr, 0) / marks.length;
+    return avg.toFixed(1);
+  };
 
-              {/* MOBILE VIEW: Large Touch-Friendly Cards */}
-              <div className="block md:hidden space-y-4">
-                {classStudents.map((stu) => (
-                  <div key={stu.id} className="bg-[#1a2234] p-4 rounded-lg border border-gray-700 space-y-3">
-                    <div className="flex justify-between items-center pb-2 border-b border-gray-700">
-                      <div>
-                        <p className="text-white font-bold text-sm">{stu.fullName || stu.name}</p>
-                        <p className="text-xs text-amber-400 font-mono">ID: {stu.id}</p>
-                      </div>
-                      <span className="px-2 py-0.5 text-[10px] font-semibold text-emerald-400 bg-emerald-950/50 rounded border border-emerald-800">
-                        Auto-Sent
+  const calculatePassPercentage = (seqKey) => {
+    const marks = classStudents
+      .map(s => parseFloat(marksRecords[s.id]?.[seqKey]))
+      .filter(m => !isNaN(m));
+    if (marks.length === 0) return '-';
+    const passed = marks.filter(m => m >= 10).length;
+    return ((passed / marks.length) * 100).toFixed(0);
+  };
+    return (
+      <div className="hidden md:block overflow-x-auto rounded-lg border border-[#0f5231] bg-[#0f5231] shadow-xl mt-4">
+        <table className="w-full text-left text-sm border-collapse">
+          <thead>
+            {/* Top Header Row */}
+            <tr className="bg-[#134e35] text-white">
+              <th rowSpan="2" className="p-3 border-r border-emerald-900/40 w-12 text-center font-bold align-middle">
+                N°
+              </th>
+              <th rowSpan="2" className="p-3 border-r border-emerald-900/40 font-bold align-middle">
+                Student Name
+              </th>
+              <th rowSpan="2" className="p-3 border-r border-emerald-900/40 font-bold text-center align-middle">
+                unique_code
+              </th>
+              <th colSpan="2" className="p-3 border-b border-emerald-900/40 text-center font-bold bg-[#134e35]">
+                <div className="text-base font-extrabold">{selectedSubjectForAction || 'Subject'}</div>
+              </th>
+            </tr>
+            {/* Sequence Sub-Header Row */}
+            <tr className="bg-[#134e35] text-white text-xs font-bold uppercase tracking-wider">
+              <th className="p-2 border-t border-r border-emerald-900/40 text-center w-28">{label1}</th>
+              <th className="p-2 border-t border-emerald-900/40 text-center w-28">{label2}</th>
+            </tr>
+          </thead>
+          {/* Table Body */}
+          <tbody className="divide-y divide-slate-200 bg-[#fefcf8] text-slate-900 font-sans">
+            {classStudents && classStudents.length > 0 ? (
+              classStudents.map((student, idx) => {
+                const studentMarks = marksRecords[student.id] || {};
+                return (
+                  <tr key={student.id || idx} className="hover:bg-amber-50/60 transition-colors">
+                    <td className="p-3 border-r border-slate-200 text-center font-bold text-slate-400">
+                      {idx + 1}
+                    </td>
+                    <td className="p-3 border-r border-slate-200 font-bold text-slate-900">
+                      {student.full_name || student.fullName || student.name}
+                    </td>
+                    <td className="p-3 border-r border-slate-200 text-center">
+                      <span className="px-2.5 py-1 rounded-md border border-slate-300 bg-white font-mono text-xs text-slate-700 shadow-sm">
+                        {student.unique_code || student.matricule || student.id || '-'}
                       </span>
-                    </div>
-
-                    <div className="pt-1">
-                      <label className="block text-[10px] text-gray-400 uppercase font-semibold mb-1">Score (/20)</label>
+                    </td>
+                    <td className="p-2 border-r border-slate-200 text-center">
                       <input
                         type="number"
-                        placeholder="0 (Reset)"
-                        max="20"
+                        step="0.25"
                         min="0"
-                        step="0.5"
-                        value={marksRecords[stu.id]?.seq1 ?? ''}
-onChange={(e) => handleMarkChange(stu.id, 'seq1', e.target.value)}
-                        className="w-full text-center bg-[#0b0f19] border border-gray-600 rounded-lg py-2.5 text-base text-white font-bold focus:border-amber-400 focus:outline-none font-mono"
+                        max="20"
+                        value={studentMarks[key1] ?? ''}
+                        onChange={(e) => handleMarkChange(student.id, key1, e.target.value)}
+                        className="w-full text-center font-extrabold bg-transparent text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-600 focus:outline-none p-1 rounded"
+                        placeholder="-"
                       />
-                    </div>
+                    </td>
+                    <td className="p-2 text-center">
+                      <input
+                        type="number"
+                        step="0.25"
+                        min="0"
+                        max="20"
+                        value={studentMarks[key2] ?? ''}
+                        onChange={(e) => handleMarkChange(student.id, key2, e.target.value)}
+                        className="w-full text-center font-extrabold bg-transparent text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-600 focus:outline-none p-1 rounded"
+                        placeholder="-"
+                      />
+                    </td>
+                  </tr>
+                );
+              })
+            ) : (
+              <tr>
+                <td colSpan="5" className="p-6 text-center text-slate-500 italic bg-white">
+                  No students enrolled in {selectedClassForAction || 'this class'}.
+                </td>
+              </tr>
+            )}
+            {classStudents && classStudents.length > 0 && (
+  <tfoot className="bg-[#0b192c] text-white font-medium text-xs">
+    {/* Subject Average Row */}
+    <tr className="border-t border-emerald-900/40">
+      <td colSpan="3" className="p-2.5 text-right pr-4 font-bold text-gray-300">
+        Subject Average (/20):
+      </td>
+      <td className="p-2 text-center text-amber-400 font-bold border-r border-emerald-900/40">
+        {calculateSeqAverage(`${key1}_mark`)}
+      </td>
+      <td className="p-2 text-center text-amber-400 font-bold border-r border-emerald-900/40">
+        {calculateSeqAverage(`${key2}_mark`)}
+      </td>
+    </tr>
+
+    {/* Percentage Passed Row */}
+    <tr className="border-t border-emerald-900/40">
+      <td colSpan="3" className="p-2.5 text-right pr-4 font-bold text-gray-300">
+        Passed (% ≥ 10/20):
+      </td>
+      <td className="p-2 text-center text-emerald-400 font-bold border-r border-emerald-900/40">
+        {calculatePassPercentage(`${key1}_mark`)}%
+      </td>
+      <td className="p-2 text-center text-emerald-400 font-bold border-r border-emerald-900/40">
+        {calculatePassPercentage(`${key2}_mark`)}%
+      </td>
+    </tr>
+  </tfoot>
+)}
+          </tbody>
+        </table>
+      </div>
+    );
+  })()}
+              {/* MOBILE VIEW: Large Touch-Friendly Cards */}
+  {(() => {
+    const activeKeys = getActiveSeqKeys ? getActiveSeqKeys(selectedTerm) : {
+      key1: selectedTerm === 'Term 2' ? 'seq3' : selectedTerm === 'Term 3' ? 'seq5' : 'seq1',
+      key2: selectedTerm === 'Term 2' ? 'seq4' : selectedTerm === 'Term 3' ? 'seq6' : 'seq2',
+      label1: selectedTerm === 'Term 2' ? 'SEQ 3' : selectedTerm === 'Term 3' ? 'SEQ 5' : 'SEQ 1',
+      label2: selectedTerm === 'Term 2' ? 'SEQ 4' : selectedTerm === 'Term 3' ? 'SEQ 6' : 'SEQ 2',
+    };
+    const { key1, key2, label1, label2 } = activeKeys;
+
+    return (
+      <div className="block md:hidden space-y-4 mt-4">
+        {classStudents && classStudents.length > 0 ? (
+          classStudents.map((student, idx) => {
+            const studentMarks = marksRecords[student.id] || {};
+            return (
+              <div key={student.id || idx} className="bg-slate-900 border border-slate-700 rounded-lg p-4 shadow-lg">
+                <div className="flex justify-between items-center mb-3 pb-2 border-b border-slate-800">
+                  <div>
+                    <span className="text-xs font-bold text-slate-500 mr-2">#{idx + 1}</span>
+                    <span className="font-bold text-slate-100">{student.full_name || student.fullName || student.name}</span>
                   </div>
-                ))}
+                  <span className="px-2 py-0.5 rounded border border-slate-700 bg-slate-800 font-mono text-xs text-slate-400">
+                    {student.unique_code || student.matricule || student.id || '-'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-slate-800/60 p-2 rounded border border-slate-700/50">
+                    <label className="block text-xs font-bold text-emerald-400 mb-1">{label1}</label>
+                    <input
+                      type="number"
+                      step="0.25"
+                      min="0"
+                      max="20"
+                      value={studentMarks[key1] ?? ''}
+                      onChange={(e) => handleMarkChange(student.id, key1, e.target.value)}
+                      className="w-full text-center font-extrabold bg-slate-900 border border-slate-700 rounded p-1.5 text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                      placeholder="-"
+                    />
+                  </div>
+                  <div className="bg-slate-800/60 p-2 rounded border border-slate-700/50">
+                    <label className="block text-xs font-bold text-emerald-400 mb-1">{label2}</label>
+                    <input
+                      type="number"
+                      step="0.25"
+                      min="0"
+                      max="20"
+                      value={studentMarks[key2] ?? ''}
+                      onChange={(e) => handleMarkChange(student.id, key2, e.target.value)}
+                      className="w-full text-center font-extrabold bg-slate-900 border border-slate-700 rounded p-1.5 text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                      placeholder="-"
+                    />
+                  </div>
+                </div>
               </div>
+            );
+          })
+        ) : (
+          <div className="p-4 text-center text-slate-400 bg-slate-900 rounded-lg border border-slate-800">
+            No students found.
+          </div>
+        )}
+      </div>
+    );
+  })()}
 
               {/* Save Action Button */}
               <div className="mt-6 pt-4 border-t border-gray-800 flex justify-end">
