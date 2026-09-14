@@ -4808,7 +4808,7 @@ if (payload.length > 0) {
               >
                 <option value="General Education">General Education</option>
 <option value="Technical Commercial (STT)">Technical Commercial (STT)</option>
-<option value="Technical Industrial (IND)">Technical Industrial (IND)</option>
+<option value="Technical Industrial (IND)">Technical Industrial (IND)</option> 
               </select>
             </div>
 
