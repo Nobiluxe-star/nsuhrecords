@@ -1,60 +1,94 @@
 'use client';
-import * as XLSX from "xlsx";
-import jsPDF from "jspdf";
-import html2canvas from "html2canvas";
-import autoTable from "jspdf-autotable";
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
+import * as XLSX from 'xlsx';
+
 // Cameroon Ministry of Secondary Education Official Classes, Technical & Commercial Trades, Subjects & Series Catalog
-const GENERAL_LOWER_CLASSES = [
-  'Form 1 (F1)',
-  'Form 2 (F2)',
-  'Form 3 (F3)',
-  'Form 4 (F4)',
-  'Form 5 (F5 Arts)',
-  'Form 5 (F5 Science)'
+export const GENERAL_LOWER_CLASSES = [
+  'Form 1A (F1A)',
+  'Form 1B (F1B)',
+  'Form 1C (F1C)',
+  'Form 1D (F1D)',
+  'Form 2A (F2A)',
+  'Form 2B (F2B)',
+  'Form 2C (F2C)',
+  'Form 2D (F2D)',
+  'Form 3A (F3A)',
+  'Form 3B (F3B)',
+  'Form 3C (F3C)',
+  'Form 4A (F4A)',
+  'Form 4B (F4B)',
+  'Form 5 Arts (F5A)',
+  'Form 5 Science (F5B)',
 ];
-const GENERAL_CLASSES_CATALOG = [
-  'Form 1 (F1)',
-  'Form 2 (F2)',
-  'Form 3 (F3)',
-  'Form 4 (F4)',
-  'Form 5 (F5 Arts)',
-  'Form 5 (F5 Science)',
+export const GENERAL_CLASSES_CATALOG = [
+  'Form 1A (F1A)',
+  'Form 1B (F1B)',
+  'Form 1C (F1C)',
+  'Form 1D (F1D)',
+  'Form 2A (F2A)',
+  'Form 2B (F2B)',
+  'Form 2C (F2C)',
+  'Form 2D (F2D)',
+  'Form 3A (F3A)',
+  'Form 3B (F3B)',
+  'Form 3C (F3C)',
+  'Form 4A (F4A)',
+  'Form 4B (F4B)',
+  'Form 5 Arts (F5A)',
+  'Form 5 Science (F5B)',
   'Lower Sixth Arts (L6A)',
   'Lower Sixth Science (L6S)',
   'Upper Sixth Arts (U6A)',
   'Upper Sixth Science (U6S)',
 ];
 
-const TECHNICAL_COMMERCIAL_CATALOG = [
+export const TECHNICAL_COMMERCIAL_CATALOG = [
   'First Year Commercial (Y1Com)',
   'Second Year Commercial (Y2Com)',
   'Third Year Commercial (Y3Com)',
   'Fourth Year Commercial / CAP / CAPIET (Y4Com)',
   'Fifth Year Commercial / Seconde (Y5Com)',
-  'Lower Sixth Commercial / Première (Probatoire Com)',
-  'Upper Sixth Commercial / Terminale (Baccalauréat Com)',
+  'Lower Sixth Commercial / Première (ProbCom)',
+  'Upper Sixth Commercial / Terminale (BacCom)',
 ];
 
-const TECHNICAL_INDUSTRIAL_CATALOG = [
+export const TECHNICAL_INDUSTRIAL_CATALOG = [
   'First Year Industrial (Y1Ind)',
   'Second Year Industrial (Y2Ind)',
   'Third Year Industrial (Y3Ind)',
   'Fourth Year Industrial / CAP / CAPIET (Y4Ind)',
   'Fifth Year Industrial / Seconde (Y5Ind)',
-  'Lower Sixth Industrial / Première (Probatoire Ind)',
-  'Upper Sixth Industrial / Terminale (Baccalauréat Ind)',
+  'Lower Sixth Industrial / Première (ProbInd)',
+  'Upper Sixth Industrial / Terminale (BacInd)',
 ];
 
 // Series mapping for Upper/Lower Sixth General
-const GENERAL_SERIES_CATALOG = {
+export const GENERAL_SERIES_CATALOG = {
   ARTS: ['A1', 'A2', 'A3', 'A4', 'A5'],
-  SCIENCE: ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8']
+  SCIENCE: ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8'],
+  series: {
+    ARTS: [
+      { code: 'A1', subjects: ['Literature in English', 'History', 'French Language'] },
+      { code: 'A2', subjects: ['Geography', 'Economics', 'History'] },
+      { code: 'A3', subjects: ['Literature in English', 'Economics', 'History'] },
+      { code: 'A4', subjects: ['Economics', 'Geography', 'Mathematics'] },
+      { code: 'A5', subjects: ['Literature in English', 'History', 'Philosophy'] }
+    ],
+    SCIENCE: [
+      { code: 'S1', subjects: ['Physics', 'Chemistry', 'Mathematics'] },
+      { code: 'S2', subjects: ['Chemistry', 'Physics', 'Biology'] },
+      { code: 'S3', subjects: ['Biology', 'Chemistry', 'Mathematics'] },
+      { code: 'S4', subjects: ['Biology', 'Chemistry', 'Geology'] },
+      { code: 'S5', subjects: ['Chemistry', 'Computer Science / ICT', 'Mathematics'] },
+      { code: 'S6', subjects: ['Chemistry', 'Physics', 'Mathematics', 'Further Mathematics'] },
+      { code: 'S7', subjects: ['Chemistry', 'Biology', 'Physics', 'Mathematics'] },
+      { code: 'S8', subjects: ['Biology', 'Chemistry', 'Physics', 'Mathematics', 'Further Mathematics'] }
+    ]
+  }
 };
-
 // Trade Series mapping for Technical Commercial
-const COMMERCIAL_TRADE_SERIES = [
+export const COMMERCIAL_TRADE_SERIES = [
   'FOUNDATIONAL',
   'G1 - Secretarial Studies',
   'G2 - Accounting and Management',
@@ -69,7 +103,7 @@ const COMMERCIAL_TRADE_SERIES = [
 ];
 
 // Trade Series mapping for Technical Industrial
-const INDUSTRIAL_TRADE_SERIES = [
+export const INDUSTRIAL_TRADE_SERIES = [
   'FOUNDATIONAL',
   'F1 - Mechanical Manufacturing',
     'F2 - Electronics',
@@ -85,12 +119,12 @@ const INDUSTRIAL_TRADE_SERIES = [
     'PL - Plumbing and Hydraulic Installation Systems'
 ];
 
-const ALL_AVAILABLE_CLASSES = [
+export const ALL_AVAILABLE_CLASSES = [
   ...GENERAL_CLASSES_CATALOG,
   ...TECHNICAL_COMMERCIAL_CATALOG,
   ...TECHNICAL_INDUSTRIAL_CATALOG
 ];
-const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+export const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 // Student ID Generator: WC-GMA15739G or WC-TPA16814B
 const generateStudentId = (schoolName, section, fullName, classLevel, age, gender, academicYear) => {
@@ -167,7 +201,7 @@ const END_TIME_OPTIONS = [
   "02:00 PM", "02:15 PM", "02:30 PM", "02:45 PM", "03:00 PM", "03:15 PM",
   "03:30 PM", "03:45 PM", "04:00 PM", "04:15 PM", "04:30 PM"
 ];
-const getAcademicYear = () => {
+export const getAcademicYear = () => {
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth(); // 0-indexed: 8 is September
@@ -178,69 +212,26 @@ const getAcademicYear = () => {
       return `${currentYear - 1}-${currentYear}`;
     }
   };
-  const NSUH_SECTIONS_DATA = {
-  GENERAL: {
-    classes: [
-      'Form 1 (F1)', 'Form 2 (F2)', 'Form 3 (F3)', 'Form 4 (F4)',
-      'Form 5 (F5 Arts)', 'Form 5 (F5 Science)',
-      'Lower Sixth Arts (L6A)', 'Lower Sixth Science (L6S)',
-      'Upper Sixth Arts (U6A)', 'Upper Sixth Science (U6S)'
-    ],
-    series: {
-      ARTS: [
-        { code: 'A1', subjects: ['Literature in English', 'History', 'French Language'] },
-        { code: 'A2', subjects: ['Geography', 'Economics', 'History'] },
-        { code: 'A3', subjects: ['Literature in English', 'Economics', 'History'] },
-        { code: 'A4', subjects: ['Economics', 'Geography', 'Mathematics'] },
-        { code: 'A5', subjects: ['Literature in English', 'History', 'Philosophy'] }
-      ],
-      SCIENCE: [
-        { code: 'S1', subjects: ['Physics', 'Chemistry', 'Mathematics'] },
-        { code: 'S2', subjects: ['Chemistry', 'Physics', 'Biology'] },
-        { code: 'S3', subjects: ['Biology', 'Chemistry', 'Mathematics'] },
-        { code: 'S4', subjects: ['Biology', 'Chemistry', 'Geology'] },
-        { code: 'S5', subjects: ['Chemistry', 'Computer Science / ICT', 'Mathematics'] },
-        { code: 'S6', subjects: ['Chemistry', 'Physics', 'Mathematics', 'Further Mathematics'] },
-        { code: 'S7', subjects: ['Chemistry', 'Biology', 'Physics', 'Mathematics'] },
-        { code: 'S8', subjects: ['Biology', 'Chemistry', 'Physics', 'Mathematics', 'Further Mathematics'] }
-      ]
-    }
-  },
-  COMMERCIAL: {
-    classes: [
-      'First Year Commercial (Y1COM)', 'Second Year Commercial (Y2COM)',
-      'Third Year Commercial (Y3COM)', 'Fourth Year Commercial / CAP / CAPIET (Y4COM)',
-      'Fifth Year Commercial / Seconde (Y5COM)',
-      'Lower Sixth Commercial / Première/Probatoire/ (PROBCOM)',
-      'Upper Sixth Commercial / Terminale (Baccalauréat/ (BACCOM)'
-    ],
-    series: [
-      'G1 - Secretarial Studies', 'G2 - Accounting and Management',
-      'G3 - Commercial Action / Marketing', 'FIG - Taxation and Management Information Systems',
-      'ACA - Administrative Action and Communication', 'HE - Home Economics',
-      'HOT - Hotel Management', 'TO - Tourism', 'BO - Bakery and Pastry'
-    ]
-  },
-  INDUSTRIAL: {
-    classes: [
-      'First Year Industrial (Y1IND)', 'Second Year Industrial (Y2IND)',
-      'Third Year Industrial (Y3IND)', 'Fourth Year Industrial/CAP/CAPIET (Y4IND)',
-      'Fifth Year Industrial/Seconde (Y5IND)',
-      'Lower Sixth Industrial/Première/ Probatoire Ind/ (PROBIND)',
-      'Upper Sixth Industrial/Terminale /Baccalaureat/ (BACIND)'
-    ],
-    series: [
-      'F1 - Mechanical Manufacturing', 'F2 - Electronics', 'F3 - Electrical Power Systems',
-      'F4BA - Civil Engineering Building Construction', 'F4BE - Building Study and Study Office',
-      'F4TP - Public Works', 'F5 - Air Conditioning and Ventilation',
-      'F6 - Laboratory Chemistry', 'F7 - Biological Sciences',
-      'F8 - Medical and Social Sciences', 'ARM - Automobile Repair Mechanics',
-      'PL - Plumbing and Hydraulic Installation Systems'
-    ]
+// Helper to retrieve classes dynamically based on active section
+const getSectionClasses = (section) => {
+  if (!section) return [...(GENERAL_CLASSES_CATALOG || []), ...(TECHNICAL_COMMERCIAL_CATALOG || []), ...(TECHNICAL_INDUSTRIAL_CATALOG || [])];
+  
+  const sec = String(section).trim().toLowerCase();
+  
+  if (sec.includes('commercial')) {
+    return TECHNICAL_COMMERCIAL_CATALOG || [];
   }
+  if (sec.includes('industrial')) {
+    return TECHNICAL_INDUSTRIAL_CATALOG || [];
+  }
+  if (sec.includes('general')) {
+    return GENERAL_CLASSES_CATALOG || [];
+  }
+  
+  return [...(GENERAL_CLASSES_CATALOG || []), ...(TECHNICAL_COMMERCIAL_CATALOG || []), ...(TECHNICAL_INDUSTRIAL_CATALOG || [])];
 };
 // Master Subjects Database List
-const ALL_SUBJECTS_LIST = [
+export const ALL_SUBJECTS_LIST = [
   // General Core Subjects
   { name: "Additional Mathematics", category: "General Core Subjects" },
   { name: "Artistic Education", category: "General Core Subjects" },
@@ -329,17 +320,29 @@ const ALL_SUBJECTS_LIST = [
   { name: "Work Organization", category: "Industrial Subjects" },
   { name: "Workshop Practicals", category: "Industrial Subjects" }
 ];
-// Default persistent subjects for Form 1 (F1) - Form 4 (F4) in General Education (Alphabetical)
-const GENERAL_CORE_SUBJECTS = [
-  "Biology",
-  "Chemistry",
-  "English Language",
-  "English Literature",
-  "French Language",
-  "Geography",
-  "History",
-  "Mathematics"
-];
+
+// Helper to dynamically organize subjects based on selected section
+const getFilteredSubjects = (section) => {
+  const sec = String(section || '').trim().toLowerCase();
+
+  if (sec.includes('commercial')) {
+    const commercial = ALL_SUBJECTS_LIST.filter(s => s.category === "Commercial Subjects");
+    const general = ALL_SUBJECTS_LIST.filter(s => s.category === "General Core Subjects");
+    return [...commercial, ...general];
+  }
+
+  if (sec.includes('industrial')) {
+    const industrial = ALL_SUBJECTS_LIST.filter(s => s.category === "Industrial Subjects");
+    const general = ALL_SUBJECTS_LIST.filter(s => s.category === "General Core Subjects");
+    return [...industrial, ...general];
+  }
+
+  if (sec.includes('both')) {
+    return ALL_SUBJECTS_LIST;
+  }
+
+  return ALL_SUBJECTS_LIST.filter(s => s.category === "General Core Subjects");
+};
 export default function AdminDashboardPage() {
   const [activeTab, setActiveTab] = useState('overview');
   const [navigationHistory, setNavigationHistory] = useState(['overview']);
@@ -351,7 +354,229 @@ const [editingPersonnel, setEditingPersonnel] = useState(null);
   const [isEditingSchedule, setIsEditingSchedule] = useState(false);
 const [teacherToEdit, setTeacherToEdit] = useState(null);
 const [selectedTeacherForLogs, setSelectedTeacherForLogs] = useState(null);
+const [isSubmittingTeacher, setIsSubmittingTeacher] = useState(false);
+const [isDeleting, setIsDeleting] = useState(false);
+const [schoolMotto, setSchoolMotto] = useState('');
+  const [schoolRules, setSchoolRules] = useState('');
+  const [rulesFileUrl, setRulesFileUrl] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showPdfModal, setShowPdfModal] = useState(false);
+  const [registrationMode, setRegistrationMode] = useState('single'); // 'single' or 'bulk'
+  const handleRulesFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
 
+    // Enforce 0.5 MB size limit (500 KB)
+    if (file.size > 500 * 1024) {
+      alert("File size exceeds 0.5MB limit. Please upload a smaller document.");
+      e.target.value = '';
+      return;
+    }
+
+    // Validate file type (PDF or Word documents)
+    const validTypes = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    ];
+    if (!validTypes.includes(file.type)) {
+      alert("Invalid file format. Please upload a PDF or Word document (.pdf, .doc, .docx).");
+      e.target.value = '';
+      return;
+    }
+
+    try {
+      const currentSchoolId = activeSchool?.id || activeSchool?.school_id || session?.user?.user_metadata?.school_id;
+      if (!currentSchoolId) {
+        alert("School ID missing. Please refresh or select a school.");
+        return;
+      }
+
+      const fileExt = file.name.split('.').pop();
+      const filePath = `school_rules/${currentSchoolId}_rules.${fileExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('school-assets')
+        .upload(filePath, file, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage
+        .from('school-assets')
+        .getPublicUrl(filePath);
+
+      setRulesFileUrl(data.publicUrl);
+      alert("Rules document uploaded successfully!");
+    } catch (err) {
+      alert("Error uploading document: " + err.message);
+    }
+  };
+  const [bulkFile, setBulkFile] = useState(null);
+  const [bulkParsedData, setBulkParsedData] = useState([]);
+  const [isProcessingBulk, setIsProcessingBulk] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  
+
+  // Generates a pre-formatted Excel template inheriting active class context
+  const handleDownloadBulkTemplate = () => {
+    if (typeof window === 'undefined' || !window.XLSX) {
+      alert('Excel library loading. Please try again in a moment.');
+      return;
+    }
+    
+    const sampleData = [
+      {
+        "full_name": "Taku Cecilia",
+        "gender": "Female",
+        "dob": "2009-05-14",
+        "residence": "Mankon",
+        "guardian_name": "Parent",
+        "guardian_phone": "682491189"
+      },
+      {
+        "full_name": "Fuh Gerald",
+        "gender": "Male",
+        "dob": "2008-08-20",
+        "residence": "Bafut",
+        "guardian_name": "Parent",
+        "guardian_phone": "682491189"
+      }
+    ];
+
+    const worksheet = window.XLSX.utils.json_to_sheet(sampleData);
+    const workbook = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(workbook, worksheet, "Student Registration");
+
+    const cleanClassName = (classLevel || 'Class').replace(/[^a-zA-Z0-9]/g, '_');
+    window.XLSX.writeFile(workbook, `${cleanClassName}_Bulk_Registration_Template.xlsx`);
+  };
+
+  // Read uploaded Excel file and parse rows into state
+  const handleParseBulkFile = async () => {
+    if (!bulkFile) {
+      alert("Please select an Excel file first.");
+      return;
+    }
+
+    setIsProcessingBulk(true);
+    try {
+      const data = await bulkFile.arrayBuffer();
+      // cellDates: true converts Excel serial values into standard date strings
+      const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      const jsonRows = XLSX.utils.sheet_to_json(worksheet, { raw: false, dateNF: 'yyyy-mm-dd' });
+
+      if (!jsonRows || jsonRows.length === 0) {
+        alert("The uploaded file contains no data.");
+        setIsProcessingBulk(false);
+        return;
+      }
+
+      setBulkParsedData(jsonRows);
+      alert(`Successfully parsed ${jsonRows.length} student records. Ready for preview!`);
+    } catch (err) {
+      alert("Error parsing file: " + err.message);
+    } finally {
+      setIsProcessingBulk(false);
+    }
+  };
+
+  // Helper to normalize data and calculate age dynamically
+  const normalizeStudentRow = (row) => {
+    const rawDob = row.dob || row["Date of Birth"] || row["DOB"] || "";
+    let birthDateStr = rawDob;
+    if (rawDob instanceof Date) {
+      birthDateStr = rawDob.toISOString().split('T')[0];
+    }
+
+    let calculatedAge = row.age || "";
+    if (birthDateStr) {
+      const birthYear = new Date(birthDateStr).getFullYear();
+      const currentYear = new Date().getFullYear();
+      if (!isNaN(birthYear)) {
+        calculatedAge = String(currentYear - birthYear);
+      }
+    }
+
+    const guardianPhone = String(row.guardian_phone || row["Guardian Phone"] || row.phone || "");
+
+    return {
+      full_name: row.full_name || row["Full Name"] || "",
+      gender: row.gender || row["Gender"] || "",
+      dob: birthDateStr,
+      age: calculatedAge,
+      residence: row.residence || row["Residence"] || "",
+      guardian_name: row.guardian_name || row["Guardian Name"] || "Parent",
+      guardian_phone: guardianPhone,
+      phone: guardianPhone,
+      section: section || "",
+      class_level: classLevel || "",
+      trade_series: (typeof tradeSeries !== 'undefined' ? tradeSeries : (typeof masterClass !== 'undefined' ? masterClass : "")) || ""
+    };
+  };
+
+  // Process rows and update uploadProgress percentage dynamically
+  const handleExecuteBulkImport = async () => {
+    if (!bulkParsedData || bulkParsedData.length === 0) {
+      alert("No student data available to import.");
+      return;
+    }
+
+    setIsProcessingBulk(true);
+    setUploadProgress(0);
+
+    const total = bulkParsedData.length;
+    let successCount = 0;
+
+    for (let i = 0; i < total; i++) {
+      const studentPayload = normalizeStudentRow(bulkParsedData[i]);
+      
+      const { error } = await supabase.from('students').insert([studentPayload]);
+      
+      if (!error) {
+        successCount++;
+      }
+
+      // Update progress percentage
+      const progressPercent = Math.round(((i + 1) / total) * 100);
+      setUploadProgress(progressPercent);
+    }
+
+    alert(`Bulk Import Complete! ${successCount} of ${total} students successfully registered.`);
+    setIsProcessingBulk(false);
+  };
+const handleSaveSchoolDetails = async () => {
+    const currentSchoolId = activeSchool?.id || activeSchool?.school_id || session?.user?.user_metadata?.school_id;
+    
+    if (!currentSchoolId) {
+      alert("School ID missing. Please refresh or select a school.");
+      return;
+    }
+
+    const payload = {
+      school_id: currentSchoolId,
+      name: activeSchool?.name || '',
+      logo_url: typeof schoolLogo !== 'undefined' ? schoolLogo : '',
+      motto: schoolMotto,
+      contact_line: schoolContact,
+      official_email: schoolEmail,
+      address_location: typeof schoolLocation !== 'undefined' ? schoolLocation : '',
+      rules_and_regulations: schoolRules,
+      rules_file_url: rulesFileUrl,
+      updated_at: new Date().toISOString()
+    };
+
+    const { error } = await supabase
+      .from('school_details')
+      .upsert(payload, { onConflict: 'school_id' });
+
+    if (error) {
+      alert('Error saving school details: ' + error.message);
+    } else {
+      alert('School parameters updated successfully!');
+    }
+  };
 const handleEditTeacherSchedule = (teacher) => {
   setTeacherToEdit(teacher);
   if (teacher?.name || teacher?.full_name) setTeacherName(teacher.name || teacher.full_name);
@@ -365,8 +590,8 @@ const handleEditTeacherSchedule = (teacher) => {
   }
   if (teacher?.schedules) {
     setSubjectSchedules(teacher.schedules);
+    setSchedulerData(teacher.schedules);
   }
-  
   // Close preview modal & switch tab
   setSelectedTeacherModal(null);
   setActiveTab('teachers');
@@ -412,6 +637,24 @@ const directSchoolName = (rawName && rawName.toLowerCase() !== 'assigned school'
       setActiveSchool(updatedSchool);
       localStorage.setItem('active_school_id', targetId);
       localStorage.setItem('active_school_name', realName);
+
+      // Fetch school details before returning
+      const { data: detailsData } = await supabase
+        .from('school_details')
+        .select('logo_url, motto, contact_line, official_email, address_location, rules_and_regulations, rules_file_url')
+        .eq('school_id', targetId)
+        .maybeSingle();
+
+      if (detailsData) {
+        if (detailsData.logo_url) setSchoolLogo(detailsData.logo_url);
+        if (detailsData.motto) setSchoolMotto(detailsData.motto);
+        if (detailsData.contact_line) setSchoolContact(detailsData.contact_line);
+        if (detailsData.official_email) setSchoolEmail(detailsData.official_email);
+        if (detailsData.address_location && typeof setSchoolLocation !== 'undefined') setSchoolLocation(detailsData.address_location);
+        if (detailsData.rules_and_regulations && typeof setSchoolRules !== 'undefined') setSchoolRules(detailsData.rules_and_regulations);
+        if (detailsData.rules_file_url && typeof setRulesFileUrl !== 'undefined') setRulesFileUrl(detailsData.rules_file_url);
+      }
+
       return;
     }
   }
@@ -458,6 +701,8 @@ const directSchoolName = (rawName && rawName.toLowerCase() !== 'assigned school'
   const [newSubjectTitle, setNewSubjectTitle] = useState('');
   const [newSubjectCategory, setNewSubjectCategory] = useState('General Core Subjects');
   const [subjectCoefficients, setSubjectCoefficients] = useState([]);
+  const [isSavedForCurrentClass, setIsSavedForCurrentClass] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [teacherSubTab, setTeacherSubTab] = useState('assigned');
 const [logSectionFilter, setLogSectionFilter] = useState('General');
 // Master Mark Sheet States
@@ -465,42 +710,22 @@ const [logSectionFilter, setLogSectionFilter] = useState('General');
   const [masterClass, setMasterClass] = useState(GENERAL_CLASSES_CATALOG[0]);
   const [masterSeries, setMasterSeries] = useState('');
   const [masterTerm, setMasterTerm] = useState('Term 1');
+  const seq1Label = masterTerm === 'Term 2' ? 'seq3_mark' : masterTerm === 'Term 3' ? 'seq5_mark' : 'seq1_mark';
+  const seq2Label = masterTerm === 'Term 2' ? 'seq3_mark' : masterTerm === 'Term 3' ? 'seq6_mark' : 'seq2_mark';
   // Helper function to update coefficient state
   const handleCoefficientChange = (subjectName, coefValue) => {
+     setIsSavedForCurrentClass(false);
     setSubjectCoefficients(prev =>
       prev.map(item =>
         item.name === subjectName ? { ...item, coefficient: Number(coefValue) || 1 } : item
       )
     );
   };
-  const handleCoefficientSubjectToggle = (subjectName) => {
-    // Find current state of the target subject
-    const targetSub = subjectCoefficients.find((s) => s.name === subjectName);
-    const isCurrentlySelected = targetSub ? targetSub.selected : false;
+ const handleCoefficientSubjectToggle = (subjectName) => {
+    setIsSavedForCurrentClass(false);
 
-    // Strict catalog string checks for Form 1 through Form 4
-    const MANDATORY_GENERAL_CLASSES = [
-      'Form 1 (F1)',
-      'Form 2 (F2)',
-      'Form 3 (F3)',
-      'Form 4 (F4)'
-    ];
-
-    const isMandatoryClass = 
-      (selectedSection === "General" || selectedSection === "General Education") && 
-      MANDATORY_GENERAL_CLASSES.includes(selectedClass);
-
-    const isCore = GENERAL_CORE_SUBJECTS.includes(subjectName);
-
-    // Trigger state confirmation instead of browser popup
-   if (isCurrentlySelected && isMandatoryClass && isCore) {
-    if (!window.confirm(`Are you sure you want to remove ${subjectName} from ${selectedClass}? Checked subjects dictate student report cards.`)) {
-        return;
-      }
-    }
-
-    setSubjectCoefficients((prev) =>
-      prev.map((sub) =>
+    setSubjectCoefficients(prev =>
+      prev.map(sub =>
         sub.name === subjectName ? { ...sub, selected: !sub.selected } : sub
       )
     );
@@ -550,33 +775,64 @@ const coeffMap = new Map();
         if (Array.isArray(student.marks)) {
           student.marks.forEach((m) => {
         // Step 2: Resolve human-readable subject name directly from DB Map
-        const subjectName = coeffMap.get(m.subject_id || m.id || m.subject) || m.subject_name;
+        const subjectName = m.subject_name || m.subject || coeffMap.get(m.subject_id) || coeffMap.get(m.id);
+          if (!subjectName) return;
+        const record = {
+        school_id: activeSchool?.id || activeSchool?.school_id,
+        student_id: student.id,
+        unique_code: student.unique_code || student.matricule || null,
+        classLevel: masterClass || student.class_level || student.classLevel || null,
+        section: masterSection || student.section || null,
+        subject_name: subjectName,
+        term: masterTerm?.includes('Term 2') ? 'Term 2' : masterTerm?.includes('Term 3') ? 'Term 3' : 'Term 1',
+        academic_year: activeSchool?.academic_year || getAcademicYear(),
+        trades_series: formattedTradesSeries,
+      };
+     let hasMarks = false;
 
-        if (!subjectName) return;
-            const record = {
-              school_id: activeSchool?.id || activeSchool?.school_id,
-              student_id: student.id,
-              subject_name: subjectName,
-              term: m.term || 'Term 1',
-              academic_year: activeSchool?.academic_year || getAcademicYear(),
-              trades_series: formattedTradesSeries,
-            };
+// Universal safe numerical mark parser
+const parseMark = (val) => {
+  if (val === undefined || val === null || val === '') return null;
+  const num = Number(val);
+  return isNaN(num) ? null : num;
+};
 
-            let hasMarks = false;
+// Map input fields dynamically based on active term
+if (masterTerm?.includes('Term 2')) {
+  const s3 = parseMark(m.seq3_mark ?? m.seq3);
+  const s4 = parseMark(m.seq4_mark ?? m.seq4);
+  if (s3 !== null) { record.seq3_mark = s3; hasMarks = true; }
+  if (s4 !== null) { record.seq4_mark = s4; hasMarks = true; }
+} else if (masterTerm?.includes('Term 3')) {
+  const s5 = parseMark(m.seq5_mark ?? m.seq5);
+  const s6 = parseMark(m.seq6_mark ?? m.seq6);
+  if (s5 !== null) { record.seq5_mark = s5; hasMarks = true; }
+  if (s6 !== null) { record.seq6_mark = s6; hasMarks = true; }
+} else {
+  const s1 = parseMark(m.seq1_mark ?? m.seq1);
+  const s2 = parseMark(m.seq2_mark ?? m.seq2);
+  if (s1 !== null) { record.seq1_mark = s1; hasMarks = true; }
+  if (s2 !== null) { record.seq2_mark = s2; hasMarks = true; }
+}
 
-            if (m.seq1_mark !== undefined && m.seq1_mark !== null && m.seq1_mark !== '') {
-              record.seq1_mark = parseFloat(m.seq1_mark);
-              hasMarks = true;
-            }
+  // Pro Rata Dynamic Term Score Calculation
+  let sum = 0;
+  let count = 0;
+  if (masterTerm?.includes('Term 2')) {
+    if (record.seq3_mark > 0) { sum += record.seq3_mark; count++; }
+    if (record.seq4_mark > 0) { sum += record.seq4_mark; count++; }
+  } else if (masterTerm?.includes('Term 3')) {
+    if (record.seq5_mark > 0) { sum += record.seq5_mark; count++; }
+    if (record.seq6_mark > 0) { sum += record.seq6_mark; count++; }
+  } else {
+    if (record.seq1_mark > 0) { sum += record.seq1_mark; count++; }
+    if (record.seq2_mark > 0) { sum += record.seq2_mark; count++; }
+  }
 
-            if (m.seq2_mark !== undefined && m.seq2_mark !== null && m.seq2_mark !== '') {
-              record.seq2_mark = parseFloat(m.seq2_mark);
-              hasMarks = true;
-            }
-
-            if (hasMarks) {
-              updates.push(record);
-            }
+  if (hasMarks) {
+    updates.push(record);
+  }
+           
           });
         }
       });
@@ -708,12 +964,30 @@ if (!students || students.length === 0) {
   setIsMasterLoading(false);
   return;
 }
+console.log("DEBUG marksData:", marksData);
+console.log("DEBUG students:", students);
   const marksMap = new Map();
-  (marksData || []).forEach(m => {
-    if (!m.unique_code) return;
+ (marksData || []).forEach(m => {
+  const normalizedMark = {
+    ...m,
+    seq1: m.seq1 ?? m.seq1_mark ?? null,
+    seq2: m.seq2 ?? m.seq2_mark ?? null,
+    seq3: m.seq3 ?? m.seq3_mark ?? null,
+    seq4: m.seq4 ?? m.seq4_mark ?? null,
+    seq5: m.seq5 ?? m.seq5_mark ?? null,
+    seq6: m.seq6 ?? m.seq6_mark ?? null,
+  };
+
+  // Map to both student_id (UUID) and unique_code so the UI lookup succeeds regardless of format
+  if (m.student_id) {
+    if (!marksMap.has(m.student_id)) marksMap.set(m.student_id, []);
+    marksMap.get(m.student_id).push(normalizedMark);
+  }
+  if (m.unique_code) {
     if (!marksMap.has(m.unique_code)) marksMap.set(m.unique_code, []);
-    marksMap.get(m.unique_code).push(m);
-  });
+    marksMap.get(m.unique_code).push(normalizedMark);
+  }
+});
  const formatted = (students || [])
   .filter(st => {
     // 1. Strict Class Level
@@ -726,7 +1000,6 @@ if (!students || students.length === 0) {
       return false;
     }
 
-    // 3. Technical Trade/Specialty Matching
     // 3. Technical Trade/Specialty Matching
 if (isTechnical && masterSeries) {
   const stTrade = (st.trades_series || st.series_specialty || st.series || '').trim();
@@ -747,7 +1020,7 @@ if (isTechnical && masterSeries) {
       ...st,
       name: st.fullName || st.name,
       unique_code: code,
-      marks: marksMap.get(code) || []
+      marks: marksMap.get(st.id) || marksMap.get(st.student_id) || marksMap.get(st.unique_code) || marksMap.get(code) || []
     };
   });
       setMasterStudentsData(formatted);
@@ -790,15 +1063,22 @@ const handleUnlockMarks = async (markId) => {
         if (existingIdx > -1) {
           updatedMarks[existingIdx] = { ...updatedMarks[existingIdx], [field]: parsedValue };
         } else {
-          updatedMarks.push({ student_id: studentId, unique_code: student.unique_code || studentId, subject_id: subjectId, [field]: parsedValue });
+          updatedMarks.push({
+            school_id: activeSchool?.id || activeSchool?.school_id,
+        student_id: student.id,
+        unique_code: student.unique_code || student.matricule || null,
+        classLevel: masterClass || student.class_level || student.classLevel || null,
+        section: masterSection || student.section || null,
+        subject_name: m.subject_name || m.subject || coeffMap.get(m.subject_id) || coeffMap.get(m.id),
+        term: masterTerm?.includes('Term 2') ? 'Term 2' : masterTerm?.includes('Term 3') ? 'Term 3' : 'Term 1',
+        academic_year: activeSchool?.academic_year || getAcademicYear(),
+        trades_series: formattedTradesSeries,
+            [field]: parsedValue
+          });
         }
         return { ...student, marks: updatedMarks };
       })
     );
-    // if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-// autoSaveTimerRef.current = setTimeout(() => {
-//   fetchMasterMarkSheetData();
-// }, 2000);
   };
   // Auto-fetch whenever Master Mark Sheet filters change or tab becomes active
   useEffect(() => {
@@ -839,7 +1119,7 @@ const handleUnlockMarks = async (markId) => {
     let initialList = ALL_SUBJECTS_LIST.map((sub) => ({
       ...sub,
       coefficient: 1,
-      selected: isMandatoryClass && GENERAL_CORE_SUBJECTS.includes(sub.name)
+      selected: false
     }));
 
     const activeSeriesCode = selectedTradeSeries?.trim()?.toUpperCase();
@@ -862,44 +1142,69 @@ const handleUnlockMarks = async (markId) => {
     }
 
     // Check Supabase for previously saved/validated coefficients
-    const loadSavedCoefficients = async () => {
-      if (!activeSchool?.id || !selectedClass) {
-        setSubjectCoefficients(initialList);
-        return;
-      }
+   const loadSavedCoefficients = async () => {
+    if (!activeSchool?.id || !selectedClass) {
+      setSubjectCoefficients(initialList);
+      return;
+    }
 
-      let query = supabase
+    // Extract raw class level (e.g., "Form 1A (F1A)")
+   let query = supabase
         .from('class_coefficients')
         .select('*')
         .eq('school_id', activeSchool.id)
         .eq('section', selectedSection)
-        .eq('classLevel', selectedClass);
+        .eq('classLevel', selectedClass.trim())
+    if (selectedTradeSeries) {
+      query = query.eq('trades_series', selectedTradeSeries);
+    }
 
-      if (selectedTradeSeries) {
-        query = query.eq('series', selectedTradeSeries);
-      }
+    const { data, error } = await query;
 
-      const { data, error } = await query;
+    if (error) {
+      console.error("Error loading class coefficients:", error.message);
+      setSubjectCoefficients(initialList);
+      return;
+    }
 
-      if (!error && data && data.length > 0) {
-        // Overlay saved database values on top of initialList
-        const mergedList = initialList.map((item) => {
-          const matched = data.find((d) => d.subject_name === item.name);
-          if (matched) {
-            return {
-              ...item,
-              coefficient: matched.coefficient,
-              selected: matched.is_included,
-              subject_code: matched.subject_code
-            };
-          }
-          return item;
-        });
-        setSubjectCoefficients(mergedList);
+    // Match Form 1 to Form 5 or Sub-Form variations
+    const isLowerForm = /Form\s*[1-5]/i.test(selectedClass);
+
+    if (data && data.length > 0) {
+        setIsSavedForCurrentClass(true);
+        setSubjectCoefficients(
+          initialList.map(item => {
+            const code = (item.subject_code || item.code || '').trim().toUpperCase();
+            const name = (item.name || item.subject_name || '').trim().toLowerCase();
+
+            // Match against DB subject_code OR DB subject_name if present
+            const matched = data.find(d => {
+              const dbCode = (d.subject_code || '').trim().toUpperCase();
+              const dbName = (d.subject_name || '').trim().toLowerCase();
+              return (dbCode && dbCode === code) || (dbName && dbName === name);
+            });
+
+            if (matched) {
+              return {
+                ...item,
+                selected: matched.is_included !== false,
+                coefficient: parseFloat(matched.coefficient) || 1,
+                subject_code: matched.subject_code || item.subject_code
+              };
+            }
+            return { ...item, selected: false };
+          })
+        );
       } else {
-        setSubjectCoefficients(initialList);
+        setIsSavedForCurrentClass(false);
+        setSubjectCoefficients(
+          initialList.map(item => ({
+            ...item,
+            selected: false
+          }))
+        );
       }
-    };
+  };
 
     loadSavedCoefficients();
   }, [activeSchool?.id, selectedSection, selectedClass, selectedTradeSeries]);
@@ -942,16 +1247,33 @@ const [teacherPhotoPreview, setTeacherPhotoPreview] = useState(null);
   const [currentTime, setCurrentTime] = useState(null);
   const [schedulerData, setSchedulerData] = useState({});
 
-  const handleSchedulerRowChange = (subject, rIdx, field, value) => {
-    setSchedulerData((prevData) => {
-      const updated = { ...prevData };
-      if (!updated[subject]) updated[subject] = [];
-      if (!updated[subject][rIdx]) updated[subject][rIdx] = {};
-      updated[subject][rIdx][field] = value;
-      return updated;
+const handleSchedulerRowChange = (subject, rIdx, field, value) => {
+  // Update schedulerData override state
+  setSchedulerData((prevData) => {
+    const currentSubjectRows = prevData?.[subject] ? [...prevData[subject]] : [];
+    const targetRow = currentSubjectRows[rIdx] ? { ...currentSubjectRows[rIdx] } : {};
+    targetRow[field] = value;
+    currentSubjectRows[rIdx] = targetRow;
+    return {
+      ...prevData,
+      [subject]: currentSubjectRows,
+    };
+  });
+
+  // Also update subjectsSchedules so save handlers read the new time values
+  if (typeof setSubjectSchedules === 'function') {
+    setSubjectSchedules((prev) => {
+      const list = [...((prev && prev[subject]) || [])];
+      const existingRow = list[rIdx] || { className: '', day: '', startTime: '', endTime: '' };
+      list[rIdx] = {
+        ...existingRow,
+        [field]: value
+      };
+      return { ...prev, [subject]: list };
     });
-  };
-const [editingStudent, setEditingStudent] = useState(null);
+  }
+};
+  const [editingStudent, setEditingStudent] = useState(null);
 const [editFormData, setEditFormData] = useState({});
 const [studentToDelete, setStudentToDelete] = useState(null);
 const handleRowClick = (student) => {
@@ -964,7 +1286,24 @@ const handleRowClick = (student) => {
 
  const handleSaveStudent = async (e) => {
     e.preventDefault();
+// Strict validation guard using single source of truth trade arrays
+const targetSec = (editFormData?.section || '').toLowerCase();
+const chosenTrade = editFormData?.trades_series || editFormData?.series || '';
 
+if (targetSec.includes('commercial') && (!chosenTrade || !COMMERCIAL_TRADE_SERIES.includes(chosenTrade))) {
+  alert("Validation Error: Please select a valid Technical Commercial trade.");
+  return;
+}
+
+if (targetSec.includes('industrial') && (!chosenTrade || !INDUSTRIAL_TRADE_SERIES.includes(chosenTrade))) {
+  alert("Validation Error: Please select a valid Technical Industrial trade.");
+  return;
+}
+
+if (!editFormData?.residence || !editFormData.residence.trim()) {
+  alert("Validation Error: Quarter / Residence is a mandatory field.");
+  return;
+}
     // Sanitize trades_series so lower forms are strictly 'N/A'
   const currentClass = editFormData?.classLevel || editFormData?.class_name || '';
   const currentSeries = editFormData?.trades_series || editFormData?.series || '';
@@ -1000,15 +1339,16 @@ const promptDeleteStudent = (student, e) => {
 // Performs the actual deletion when confirmed in the modal
 const confirmDeleteStudent = async () => {
     if (!studentToDelete) return;
-
+setIsDeleting(true);
    // 1. HARD SAFETY GAURDS & MULTI-TENANT CONTEXT
     const studentId = studentToDelete?.id;
     const studentCode = studentToDelete?.unique_code || studentToDelete?.matricule;
     const currentSchoolId = activeSchool?.id || studentToDelete?.school_id;
 
     // Reject operation if primary key or tenant identity is missing
-    if (!studentId || typeof studentId !== 'string' || !studentId.includes('-')) {
+    if (!studentId) {
       alert("Safety Lock: Cannot delete record without a valid UUID primary key.");
+      setIsDeleting(false);
       return;
     }
 
@@ -1034,12 +1374,15 @@ const confirmDeleteStudent = async () => {
 
     if (error) {
       alert("Error deleting student from database: " + error.message);
+      setIsDeleting(false);
       return;
     }
 
     // 3. PERMANENT LOCAL UI STATE PURGE
     setStudentsList((prev) => prev.filter((s) => s.id !== studentId));
     setStudentToDelete(null);
+    changeTab('students');
+    setIsDeleting(false);
   };
   useEffect(() => {
     setCurrentTime(new Date());
@@ -1320,58 +1663,293 @@ console.log('Students Response:', studentsRes);
     }
   };
 // Helper: Export current student list to Excel
-  const handleExportExcel = () => {
-    if (!studentsList || studentsList.length === 0) return;
-    const worksheet = XLSX.utils.json_to_sheet(studentsList);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Students");
-    XLSX.writeFile(workbook, "Student_List.xlsx");
-  };
+const handleExportExcel = async () => {
+    const XLSX = await import("xlsx");
 
-  // Helper: Export current student list to PDF
-  const handleExportPDF = () => {
-    if (!studentsList || studentsList.length === 0) return;
-    const doc = new jsPDF();
-    doc.text("Student List", 14, 15);
+    const filteredData = studentsList.filter((stu) => {
+      // 1. Section Matching (handles Technical Commercial, Industrial, General, etc.)
+      if (printSection && printSection !== 'All' && printSection !== 'All Sections') {
+        const secVal = (stu.section || '').toLowerCase();
+        const selSec = printSection.toLowerCase();
+        const matchesSec = secVal.includes(selSec) || selSec.includes(secVal) ||
+          (selSec.includes('commercial') && (secVal.includes('commercial') || secVal.includes('STT'))) ||
+          (selSec.includes('industrial') && (secVal.includes('industrial') || secVal.includes('IND')));
+        if (!matchesSec) return false;
+      }
 
-    const tableColumn = ["ID", "Full Name", "Section", "Class Level", "Gender", "Guardian Phone"];
-    const tableRows = studentsList.map((stu) => [
-      stu.id || "",
-      stu.fullName || "",
-      stu.section || "",
-      stu.classLevel || "",
-      stu.gender || "",
-      stu.guardianPhone || "",
-    ]);
-
-    doc.autoTable({
-      head: [tableColumn],
-      body: tableRows,
-      startY: 20,
+      // 2. Trade/Series Matching
+      if (printTrade && printTrade !== 'All' && printTrade !== 'All Trades / Series' && printTrade !== '') {
+        const tradeVal = (stu.trades_series || stu.trade_series || stu.trade || stu.series || stu.specialty || '').toLowerCase();
+        const selTrade = printTrade.toLowerCase();
+        if (!tradeVal.includes(selTrade) && !selTrade.includes(tradeVal)) return false;
+      }
+      if (searchQuery.trim() !== '') {
+        const q = searchQuery.toLowerCase().trim();
+        const name = (stu.fullName || stu.fullname || stu.full_name || '').toLowerCase();
+        const id = (stu.unique_code || stu.id || stu.student_id || '').toLowerCase();
+        const cls = (stu.classLevel || stu.class_level || '').toLowerCase();
+        const sec = (stu.section || '').toLowerCase();
+        const trd = (stu.trades_series || stu.trade_series || stu.trade || stu.series || stu.specialty || '').toLowerCase();
+        if (!name.includes(q) && !id.includes(q) && !cls.includes(q) && !sec.includes(q) && !trd.includes(q)) return false;
+      }
+      return true;
     });
 
-    doc.save("Student_List.pdf");
+  if (filteredData.length === 0) {
+    alert("No student records found for the current selection.");
+    return;
+  }
+// 1. Map to clean fields
+  const cleanExportData = filteredData.map((stu) => ({
+    "Student ID": stu.unique_code || stu.id || '',
+    "Full Name": stu.fullName || stu.fullname || stu.full_name || '',
+    "Section": stu.section || '',
+    "Class Level": stu.classLevel || stu.class_level || '',
+    "Trade / Series": stu.trades_series || stu.trade_series || stu.trade || stu.series || stu.specialty || 'N/A',
+    "Gender": stu.gender || '',
+    "Age": stu.age || '',
+    "Guardian Contact": stu.guardianPhone || stu.guardian_phone || stu.guardianContact || '',
+    "Residence": stu.residence || ''
+  }));
+
+  // 2. Build dynamic file name
+  let titleParts = [];
+  if (printClass !== 'All') titleParts.push(printClass);
+  if (printTrade !== 'All') titleParts.push(printTrade);
+  if (printSection !== 'All' && printClass === 'All') titleParts.push(printSection);
+
+  const dynamicFileName = titleParts.length > 0 
+    ? `${titleParts.join('_').replace(/[^a-zA-Z0-9_-]/g, '_')}_Student_List.xlsx` 
+    : 'Student_List.xlsx';
+
+  // 3. Create worksheet and set auto column widths
+  const excelLib = XLSX.default || XLSX;
+    const worksheet = excelLib.utils.json_to_sheet(cleanExportData);
+
+    const keys = Object.keys(cleanExportData[0] || {});
+    worksheet['!cols'] = keys.map((key) => {
+      const maxLen = Math.max(
+        key.length,
+        ...cleanExportData.map((row) => String(row[key] || '').length)
+      );
+      return { wch: maxLen + 4 };
+    });
+
+    const workbook = excelLib.utils.book_new();
+    excelLib.utils.book_append_sheet(workbook, worksheet, "Students");
+    excelLib.writeFile(workbook, dynamicFileName);
+};
+
+  // Helper: Export current student list to PDF
+const handleExportPDF = async (exportType = 'all') => {
+    if (!studentsList || studentsList.length === 0) return;
+
+    // Load libraries dynamically to prevent initial bundle bloat
+    const { default: jsPDF } = await import("jspdf");
+    const { default: autoTable } = await import("jspdf-autotable");
+
+    // 1. Filter students according to UI selections
+   const filteredData = studentsList.filter((stu) => {
+      // 1. Section Matching
+      if (printSection && printSection !== 'All' && printSection !== 'All Sections') {
+        const secVal = (stu.section || '').toLowerCase();
+        const selSec = printSection.toLowerCase();
+        const matchesSec = secVal.includes(selSec) || selSec.includes(secVal) ||
+          (selSec.includes('commercial') && (secVal.includes('commercial') || secVal.includes('stt'))) ||
+          (selSec.includes('industrial') && (secVal.includes('industrial') || secVal.includes('sti')));
+        if (!matchesSec) return false;
+      }
+
+      // 2. Class Level Matching
+    if (printClass !== 'All' && printClass !== 'All Classes') {
+      const pClass = printClass.toLowerCase();
+      const sClass = String(stu.classLevel || stu.class_level || stu.className || stu.class || '').toLowerCase();
+      const codeInParen = pClass.match(/\(([^)]+)\)/)?.[1] || '';
+      const classMatch = sClass === pClass || sClass.includes(pClass) || pClass.includes(sClass) || (codeInParen !== '' && sClass.includes(codeInParen.toLowerCase()));
+      if (!classMatch) return false;
+    }
+    if (printTrade !== 'All' && printTrade !== 'All Trades / Series' && printTrade !== '') {
+      const pTrade = printTrade.toLowerCase();
+      const sTrade = String(stu.trades_series || stu.trade_series || stu.trade || stu.series || stu.specialty || '').toLowerCase();
+      if (sTrade && !sTrade.includes(pTrade) && !pTrade.includes(sTrade)) return false;
+    }
+      if (searchQuery.trim() !== '') {
+        const q = searchQuery.toLowerCase().trim();
+        const name = (stu.fullName || stu.fullname || stu.full_name || '').toLowerCase();
+        const id = (stu.unique_code || stu.id || stu.student_id || '').toLowerCase();
+        const cls = (stu.classLevel || stu.class_level || '').toLowerCase();
+        const sec = (stu.section || '').toLowerCase();
+        const trd = (stu.trades_series || stu.trade_series || stu.trade || stu.series || stu.specialty || '').toLowerCase();
+        if (!name.includes(q) && !id.includes(q) && !cls.includes(q) && !sec.includes(q) && !trd.includes(q)) return false;
+      }
+      return true;
+    });
+
+    if (filteredData.length === 0) {
+      alert("No student records found for the current selection.");
+      return;
+    }
+// 2. Resolve Active School Name (Supabase DB -> LocalStorage Fallback)
+    let tenantSchoolName = "";
+
+    try {
+      const { data: sDetails, error: sErr } = await supabase
+        .from('school_details')
+        .select('school_name, name')
+        .limit(1)
+        .maybeSingle();
+
+      if (!sErr && sDetails) {
+        tenantSchoolName = sDetails.school_name || sDetails.name || "";
+      }
+    } catch (err) {
+      console.warn("Supabase fetch error, checking localStorage fallback...", err);
+    }
+
+    // Fallback to localStorage if database lookup returns empty
+    if (!tenantSchoolName) {
+      tenantSchoolName = localStorage.getItem('selectedSchoolName') || localStorage.getItem('activeSchoolName') || "";
+    }
+
+    // Stop execution and alert if school name is missing
+    if (!tenantSchoolName) {
+      alert("Can't find active school name. Check your internet connection or active school selection.");
+      return;
+    }
+// Calculate dynamic academic year using system utility/state
+    const activeAcademicYear = 
+      (typeof getAcademicYear === 'function' && getAcademicYear()) ||
+      (typeof currentAcademicYear !== 'undefined' && currentAcademicYear) ||
+      localStorage.getItem('selectedAcademicYear') ||
+      "";
+    const doc = new jsPDF();
+
+    // 3. Official Header Metadata
+    let currentY = 13;
+
+    if (tenantSchoolName) {
+      // Primary Active School Name (Forest Green, Bold)
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(15);
+      doc.setTextColor(4, 80, 42); 
+      doc.text(String(tenantSchoolName).toUpperCase(), 105, currentY, { align: 'center' });
+      currentY += 5;
+
+      // Decorative Divider Line
+      doc.setDrawColor(4, 80, 42);
+      doc.setLineWidth(0.5);
+      doc.line(20, currentY, 190, currentY);
+      currentY += 6;
+
+      // Document Title Subheader
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.setTextColor(51, 65, 85); 
+      doc.text("OFFICIAL STUDENT ROSTER", 105, currentY, { align: 'center' });
+      currentY += 5;
+    } else {
+      // Fallback Header if no tenant name is present
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(15);
+      doc.setTextColor(4, 80, 42);
+      doc.text("OFFICIAL STUDENT ROSTER", 105, currentY, { align: 'center' });
+      currentY += 6;
+    }
+
+    // Dynamic Academic Year & Filter Context
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(71, 85, 105);
+
+    if (activeAcademicYear) {
+      doc.text(`Academic Year: ${activeAcademicYear}`, 105, currentY, { align: 'center' });
+      currentY += 5;
+    }
+
+    let subtitle = `Section: ${printSection}  |  Class: ${printClass}`;
+    if (printTrade !== 'All') subtitle += `  |  Trade/Series: ${printTrade}`;
+    doc.text(subtitle, 105, currentY, { align: 'center' });
+
+    // 3. Render Table
+    if (exportType === 'classList') {
+      const tableColumn = ["S/N", "Full Name", "Mark / Attendance", "Remarks / Signature"];
+      const tableRows = filteredData.map((stu, index) => [
+        index + 1,
+        stu.fullName || stu.fullname || stu.full_name || '',
+        "",
+        ""
+      ]);
+
+      autoTable(doc, {
+        startY: 36,
+        head: [tableColumn],
+        body: tableRows,
+        theme: 'grid',
+        headStyles: { fillColor: [4, 32, 20], textColor: [255, 255, 255] },
+        columnStyles: {
+          0: { cellWidth: 15 },
+          1: { cellWidth: 75 },
+          2: { cellWidth: 50 },
+          3: { cellWidth: 50 }
+        }
+      });
+    } else {
+      const tableColumn = ["ID", "Full Name", "Section", "Class", "Trade/Series", "Gender", "Phone"];
+      const tableRows = filteredData.map((stu) => [
+        stu.unique_code || stu.id || '',
+        stu.fullName || stu.fullname || stu.full_name || '',
+        stu.section || '',
+        stu.classLevel || stu.class_level || '',
+        stu.trades_series || stu.trade_series || stu.trade || 'N/A',
+        stu.gender || '',
+        stu.guardianPhone || stu.guardian_phone || ''
+      ]);
+
+      autoTable(doc, {
+        startY: 34,
+        head: [tableColumn],
+        body: tableRows,
+        theme: 'striped',
+        headStyles: { fillColor: [15, 23, 42] }
+      });
+    }
+
+    // Dynamic Filename
+    let titleParts = [];
+    if (printClass && printClass !== 'All' && printClass !== 'All Classes') titleParts.push(printClass);
+    if (printTrade && printTrade !== 'All' && printTrade !== 'All Trades / Series') titleParts.push(printTrade);
+
+    const fileName = titleParts.length > 0
+      ? `${titleParts.join('_').replace(/[^a-zA-Z0-9_-]/g, '_')}_${exportType === 'classList' ? 'Roster' : 'Full_List'}.pdf`
+      : `Student_Directory_${exportType}.pdf`;
+
+    doc.save(fileName);
   };
 
   const handlePrint = () => {
     let filteredStudents = [...studentsList];
 
-    if (printSection !== 'All') {
-      filteredStudents = filteredStudents.filter(
-        (stu) => stu.section?.toLowerCase() === printSection.toLowerCase()
-      );
-    }
-
-    if (printClass !== 'All') {
-      filteredStudents = filteredStudents.filter(
-        (stu) => stu.classLevel?.toLowerCase() === printClass.toLowerCase()
-      );
-    }
-
-    if (printTrade !== 'All') {
+    if (printSection && printSection !== 'All' && printSection !== 'All Sections') {
       filteredStudents = filteredStudents.filter((stu) => {
-        const tradeVal = stu.trades_series || stu.trade || stu.specialty || '';
-        return tradeVal.toLowerCase() === printTrade.toLowerCase();
+        const secVal = (stu.section || '').toLowerCase();
+        const selSec = printSection.toLowerCase();
+        return secVal.includes(selSec) || selSec.includes(secVal) ||
+          (selSec.includes('commercial') && (secVal.includes('commercial') || secVal.includes('STT'))) ||
+          (selSec.includes('industrial') && (secVal.includes('industrial') || secVal.includes('IND')));
+      });
+    }
+
+    if (printClass && printClass !== 'All' && printClass !== 'All Classes') {
+      filteredStudents = filteredStudents.filter(
+        (stu) => (stu.classLevel || stu.class_level || '').toLowerCase() === printClass.toLowerCase()
+      );
+    }
+
+    if (printTrade && printTrade !== 'All' && printTrade !== 'All Trades / Series') {
+      filteredStudents = filteredStudents.filter((stu) => {
+        const tradeVal = (stu.trades_series || stu.trade_series || stu.trade || stu.series || stu.specialty || '').toLowerCase();
+        const selTrade = printTrade.toLowerCase();
+        return tradeVal.includes(selTrade) || selTrade.includes(tradeVal);
       });
     }
 
@@ -1386,10 +1964,10 @@ console.log('Students Response:', studentsRes);
 
     const printWindow = window.open('', '_blank');
     let classTitle = 'All Students';
-    if (printClass !== 'All') classTitle = printClass;
-    else if (printSection !== 'All') classTitle = `${printSection} Section`;
+    if (printClass && printClass !== 'All' && printClass !== 'All Classes') classTitle = printClass;
+    else if (printSection && printSection !== 'All' && printSection !== 'All Sections') classTitle = `${printSection} Section`;
 
-    if (printTrade !== 'All') classTitle += ` - Trade: ${printTrade}`;
+    if (printTrade && printTrade !== 'All' && printTrade !== 'All Trades / Series') classTitle += ` - Trade: ${printTrade}`;
 
     const isTechnicalView = printSection === 'Technical' || printTrade !== 'All';
 
@@ -1502,25 +2080,57 @@ console.log('Students Response:', studentsRes);
 
   // Student Registration Submission with Gender Included
  const handleStudentRegistration = async (e) => {
-    e.preventDefault();
-    const chosenSeriesOrTrade = (selectedSeries || selectedTechnicalSubject || 'N/A');
+  e.preventDefault();
+  if (isSubmitting) return;
+  setIsSubmitting(true);
 
-  if ((classLevel?.includes('Sixth') || masterClass?.includes('Sixth')) && chosenSeriesOrTrade === 'N/A') {
-    alert('Please select a Series for Sixth Form students before registering.');
-    return;
-  }
+   const GENERAL_LOWER_CLASSES = [
+      'Form 1A (F1A)', 'Form 1B (F1B)', 'Form 1C (F1C)', 'Form 1D (F1D)',
+      'Form 2A (F2A)', 'Form 2B (F2B)', 'Form 2C (F2C)', 'Form 2D (F2D)',
+      'Form 3A (F3A)', 'Form 3B (F3B)', 'Form 3C (F3C)',
+      'Form 4A (F4A)', 'Form 4B (F4B)',
+      'Form 5 Arts (F5A)', 'Form 5 Science (F5B)'
+    ];
+
+const isGeneralLower = GENERAL_LOWER_CLASSES.some(cls => classLevel === cls || classLevel?.includes(cls));
+
+    const chosenSeriesOrTrade = isGeneralLower
+      ? 'N/A'
+      : (selectedSeries || selectedTechnicalSubject || 'N/A');
+ if ((classLevel?.includes('Sixth') || masterClass?.includes('Sixth')) && chosenSeriesOrTrade === 'N/A') {
+  alert('Please select a Series for Sixth Form students before registering.');
+  setIsSubmitting(false);
+  return;
+}
+
+const sec = (section || '').toLowerCase();
+
+if (sec.includes('commercial') && (!selectedTechnicalSubject || !COMMERCIAL_TRADE_SERIES.includes(selectedTechnicalSubject))) {
+      alert("Validation Error: Please select a valid Technical Commercial trade.");
+      setIsSubmitting(false);
+      return;
+    }
+
+    if (sec.includes('industrial') && (!selectedTechnicalSubject || !INDUSTRIAL_TRADE_SERIES.includes(selectedTechnicalSubject))) {
+      alert("Validation Error: Please select a valid Technical Industrial trade.");
+      setIsSubmitting(false);
+      return;
+    }
     if (!fullName || !guardianPhone || !age || !dob || !gender || !residence) {
   alert('Please fill in all mandatory student credential fields including gender and residence.');
+  setIsSubmitting(false);
   return;
 }
 
     if (phone && !validateCameroonPhone(phone)) {
       alert('Invalid Student Phone Number! Must start with 6 and contain 9 digits.');
+      setIsSubmitting(false);
       return; 
     }
 
     if (!validateCameroonPhone(guardianPhone)) {
       alert('Invalid Guardian Phone Number! Must start with 6 and contain 9 digits.');
+      setIsSubmitting(false);
       return;
     }
 // Direct Multi-Tenant Resolution (Bypasses verification query failures)
@@ -1543,6 +2153,26 @@ console.log('Students Response:', studentsRes);
       alert("Security Error: No active school session or tenant ID found. Please re-select your school.");
       return;
     }
+
+    // Duplicate Check: Verify if student already exists in this school
+     const { data: potentialDuplicate } = await supabase
+        .from('students')
+        .select('id')
+        .eq('school_id', currentSchoolId)
+        .ilike('fullName', fullName.trim())
+        .eq('age', age)
+        .eq('classLevel', classLevel)
+        .maybeSingle();
+
+      if (potentialDuplicate) {
+        const proceed = window.confirm(
+          `Notice: It seems like you have already registered "${fullName}" in ${classLevel}.\n\nDo you still want to register this student again?`
+        );
+        if (!proceed) {
+          setIsSubmitting(false);
+          return;
+        }
+      }
     const uniqueStudentId = generateStudentId(currentSchoolName, section, fullName, classLevel, age, gender);
     const newStudentRecord = {
       school_id: currentSchoolId,
@@ -1569,9 +2199,14 @@ const { error } = await supabase
   .insert([newStudentRecord]);
 
 if (error) {
-  alert("Error registering student to Supabase: " + error.message);
-  return;
-}
+      if (error.message?.includes('EXACT_DUPLICATE_RECORD') || error.code === '23505') {
+        alert(`Registration Error: Student "${fullName}" (${gender}, Age: ${age}, Class: ${classLevel}) has already been registered with these exact details.`);
+      } else {
+        alert("Registration failed due to a system error. Please verify the student details and try again.");
+      }
+      setIsSubmitting(false);
+      return;
+    }
 
 // 2. Update UI locally
 setStudentsList((prev) => [newStudentRecord, ...prev]);
@@ -1587,7 +2222,9 @@ setStudentsList((prev) => [newStudentRecord, ...prev]);
       setGuardianName('');
       setGuardianPhone('');
       setMedicalHistory('');
-      setSelectedSeries(''); // <-- ADD THIS LINE
+      setSelectedSeries(''); 
+      setSelectedTechnicalSubject(''); // Reset technical trade selection
+      setIsSubmitting(false);           // Release submission lock
   };
 
   // Other School Personnel Registration (Bursar, Supervisor, Discipline Master, Principal)
@@ -1612,36 +2249,41 @@ setStudentsList((prev) => [newStudentRecord, ...prev]);
       bursar: 'BS'
     };
     const prefix = roleCodeMap[regRole] || 'ST';
-let uniqueStaffId = '';
+// Reuse existing unique_id / signup_link if editing, otherwise generate new ones
+  // Safe edit check prevents "staffToEdit is not defined" ReferenceError
+  const activeEditRecord = typeof staffToEdit !== 'undefined' ? staffToEdit : null;
+  let uniqueStaffId = activeEditRecord?.unique_id || activeEditRecord?.id || '';
 
-  if (regRole === 'teacher') {
-    // Teacher ID logic: WC-TJO45626K
-    uniqueStaffId = generateTeacherId(schoolName, 'General', fullName, phone);
-  } else {
-    // Original logic strictly preserved for all other staff roles
-    const resolvedSchoolName = (typeof active_school_name !== 'undefined' && active_school_name) 
-      ? active_school_name 
-      : (typeof activeSchool !== 'undefined' ? (activeSchool?.school_name || activeSchool?.name || schoolName || 'School') : (schoolName || 'School'));
-      
-    const schoolWords = String(resolvedSchoolName).trim().split(/\s+/);
-    const schoolInitials = schoolWords.length > 1 
-      ? (schoolWords[0].charAt(0) + schoolWords[1].charAt(0)).toUpperCase() 
-      : schoolWords[0].substring(0, 2).toUpperCase();
+  if (!uniqueStaffId) {
+    if (regRole === 'teacher') {
+      uniqueStaffId = generateTeacherId(schoolName, 'General', fullName, phone);
+    } else {
+      const resolvedSchoolName = (typeof active_school_name !== 'undefined' && active_school_name)
+        ? active_school_name
+        : (typeof activeSchool !== 'undefined' ? (activeSchool?.school_name || activeSchool?.name) || schoolName : schoolName);
 
-    const nameWords = fullName.trim().split(/\s+/);
-    const nameInitials = nameWords.length > 1 
-      ? (nameWords[0].charAt(0) + nameWords[1].charAt(0)).toUpperCase() 
-      : nameWords[0].substring(0, 2).toUpperCase();
+      const schoolWords = String(resolvedSchoolName).trim().split(/\s+/);
+      const schoolInitials = schoolWords.length > 1
+        ? (schoolWords[0].charAt(0) + schoolWords[1].charAt(0)).toUpperCase()
+        : schoolWords[0].substring(0, 2).toUpperCase();
 
-    const phoneDigits = phone ? phone.replace(/\D/g, '') : '0000';
-    const lastFourPhone = phoneDigits.slice(-4).padStart(4, '0');
+      const nameWords = fullName.trim().split(/\s+/);
+      const nameInitials = nameWords.length > 1
+        ? (nameWords[0].charAt(0) + nameWords[1].charAt(0)).toUpperCase()
+        : nameWords[0].substring(0, 2).toUpperCase();
 
-    uniqueStaffId = `${schoolInitials}-${prefix}${nameInitials}${lastFourPhone}`;
+      const phoneDigits = phone ? phone.replace(/\D/g, '') : '0000';
+      const lastFourPhone = phoneDigits.slice(-4).padStart(4, '0');
+
+      uniqueStaffId = `${schoolInitials}-${prefix}${nameInitials}${lastFourPhone}`;
+    }
   }
 
   const token = Math.random().toString(36).substring(2, 10);
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
-  const signupLink = `${baseUrl}/staff-signup?token=${token}&id=${uniqueStaffId}`;
+
+  // Explicitly passes role= parameter and formatted query params
+  const signupLink = activeEditRecord?.signup_link || `${baseUrl}/staff-signup?role=${encodeURIComponent(regRole)}&token=${token}&id=${uniqueStaffId}`;
 
    const activeSchoolId = typeof schoolId !== 'undefined' ? schoolId : (activeSchool?.school_id || activeSchool?.id || '');
 const activeSchoolName = (typeof active_school_name !== 'undefined' ? active_school_name : null) || activeSchool?.name || activeSchool?.['school-name'] || 'NsuhRecords School';
@@ -1654,6 +2296,7 @@ const newStaffRecord = {
   phone: phone,
   email: staffEmail || null,
   residence: staffResidence || null,
+  academic_year: getAcademicYear(),
   role: regRole
 };
 
@@ -1875,9 +2518,11 @@ const handleUpdatePersonnel = async (e) => {
   // Teacher Assignment Submission with Validation Rules & Conflict Checks
   const handleTeacherAssignment = async (e) => {
     e.preventDefault();
+    setIsSubmittingTeacher(true);
 
     if (!teacherName || !teacherPhone || !teacherEmail || selectedTeacherSubjects.length === 0) {
       alert('Please provide teacher name, mandatory email, phone number, and select at least one subject with class schedules.');
+      setIsSubmittingTeacher(false);
       return;
     }
 
@@ -1910,10 +2555,21 @@ const parseTimeToMinutes = (timeStr) => {
 // Flatten and normalize all schedule slots safely from BOTH state sources
     const allScheduleSlots = [];
     for (const sub of selectedTeacherSubjects) {
-      // Prioritize schedulerData if available, fallback to subjectSchedules
-      const rows = (schedulerData && schedulerData[sub] && schedulerData[sub].length > 0)
-        ? schedulerData[sub]
-        : (subjectSchedules[sub] || []);
+      const baseRows = subjectSchedules[sub] || [];
+const customRows = schedulerData[sub] || [];
+
+const maxLen = Math.max(baseRows.length, customRows.length, 1);
+const rows = Array.from({ length: maxLen }, (_, rIdx) => {
+  const base = baseRows[rIdx] || {};
+  const custom = customRows[rIdx] || {};
+  return {
+    ...base,
+    ...custom,
+    day: custom.day || base.day || "Monday",
+    startTime: custom.startTime || base.startTime || "07:30 AM",
+    endTime: custom.endTime || base.endTime || "09:00 AM",
+  };
+});
 
       for (const row of rows) {
         if (!row) continue;
@@ -1957,6 +2613,7 @@ const parseTimeToMinutes = (timeStr) => {
 
     if (hasConflict) {
       alert('Conflict Error: A class cannot receive two subjects at the exact same day and time slot!');
+      setIsSubmittingTeacher(false);
       return;
     }
 // Dynamic Academic Year Calculator (September 1st cutoff)
@@ -2005,19 +2662,19 @@ const generateTeacherId = (schoolNameInput, section, fullName, phoneNumber) => {
 
   const currentSchoolTitle = activeSchool?.name || schoolName || 'Virgin Island';
 
-  const teacherId = generateTeacherId(
+  // Reuse existing teacher_id if editing, otherwise generate a new one
+  const teacherId = teacherToEdit?.teacher_id || teacherToEdit?.id || generateTeacherId(
     currentSchoolTitle,
     teacherSection,
     teacherName,
     teacherPhone
   );
 
+  const signupToken = 'teach_' + Math.random().toString(36).substring(2, 9);
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
 
-
-const signupToken = 'teach_' + Math.random().toString(36).substring(2, 9);
-const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
-const generatedLink = `${baseUrl}/staff-signup?role=teacher?token=${signupToken}&id=${teacherId}`;
-
+  // Reuse existing signup_link if editing, otherwise construct a properly formatted link
+  const generatedLink = teacherToEdit?.signup_link || teacherToEdit?.signupLink || `${baseUrl}/staff-signup?role=teacher&token=${signupToken}&id=${teacherId}`;
  // 1. Safe Multi-Tenant School ID Resolution
     let activeSchoolId = activeSchool?.school_id || activeSchool?.id || currentSchoolId;
 let activeSchoolName = activeSchool?.name || activeSchool?.['school-name'] || schoolName;
@@ -2074,14 +2731,15 @@ const payloadData = {
   schedules: subjectSchedules,
   picture: teacherPhotoPreview || picturePreview || null,
   signup_link: generatedLink,
-  role: 'teacher'
+  role: 'teacher',
+  academic_year: activeSchool?.academic_year || getAcademicYear(),
 };
 
 let error = null;
 
 if (teacherToEdit) {
   // Exclude key identifiers from payload so Supabase update doesn't hit UUID conflicts
-  const { teacher_id, id, ...updateFields } = payloadData;
+  const { id, ...updateFields } = payloadData;
 
   const res = await supabase
     .from('teachers')
@@ -2150,32 +2808,32 @@ setTeacherPhotoPreview(null);
           {navigationHistory.length > 1 && (
             <button 
               onClick={handleGoBack}
-              className="bg-gray-800 hover:bg-gray-700 text-amber-400 border border-gray-700 text-xs px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1 transition-colors"
+              className="bg-gray-800 hover:bg-gray-700 text-sky-400 border border-gray-700 text-xs px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1 transition-colors"
             >
               ← Back
             </button>
           )}
           <div>
-            <h1 className="text-xl font-bold tracking-tight text-amber-400 uppercase">
+            <h1 className="text-xl font-bold tracking-tight text-blue-500 uppercase">
               {hasMounted ? (localStorage.getItem('active_school_name') || localStorage.getItem('activeSchoolName') || schoolName || '') : ''}
 </h1>
 <p className="text-xs text-gray-400">Academic Year: {getAcademicYear()} | Administrator Portal | Contact: {schoolContact}</p>          </div>
         </div>
        {/* High-Resolution School Logo Container */}
-        <div className="hidden md:flex items-center justify-center border border-dashed border-sky-500/50 bg-[#1f2937]/50 rounded-lg px-4 py-1.5 min-w-[130px] h-[52px] overflow-hidden">
-          {schoolLogo && schoolLogo.startsWith('http') ? (
-            <img 
-              src={schoolLogo} 
-              alt="School Logo" 
-              className="max-h-12 max-w-full object-contain filter drop-shadow-md" 
-            />
-          ) : (
-            <span className="text-xs font-semibold text-sky-400 tracking-wider">LOGO</span>
-          )}
-        </div>
+<div className="hidden md:flex items-center justify-center p-1">
+  {schoolLogo && schoolLogo.startsWith('http') ? (
+    <img
+      src={schoolLogo}
+      alt="School Logo"
+      className="max-h-12 max-w-full object-contain filter drop-shadow-md"
+    />
+  ) : (
+    <span className="text-xs font-semibold text-sky-400 tracking-wider">LOGO</span>
+  )}
+</div>
         <div className="flex items-center gap-4">
           <div className="text-right hidden sm:block">
-            <div className="text-xs font-mono text-amber-300 font-semibold">
+            <div className="text-xs font-mono text-blue-400 font-semibold">
               {currentTime ? currentTime.toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' }) : 'Loading date...'}
             </div>
             <div className="text-xs font-mono text-gray-400">
@@ -2204,7 +2862,7 @@ setTeacherPhotoPreview(null);
             onClick={() => changeTab(tab.id)}
             className={`py-3 text-sm font-semibold border-b-2 transition-colors whitespace-nowrap ${
               activeTab === tab.id
-                ? 'border-amber-500 text-amber-400'
+                ? 'border-blue-500 text-blue-400'
                 : 'border-transparent text-gray-400 hover:text-white'
             }`}
           >
@@ -2230,7 +2888,7 @@ setTeacherPhotoPreview(null);
             onClick={() => changeTab(tab.id)}
            className={`w-full p-4 rounded-xl border text-left font-medium text-sm transition-all duration-200 flex items-center justify-between shadow-sm ${
   activeTab === tab.id
-    ? 'bg-amber-500/15 border-amber-500/80 text-amber-300 shadow-amber-500/10 ring-1 ring-amber-500/30'
+    ? 'bg-[#052e16] border-emerald-600 text-[#fdfbf7] shadow-emerald-900/20 ring-1 ring-emerald-500/30'
     : 'bg-gray-900/90 border-gray-800 text-gray-300 hover:bg-gray-800 hover:border-gray-700'
 }`}
           >
@@ -2244,28 +2902,28 @@ setTeacherPhotoPreview(null);
         {activeTab === 'overview' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-              <div className="bg-[#111827] border border-gray-800 p-4 sm:p-6 rounded-xl shadow-md">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Total Students</h3>
-                <p className="text-3xl font-black mt-2 text-white">{totalStudents}</p>
-                <div className="text-[11px] text-gray-400 mt-1 flex gap-2">
+              <div className="bg-[#f0f7ff] border border-blue-200 p-4 sm:p-6 rounded-xl shadow-sm text-slate-900">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-blue-500 font-bold">Total Students</h3>
+                <p className="text-3xl font-black mt-2 text-[#052e16]">{totalStudents}</p>
+                <div className="text-[11px] text-blue-500 font-bold mt-1 flex gap-2">
                   <div>
-    <span>General Education = <strong className="text-amber-400">{generalStudentsCount}</strong></span> | 
-    <span>Technical Commercial = <strong className="text-amber-400">{tcStudentsCount}</strong></span> | 
-    <span>Technical Industrial = <strong className="text-amber-400">{tiStudentsCount}</strong></span>
+                    <span>General Education = <strong className="text-amber-500 font-bold">{generalStudentsCount}</strong> | </span>
+                    <span>Technical Commercial = <strong className="text-amber-500 font-bold">{tcStudentsCount}</strong> | </span>
+                    <span>Technical Industrial = <strong className="text-amber-500 font-bold">{tiStudentsCount}</strong></span>
   </div>
                 </div>
               </div>
-              <div className="bg-[#111827] border border-gray-800 p-6 rounded-xl shadow-md">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Total Teachers</h3>
-                <p className="text-3xl font-black mt-2 text-white">{teachersList.length}</p>
+              <div className="bg-[#f0f7ff] border border-blue-200 p-6 rounded-xl shadow-sm text-slate-900">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-blue-900 font-bold">Total Teachers</h3>
+                <p className="text-3xl font-black mt-2 text-slate-900">{teachersList.length}</p>
               </div>
-              <div className="bg-[#111827] border border-gray-800 p-6 rounded-xl shadow-md">
+              <div className="bg-[#f0f7ff] border border-blue-200 p-6 rounded-xl shadow-sm text-slate-900">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Other Personnel</h3>
                 <p className="text-3xl font-black mt-2 text-blue-400">{personnelList.length}</p>
               </div>
-              <div className="bg-[#111827] border border-gray-800 p-6 rounded-xl shadow-md">
+              <div className="bg-[#f0f7ff] border border-blue-200 p-6 rounded-xl shadow-sm text-slate-900">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Administrators</h3>
-                <p className="text-3xl font-black mt-2 text-amber-400">
+                <p className="text-3xl font-black mt-2 text-blue-400">
   {personnelList.filter(p => p.role === 'administrator').length + 1} / 4
 </p>
               </div>
@@ -2283,26 +2941,22 @@ setTeacherPhotoPreview(null);
               ) : (
                 <div className="hidden md:block overflow-x-auto">
                   {/* Mobile Responsive Card Stack */}
-        <div className="grid grid-cols-1 gap-3 md:hidden">
-          {teachersList.map((t, i) => (
-            <div key={i} className="p-4 rounded-xl bg-gray-900/90 border border-gray-800 space-y-3">
-              <div className="flex items-center justify-between border-b border-gray-800 pb-2">
-                <h4 className="font-bold text-sm text-white">{t.name}</h4>
-                <span className="text-[10px] font-mono text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">{t.id}</span>
-              </div>
-              <div>
-                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Subjects Taught</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {t.subjects?.map((sub, sIdx) => (
-                    <span key={sIdx} className="text-xs px-2 py-1 rounded bg-blue-900/30 text-blue-300 border border-blue-700/50">
-                      {sub}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-          ))}
+       <div className="grid grid-cols-1 gap-2.5 md:hidden">
+  {teachersList.map((t, i) => (
+    <div key={i} className="p-3 rounded-lg bg-gray-900/90 border border-gray-800 space-y-2">
+      <div className="flex items-center justify-between border-b border-gray-800 pb-1.5">
+        <h4 className="font-bold text-xs text-white">{t.name}</h4>
+        <span className="text-[10px] font-mono text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">{t.id || t.teacherId}</span>
+      </div>
+      <div className="text-[11px] text-gray-300">
+        <p className="font-semibold text-amber-400 mb-1 text-[10px] uppercase tracking-wider">Schedule Summary</p>
+        <div className="space-y-1 font-mono text-[10px] leading-tight text-gray-300 bg-gray-950/60 p-2 rounded border border-gray-800/80">
+          {t.scheduleSummary || "No schedule assigned"}
         </div>
+      </div>
+    </div>
+  ))}
+</div>
                   <table className="w-full text-left text-xs text-gray-300 border border-gray-700">
                     <thead className="bg-[#1f2937] text-amber-400 uppercase font-semibold">
                       <tr>
@@ -2312,11 +2966,12 @@ setTeacherPhotoPreview(null);
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-800">
+
                       {teachersList.map((t, i) => (
                         <tr key={i} className="hover:bg-gray-800/40">
                           <td className="p-3 border border-gray-700 font-bold text-white">
                             <div>{t.name}</div>
-                            <span className="text-[10px] font-mono text-amber-400">{t.id}</span>
+                            <span className="text-[10px] font-mono text-amber-400">{t.id || t.teacherId}</span>
                           </td>
                           <td className="p-3 border border-gray-700">
   <div className="flex flex-col gap-1.5 items-start">
@@ -2364,16 +3019,322 @@ setTeacherPhotoPreview(null);
                 >
                   <option value="student">Student</option>
                   <option value="administrator">Administrator</option>
-                  <option value="teacher">Teacher (Use Assign New Teacher Tab)</option>
                   <option value="supervisor">Supervisor</option>
                   <option value="bursar">Bursar</option>
                   <option value="discipline_master">Discipline Master</option>
                   <option value="principal">Principal</option>
                 </select>
               </div>
+              {/* REGISTRATION MODE TOGGLE BUTTONS */}
+{regRole === 'student' && (
+  <div className="space-y-4 mb-6">
+   {/* MODE TOGGLE BUTTONS */}
+          <div className="flex items-center gap-3 p-1.5 bg-[#141d2b] border border-gray-700/60 rounded-lg w-fit">
+            <button
+              type="button"
+              onClick={() => setRegistrationMode('single')}
+              className={`px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                registrationMode === 'single'
+                  ? 'bg-amber-500 text-black shadow-md'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              Single Student Registration
+            </button>
+            <button
+              type="button"
+              onClick={() => setRegistrationMode('bulk')}
+              className={`px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                registrationMode === 'bulk'
+                  ? 'bg-amber-500 text-black shadow-md'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              Bulk Spreadsheet Import (.xlsx)
+            </button>
+          </div>
+
+          {/* 1. TARGET CLASS CONTEXT (ONLY SHOWS UNDER BULK IMPORT MODE) */}
+          {registrationMode === 'bulk' && (
+            <div className="bg-[#141d2b] p-4 rounded-xl border border-amber-500/30 shadow-md">
+              <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider mb-3">
+                1. Select Target Class Context
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+                {/* 1. SECTION SELECT */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-300 mb-1">
+                    Section <span className="text-red-400">*</span>
+                  </label>
+                  <select
+                    value={typeof section !== 'undefined' ? section : ''}
+                    onChange={(e) => {
+                      const newSec = e.target.value;
+                      if (typeof setSection === 'function') setSection(newSec);
+                      if (typeof setClassLevel === 'function') setClassLevel('');
+                      
+                      if (newSec === 'Technical Commercial (STT)' && typeof COMMERCIAL_TRADE_SERIES !== 'undefined' && COMMERCIAL_TRADE_SERIES.length > 0) {
+                        if (typeof setMasterClass === 'function') setMasterClass(COMMERCIAL_TRADE_SERIES[0]);
+                      } else if (newSec === 'Technical Industrial (IND)' && typeof INDUSTRIAL_TRADE_SERIES !== 'undefined' && INDUSTRIAL_TRADE_SERIES.length > 0) {
+                        if (typeof setMasterClass === 'function') setMasterClass(INDUSTRIAL_TRADE_SERIES[0]);
+                      } else {
+                        if (typeof setMasterClass === 'function') setMasterClass('');
+                      }
+                    }}
+                    className="w-full bg-slate-900 border border-gray-700 text-white rounded-lg px-3 py-2 text-xs focus:ring-2"
+                  >
+                    <option value="">-- Select Section --</option>
+                    <option value="General Education">General Education</option>
+                    <option value="Technical Commercial (STT)">Technical Commercial (STT)</option>
+                    <option value="Technical Industrial (IND)">Technical Industrial (IND)</option>
+                  </select>
+                </div>
+
+                {/* 2. CLASS LEVEL SELECT */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-300 mb-1">
+                    Class Level <span className="text-red-400">*</span>
+                  </label>
+                  <select
+                    value={typeof classLevel !== 'undefined' ? classLevel : ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (typeof setClassLevel === 'function') setClassLevel(val);
+                      if (section === 'General Education') {
+                        const isLower = typeof GENERAL_LOWER_CLASSES !== 'undefined' && Array.isArray(GENERAL_LOWER_CLASSES) && GENERAL_LOWER_CLASSES.includes(val);
+                        if (isLower) {
+                          if (typeof setMasterClass === 'function') setMasterClass('N/A');
+                        } else {
+                          if (typeof setMasterClass === 'function') setMasterClass('');
+                        }
+                      }
+                    }}
+                    className="w-full bg-slate-900 border border-gray-700 text-white rounded-lg px-3 py-2 text-xs focus:ring-2"
+                    disabled={!section}
+                  >
+                    <option value="">-- Select Class Level --</option>
+                    
+                    {section === 'General Education' && typeof GENERAL_CLASSES_CATALOG !== 'undefined' && Array.isArray(GENERAL_CLASSES_CATALOG) && GENERAL_CLASSES_CATALOG.map((cls) => (
+                      <option key={cls} value={cls}>{cls}</option>
+                    ))}
+
+                    {section === 'Technical Commercial (STT)' && typeof TECHNICAL_COMMERCIAL_CATALOG !== 'undefined' && Array.isArray(TECHNICAL_COMMERCIAL_CATALOG) && TECHNICAL_COMMERCIAL_CATALOG.map((cls) => (
+                      <option key={cls} value={cls}>{cls}</option>
+                    ))}
+
+                    {section === 'Technical Industrial (IND)' && typeof TECHNICAL_INDUSTRIAL_CATALOG !== 'undefined' && Array.isArray(TECHNICAL_INDUSTRIAL_CATALOG) && TECHNICAL_INDUSTRIAL_CATALOG.map((cls) => (
+                      <option key={cls} value={cls}>{cls}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 3. DYNAMIC TRADE / SERIES DROPDOWN */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-300 mb-1">
+                    Trade / Series
+                  </label>
+
+                  {section === 'General Education' && typeof classLevel !== 'undefined' && classLevel && (classLevel.includes('Sixth') || classLevel.startsWith('L6') || classLevel.startsWith('U6')) ? (
+                    <select
+                      value={typeof masterClass !== 'undefined' ? masterClass : ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (typeof setMasterClass === 'function') setMasterClass(val);
+                        if (typeof setSelectedSeries === 'function') setSelectedSeries(val);
+                      }}
+                      className="w-full bg-slate-900 border border-gray-700 text-white rounded-lg px-3 py-2 text-xs focus:ring-2"
+                    >
+                      <option value="">-- Select Series --</option>
+                      {((classLevel.includes('Arts') || classLevel.includes('L6A') || classLevel.includes('U6A'))
+                        ? GENERAL_SERIES_CATALOG?.ARTS
+                        : GENERAL_SERIES_CATALOG?.SCIENCE
+                      )?.map((seriesCode) => (
+                        <option key={seriesCode} value={seriesCode}>
+                          Series {seriesCode}
+                        </option>
+                      ))}
+                    </select>
+                  ) : section === 'General Education' ? (
+                    <input
+                      type="text"
+                      disabled
+                      value="N/A"
+                      className="w-full bg-slate-800/60 border border-gray-700 text-gray-400 rounded-lg px-3 py-2 text-xs cursor-not-allowed"
+                    />
+                  ) : section === 'Technical Commercial (STT)' ? (
+                    <select
+                      value={typeof masterClass !== 'undefined' && masterClass ? masterClass : (COMMERCIAL_TRADE_SERIES?.[0] || '')}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (typeof setMasterClass === 'function') setMasterClass(val);
+                      }}
+                      className="w-full bg-slate-900 border border-gray-700 text-white rounded-lg px-3 py-2 text-xs focus:ring-2"
+                    >
+                      {typeof COMMERCIAL_TRADE_SERIES !== 'undefined' && Array.isArray(COMMERCIAL_TRADE_SERIES) && COMMERCIAL_TRADE_SERIES.map((trade) => (
+                        <option key={trade} value={trade}>{trade}</option>
+                      ))}
+                    </select>
+                  ) : section === 'Technical Industrial (IND)' ? (
+                    <select
+                      value={typeof masterClass !== 'undefined' && masterClass ? masterClass : (INDUSTRIAL_TRADE_SERIES?.[0] || '')}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (typeof setMasterClass === 'function') setMasterClass(val);
+                      }}
+                      className="w-full bg-slate-900 border border-gray-700 text-white rounded-lg px-3 py-2 text-xs focus:ring-2"
+                    >
+                      {typeof INDUSTRIAL_TRADE_SERIES !== 'undefined' && Array.isArray(INDUSTRIAL_TRADE_SERIES) && INDUSTRIAL_TRADE_SERIES.map((trade) => (
+                        <option key={trade} value={trade}>{trade}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      disabled
+                      placeholder="Select a section first"
+                      className="w-full bg-slate-800/60 border border-gray-700 text-gray-500 rounded-lg px-3 py-2 text-xs cursor-not-allowed"
+                    />
+                  )}
+                </div>
+
+              </div>
+            </div>
+          )}
+  </div>
+)}
+
+{/* BULK UPLOAD PANEL */}
+{regRole === 'student' && registrationMode === 'bulk' && (
+  <div className="bg-[#1f2937]/60 border border-amber-500/40 rounded-xl p-5 mb-5 space-y-4 shadow-xl">
+    <div className="border-b border-gray-700 pb-3">
+      <h3 className="text-sm font-bold text-amber-400 uppercase tracking-wider">
+        Bulk Student Spreadsheet Registration
+      </h3>
+      <p className="text-xs text-gray-300 mt-1">
+        Register an entire class section at once using an Excel template.
+      </p>
+    </div>
+
+    {/* ADMIN INSTRUCTIONS */}
+    <div className="bg-[#141d2b] border border-gray-700/80 rounded-lg p-4 text-xs text-gray-300 space-y-2">
+      <p className="font-semibold text-amber-300">Simple Instructions for Administrators:</p>
+      <ol className="list-decimal list-inside space-y-1 text-gray-300">
+        <li>Select target <strong>Section</strong>, <strong>Class Level</strong>, and <strong>Trade/Series</strong> using the dropdowns below.</li>
+        <li>Click <strong>Download Class Template (.xlsx)</strong> to get your pre-formatted sheet.</li>
+        <li>Fill in student names, date of birth, gender, residence, and guardian details. <em>Leave Student IDs empty—they generate automatically!</em></li>
+        <li>Choose your completed Excel file and click <strong>Parse Excel File</strong> to verify records.</li>
+      </ol>
+    </div>
+
+    {/* ACTIONS */}
+    <div className="flex flex-wrap items-center gap-4 pt-2">
+      <button
+        type="button"
+        onClick={handleDownloadBulkTemplate}
+        className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg text-xs font-semibold flex items-center gap-2 shadow-md transition-all"
+      >
+        📥 Download Class Template (.xlsx)
+      </button>
+
+      <input
+        type="file"
+        accept=".xlsx, .xls, .csv"
+        onChange={(e) => setBulkFile(e.target.files[0])}
+        className="block text-xs text-gray-300 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-amber-500 file:text-black hover:file:bg-amber-400 cursor-pointer"
+      />
+
+      <button
+        type="button"
+        onClick={handleParseBulkFile}
+        disabled={!bulkFile || isProcessingBulk}
+        className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black rounded-lg text-xs font-bold shadow-md transition-all disabled:opacity-50"
+      >
+        {isProcessingBulk ? "Parsing File..." : "Parse Excel File"}
+      </button>
+    </div>
+
+    {/* IMPORT PROGRESS BAR */}
+    {isProcessingBulk && (
+      <div className="space-y-1.5 pt-2">
+        <div className="flex justify-between text-xs text-amber-300 font-semibold">
+          <span>{uploadProgress === 100 ? "Upload Complete!" : "Importing Students..."}</span>
+          <span>{uploadProgress}%</span>
+        </div>
+        <div className="w-full bg-gray-800 rounded-full h-2.5 overflow-hidden border border-gray-700">
+          <div
+            className="bg-amber-500 h-2.5 rounded-full transition-all duration-300"
+            style={{ width: `${uploadProgress}%` }}
+          />
+        </div>
+      </div>
+    )}
+    {/* PARSED DATA PREVIEW TABLE */}
+    {bulkParsedData.length > 0 && (
+      <div className="mt-4 pt-4 border-t border-gray-700 space-y-3">
+        <div className="flex justify-between items-center">
+          <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">
+            Parsed Preview ({bulkParsedData.length} Students Ready)
+          </span>
+          <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setBulkParsedData([])}
+            className="text-xs text-red-400 hover:text-red-300 underline"
+          >
+            Clear Preview
+          </button>
+          <button
+            type="button"
+            onClick={handleExecuteBulkImport}
+            disabled={isProcessingBulk}
+            className="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white font-bold text-xs rounded-md shadow transition-all disabled:opacity-50"
+          >
+            {isProcessingBulk ? "Importing..." : `Confirm & Register (${bulkParsedData.length}) Students`}
+          </button>
+        </div>
+        </div>
+
+        <div className="max-h-56 overflow-y-auto border border-gray-700 rounded-lg">
+          <table className="w-full text-left text-xs text-gray-300">
+            <thead className="bg-[#141d2b] text-gray-400 sticky top-0 uppercase text-[10px] tracking-wider">
+              <tr>
+                <th className="p-2 border-b border-gray-700">Full Name</th>
+                <th className="p-2 border-b border-gray-700">Gender</th>
+                <th className="p-2 border-b border-gray-700">Date of Birth</th>
+                <th className="p-2 border-b border-gray-700">Residence</th>
+                <th className="p-2 border-b border-gray-700">Guardian Name</th>
+                <th className="p-2 border-b border-gray-700">Guardian Phone</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-800">
+              {bulkParsedData.map((row, idx) => (
+                <tr key={idx} className="hover:bg-gray-800/40">
+                  <td className="p-2 font-medium text-white">{row.full_name || row["Full Name"] || '-'}</td>
+              <td className="p-2">{row.gender || row["Gender"] || '-'}</td>
+              <td className="p-2">{row.dob || row["Date of Birth"] || row["DOB"] || '-'}</td>
+              <td className="p-2">{row.residence || row["Residence"] || '-'}</td>
+              <td className="p-2">{row.guardian_name || row["Guardian Name"] || '-'}</td>
+              <td className="p-2">{row.guardian_phone || row["Guardian Phone"] || row.phone || '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    )}
+  </div>
+)}
 
               {regRole === 'student' ? (
                 <form onSubmit={handleStudentRegistration} className="space-y-2">
+                  {/* STUDENT REGISTRATION GUIDE CONTAINER */}
+          <div className="bg-[#1f2937]/60 border border-gray-700/80 rounded-xl p-3.5 mb-3 shadow-inner">
+            <p className="text-xs text-gray-200 italic leading-relaxed font-sans">
+              <strong className="text-blue-400 not-italic font-semibold mr-1">Important Registration Guide:</strong>
+              Accurate registration directly determines student report cards and academic records. Ensure all required fields—including Section, Class Level, and Trade/Series—are correctly filled. If a class enrollment is under 50 students, assign all students to stream <span className="text-blue-300 font-semibold not-italic">A</span> (e.g., Form 1A) and avoid mixing streams.
+            </p>
+          </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
                     <div>
   <label className="block text-xs font-semibold uppercase tracking-wider text-amber-400 mb-1">SECTION</label>
@@ -2411,8 +3372,11 @@ setTeacherPhotoPreview(null);
   <select
     value={classLevel}
     onChange={(e) => {
-      setClassLevel(e.target.value);
-    }}
+  const val = e.target.value;
+  setClassLevel(val);
+  setSelectedSeries('');
+  setSelectedTechnicalSubject('');
+}}
     className="w-full bg-[#1f2937] border border-amber-500/50 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none"
   >
   {((section?.includes('General') || section === 'General Education')
@@ -2478,7 +3442,7 @@ setTeacherPhotoPreview(null);
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
                       required
-                      placeholder="e.g. Nsuh Brayden"
+                      placeholder="e.g. Taku Cecilia"
                       className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white"
                     />
                   </div>
@@ -2531,7 +3495,7 @@ setTeacherPhotoPreview(null);
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
-                      <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Quarter / Residence</label>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-amber-400 mb-1">Quarter / Residence *</label>
                       <input 
                         type="text" 
                         value={residence}
@@ -2557,7 +3521,7 @@ setTeacherPhotoPreview(null);
                         type="text" 
                         value={guardianName}
                         onChange={(e) => setGuardianName(e.target.value)}
-                        placeholder="Mr. Che"
+                        placeholder="Mr. Taku"
                         className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white"
                       />
                     </div>
@@ -2785,14 +3749,14 @@ setTeacherPhotoPreview(null);
               )}
             </div>
               <span className="text-xs bg-amber-500/20 text-amber-400 px-3 py-1 rounded-full border border-amber-500/30 font-mono">
-              Total: {studentsList.length} (TE: {studentsList.filter(s => s.section === 'Technical Commercial' || s.section === 'Technical Industrial' || s.section?.toLowerCase().includes('technical')).length} | General: {studentsList.filter(s => s.section === 'General Education' || s.section?.toLowerCase().includes('general')).length})
+              Total: {studentsList.length} (TE: {studentsList.filter(s => s.section === 'Technical Commercial(STT)' || s.section === 'Technical Industrial(IND)' || s.section?.toLowerCase().includes('technical')).length} | General: {studentsList.filter(s => s.section === 'General Education' || s.section?.toLowerCase().includes('general')).length})
               </span>
             </h2>
 {/* Export & Print Action Bar */}
-<div className="flex flex-wrap gap-3 mb-4 justify-between items-center bg-gray-800/80 p-3 rounded-lg border border-gray-700">
+<div className="flex flex-col sm:flex-row gap-3 mb-4 justify-between items-start sm:items-center bg-gray-800/80 p-3 rounded-lg border border-gray-700">
   <h3 className="text-lg font-bold text-white">Student Directory Actions</h3>
   
-  <div className="flex gap-2">
+  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
     <div className="flex flex-wrap items-center gap-2">
           {/* Section Selector */}
           <select
@@ -2887,6 +3851,7 @@ setTeacherPhotoPreview(null);
                 <option key={t} value={t}>
                   {t}
                 </option>
+
               ))}
 
             {/* Technical Industrial Trade Series */}
@@ -2898,30 +3863,145 @@ setTeacherPhotoPreview(null);
               ))}
           </select>
           {/* Print Trigger Button */}
-          <button
-            type="button"
-            onClick={handlePrint}
-className="w-full sm:w-auto bg-gray-700 hover:bg-gray-600 text-white font-semibold text-xs px-3 py-1.5 rounded border border-gray-600 flex items-center justify-center gap-1.5"          >
-            🖨️ Print List
-          </button>
-        </div>
+         <button
+  type="button"
+  onClick={handlePrint}
+  className="w-full sm:w-auto px-3 py-1.5 bg-gray-700 hover:bg-gray-600 active:scale-95 transition-transform text-white font-semibold text-xs rounded border border-gray-600 flex items-center justify-center gap-1.5 cursor-pointer"
+>
+  🖨️ Print List
+</button>
+{/* Add right after </button> on line 3216 */}
+<span className="px-2.5 py-1.5 bg-amber-500/10 border border-amber-500/30 rounded text-amber-400 font-semibold text-xs whitespace-nowrap">
+  Filtered: {
+    studentsList.filter((stu) => {
+      // 1. Flexible Section Filter (STT = Commercial, IND = Industrial, TE = Technical)
+      if (printSection !== 'All' && printSection !== 'All Sections') {
+        const pSec = printSection.toLowerCase();
+        const sSec = String(stu.section || stu.education_type || stu.educationType || stu.school_type || '').toLowerCase();
+        const sClass = String(stu.classLevel || stu.class_level || stu.className || stu.class || '').toLowerCase();
+        
+        let secMatch = sSec === pSec || sSec.includes(pSec) || pSec.includes(sSec);
+        if (!secMatch) {
+          if (pSec.includes('commercial') || pSec.includes('stt')) {
+            secMatch = sSec.includes('commercial') || sSec.includes('stt') || sSec === 'te' || sSec.includes('technical') || sClass.includes('com') || sClass.includes('stt');
+          } else if (pSec.includes('industrial') || pSec.includes('ind')) {
+            secMatch = sSec.includes('industrial') || sSec.includes('ind') || sSec === 'te' || sSec.includes('technical') || sClass.includes('ind');
+          } else if (pSec.includes('general')) {
+            secMatch = sSec.includes('general') || sClass.includes('gen');
+          }
+        }
+        if (!secMatch) return false;
+      }
 
-    <button
-      type="button"
-      onClick={handleExportExcel}
-      className="w-full sm:w-auto px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded font-medium text-xs transition flex items-center justify-center gap-1.5"
-    >
-      📊 Export to Excel
-    </button>
+      // 2. Flexible Class Filter (Extracts short codes like 'Y1Com' or 'Y1Ind')
+      if (printClass !== 'All' && printClass !== 'All Classes') {
+        const pClass = printClass.toLowerCase();
+        const sClass = String(stu.classLevel || stu.class_level || stu.className || stu.class || '').toLowerCase();
+        const codeInParen = pClass.match(/\(([^)]+)\)/)?.[1] || '';
+        const classMatch = sClass === pClass || sClass.includes(pClass) || pClass.includes(sClass) || (codeInParen !== '' && sClass.includes(codeInParen.toLowerCase()));
+        if (!classMatch) return false;
+      }
+     if (printTrade !== 'All' && printTrade !== 'All Trades / Series' && printTrade !== '') {
+        const pTrade = printTrade.toLowerCase();
+        const sTrade = String(stu.trades_series || stu.trade_series || stu.trade || stu.series || stu.specialty || '').toLowerCase();
+        if (sTrade && !sTrade.includes(pTrade) && !pTrade.includes(sTrade)) return false;
+      }
+      if (searchQuery.trim() !== '') {
+        const q = searchQuery.toLowerCase().trim();
+        const name = (stu.fullName || stu.fullname || stu.full_name || '').toLowerCase();
+        const id = (stu.unique_code || stu.id || stu.student_id || '').toLowerCase();
+        const cls = (stu.classLevel || stu.class_level || '').toLowerCase();
+        const sec = (stu.section || '').toLowerCase();
+        const trd = (stu.trades_series || stu.trade_series || stu.trade || stu.series || stu.specialty || '').toLowerCase();
+        if (!name.includes(q) && !id.includes(q) && !cls.includes(q) && !sec.includes(q) && !trd.includes(q)) return false;
+      }
+      return true;
+    }).length
+  }
+</span>
+</div>
 
-    <button
-      type="button"
-      onClick={handleExportPDF}
-      className="w-full sm:w-auto px-3 py-1.5 bg-rose-700 hover:bg-rose-600 text-white rounded font-medium text-xs transition flex items-center justify-center gap-1.5"
-    >
-      📄 Download PDF
-    </button>
+<div className="relative group sm:w-auto w-full">
+  <button
+    type="button"
+    onClick={handleExportExcel}
+    className="w-full sm:w-auto px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 active:scale-95 transition-transform text-white font-semibold text-xs rounded-lg flex items-center justify-center gap-1.5 shadow-sm"
+  >
+    📊 Export to Excel
+  </button>
+  
+  {/* Pop-up Tooltip */}
+  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:flex group-active:flex flex-col items-center w-64 p-2.5 bg-[#0f172a] text-white text-[11px] rounded-md shadow-2xl border border-gray-700 pointer-events-none z-50 text-center leading-tight">
+    Export student list to Excel. Easily re-enroll these students for the next academic year with a single click.
+    <div className="w-2 h-2 bg-[#0f172a] border-r border-b border-gray-700 rotate-45 -mb-3 mt-1"></div>
   </div>
+</div>
+
+<button
+  type="button"
+  onClick={() => setShowPdfModal(true)}
+  className="w-full sm:w-auto px-3 py-1.5 bg-rose-700 hover:bg-rose-600 active:scale-95 transition-transform text-white font-medium text-xs rounded flex items-center justify-center gap-1.5 cursor-pointer"
+>
+  📄 Download PDF
+</button>
+  </div>
+  {/* PDF Export Modal */}
+{showPdfModal && (
+  <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div className="bg-[#042014] border border-emerald-500/40 rounded-xl p-6 max-w-md w-full shadow-2xl text-center space-y-6 relative overflow-hidden">
+      {/* Decorative Green Glow */}
+      <div className="absolute -top-10 -left-10 w-32 h-32 bg-emerald-500/20 rounded-full blur-2xl pointer-events-none" />
+
+      <h3 className="text-lg font-bold text-emerald-400 uppercase tracking-wide">
+        Select PDF Export Type
+      </h3>
+
+      <div className="flex flex-col gap-3">
+        {/* Class List Option */}
+        <button
+          type="button"
+          onClick={() => {
+            setShowPdfModal(false);
+            handleExportPDF('classList');
+          }}
+          className="w-full py-3 px-4 rounded-lg border border-emerald-500/50 bg-emerald-900/40 hover:bg-emerald-800/60 transition-all font-semibold text-emerald-300 hover:text-white flex items-center justify-between group"
+        >
+          <span className="animate-pulse underline underline-offset-4 decoration-emerald-400">
+            📋 Class List (Roster)
+          </span>
+          <span className="text-xs text-emerald-400/80 group-hover:text-emerald-200">
+            S/N, Name & Blank Columns
+          </span>
+        </button>
+
+        {/* All Selected Fields Option */}
+        <button
+          type="button"
+          onClick={() => {
+            setShowPdfModal(false);
+            handleExportPDF('all');
+          }}
+          className="w-full py-3 px-4 rounded-lg border border-emerald-500/50 bg-emerald-900/40 hover:bg-emerald-800/60 transition-all font-semibold text-emerald-300 hover:text-white flex items-center justify-between group"
+        >
+          <span className="animate-pulse underline underline-offset-4 decoration-emerald-400 delay-150">
+            📑 All Selected Fields
+          </span>
+          <span className="text-xs text-emerald-400/80 group-hover:text-emerald-200">
+            Full Table Details
+          </span>
+        </button>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setShowPdfModal(false)}
+        className="text-xs text-gray-400 hover:text-white underline mt-2"
+      >
+        Cancel
+      </button>
+    </div>
+  </div>
+)}
 </div>
             {studentsList.length === 0 ? (
               <div className="text-center py-12 text-gray-500 text-sm">
@@ -2954,19 +4034,18 @@ className="w-full sm:w-auto bg-gray-700 hover:bg-gray-600 text-white font-semibo
                     if (printClass !== 'All' && stu.classLevel?.toLowerCase() !== printClass.toLowerCase()) {
                       return false;
                     }
-                    if (printTrade !== 'All') {
-                      const tradeVal = stu.trade || stu.trade_series || stu.specialty || '';
-                      if (tradeVal.toLowerCase() !== printTrade.toLowerCase()) return false;
-                    }
+                  if (printTrade !== 'All') {
+  const tradeVal = stu.trades_series || stu.trade_series || stu.trade || stu.series || stu.specialty || '';
+  if (tradeVal.toLowerCase() !== printTrade.toLowerCase()) return false;
+}
                     // Smart Search (First letters, Name, ID, Class, Section, Trade)
                     if (searchQuery.trim() !== '') {
-                      const q = searchQuery.toLowerCase().trim();
-                      const name = (stu.fullName || '').toLowerCase();
-                      const id = (stu.unique_code || stu.id || '').toLowerCase();
-                      const cls = (stu.classLevel || '').toLowerCase();
-                      const sec = (stu.section || '').toLowerCase();
-                      const trd = (stu.trade || stu.trade_series || stu.specialty || '').toLowerCase();
-
+  const q = searchQuery.toLowerCase().trim();
+  const name = (stu.fullName || stu.fullname || stu.full_name || '').toLowerCase();
+  const id = (stu.unique_code || stu.id || stu.student_id || '').toLowerCase();
+  const cls = (stu.classLevel || stu.class_level || '').toLowerCase();
+  const sec = (stu.section || '').toLowerCase();
+  const trd = (stu.trades_series || stu.trade_series || stu.trade || stu.series || stu.specialty || '').toLowerCase();
                       const nameMatch = name.includes(q) || name.startsWith(q);
                       const idMatch = id.includes(q);
                       const classMatch = cls.includes(q);
@@ -3134,11 +4213,12 @@ className="w-full sm:w-auto bg-gray-700 hover:bg-gray-600 text-white font-semibo
                 <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Section</label>
                 <select 
                   value={teacherSection} 
-                  onChange={(e) => {
-                    setTeacherSection(e.target.value);
-                    setSelectedTeacherSubjects([]);
-                    setSubjectSchedules({});
-                  }}
+                 onChange={(e) => {
+          setTeacherSection(e.target.value);
+          setSelectedSection(e.target.value);
+          setSelectedTeacherSubjects([]);
+          setSubjectSchedules({});
+        }}
                   className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white"
                 >
                   <option value="General Education">General Education</option>
@@ -3149,24 +4229,27 @@ className="w-full sm:w-auto bg-gray-700 hover:bg-gray-600 text-white font-semibo
               </div>
 
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-amber-400 mb-2">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
                   Select Subjects Taught (Click subjects to add forms and configure day, start time, and end time)
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 max-h-56 overflow-y-auto bg-[#1f2937]/50 p-3 rounded-lg border border-gray-700/50">
-          {getAvailableSubjects().map((sub, idx) => (
-            <label 
-              key={idx} 
-              className="flex items-center gap-2.5 text-xs text-gray-300 cursor-pointer p-2 hover:bg-gray-800/60 rounded-md transition-colors touch-manipulation active:bg-gray-700/50"
-            >
-              <input
-                type="checkbox"
-                checked={selectedTeacherSubjects.includes(sub)}
-                onChange={(e) => handleSubjectToggle(sub, e.target.checked)}
-                className="w-4 h-4 rounded border-gray-700 text-amber-600 focus:ring-0 cursor-pointer accent-amber-500 shrink-0"
-              />
-              <span className="leading-tight select-none">{sub}</span>
-            </label>
-          ))}
+          {getFilteredSubjects(teacherSection || selectedSection).map((subObj, idx) => {
+  const sub = typeof subObj === 'string' ? subObj : subObj.name;
+  return (
+    <label
+      key={idx}
+      className="flex items-center gap-2.5 text-xs text-gray-300 cursor-pointer p-2 hover:bg-gray-800/60 rounded"
+    >
+      <input
+        type="checkbox"
+        checked={selectedTeacherSubjects.includes(sub)}
+        onChange={(e) => handleSubjectToggle(sub, e.target.checked)}
+        className="w-4 h-4 rounded border-gray-700 text-amber-600 focus:ring-0 cursor-pointer accent-amber-500"
+      />
+      <span className="leading-tight select-none">{sub}</span>
+    </label>
+  );
+})}
         </div>
               </div>
 
@@ -3198,9 +4281,9 @@ className="w-full sm:w-auto bg-gray-700 hover:bg-gray-600 text-white font-semibo
                                   onChange={(e) => handleScheduleRowChange(subject, rIdx, 'className', e.target.value)}
                                   className="w-full bg-[#1f2937] border border-gray-700 rounded p-2 text-xs text-amber-300"
                                 >
-                                  {ALL_AVAILABLE_CLASSES.map((cls, cId) => (
-                                    <option key={cId} value={cls}>{cls}</option>
-                                  ))}
+                                  {getSectionClasses(selectedSection || '').map((cls, cId) => (
+  <option key={cId} value={cls}>{cls}</option>
+))}
                                 </select>
                               </div>
                               <div className="w-full md:w-36">
@@ -3350,48 +4433,9 @@ className="w-full sm:w-auto bg-gray-700 hover:bg-gray-600 text-white font-semibo
                 Total: {teachersList.length}
               </span>
             </h2>
-
-            {teachersList.length === 0 ? (
-              <div className="text-center py-12 text-gray-500 text-sm">
-                No teachers assigned yet. Use the "Assign New Teacher" tab to add faculty members.
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {teachersList.map((teacher, index) => (
-                  <div key={teacher.id || index} className="bg-[#1f2937]/50 border border-gray-800 p-5 rounded-xl space-y-4">
-                    <div className="flex justify-between items-start border-b border-gray-800 pb-3">
-                      <div>
-                        <h3 className="text-base font-bold text-white">{teacher.name}</h3>
-                        <p className="text-xs text-gray-400 mt-1">Phone: {teacher.phone || 'N/A'} | Email: {teacher.email || 'N/A'}</p>
-                      </div>
-                      <button
-                        onClick={() => {
-                          navigator.clipboard.writeText(teacher.id);
-                          alert(`Teacher ID ${teacher.id} copied to clipboard!`);
-                        }}
-                        className="text-xs bg-amber-500/10 border border-amber-500/40 text-amber-400 font-mono px-2 py-1 rounded hover:bg-amber-500/20 transition"
-                      >
-                        ID: {teacher.id} (Copy)
-                      </button>
-                    </div>
-
-                    <div className="space-y-1">
-                      <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Subjects Taught:</span>
-                      <div className="flex flex-wrap gap-1.5 pt-1">
-                        {(teacher.subjects || []).map((sub, sIdx) => (
-                          <span key={sIdx} className="text-xs bg-blue-900/40 border border-blue-600/40 text-blue-300 px-2.5 py-1 rounded-md">
-                            {sub}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
+          
         )}
-
             {teachersList.length === 0 ? (
               <div className="text-center py-12 text-gray-500 text-sm">
                 No teachers assigned yet. Use the "Assign New Teacher" tab to add faculty members.
@@ -3425,48 +4469,71 @@ className="w-full sm:w-auto bg-gray-700 hover:bg-gray-600 text-white font-semibo
   <span className="text-xs font-semibold text-gray-300 block mb-1.5">Click Subject to View Log Sheet:</span>
   <div className="flex flex-wrap gap-1.5">
    {(() => {
-  const rawSchedules = teacher.schedules || teacher.timetable || [];
-const scheduleList = Array.isArray(rawSchedules) ? rawSchedules : [];
+  const scheduleSlots = [];
 
-const uniqueSlots = scheduleList
-      .filter(s => s && s.subject && (s.className || s.class || s.class_name || s.form))
-      .map(s => ({
-        subject: s.subject,
-        className: s.className || s.class || s.class_name || s.form
+  // Parse teacher.schedules (e.g. { Commerce: [{classLevel: '...'}], ... })
+  if (teacher.schedules && typeof teacher.schedules === 'object') {
+    Object.entries(teacher.schedules).forEach(([subjectName, slots]) => {
+      if (Array.isArray(slots)) {
+        slots.forEach(slot => {
+          const classTitle = slot.classLevel || slot.className || slot.class || '';
+          const exists = scheduleSlots.some(s => s.subject === subjectName && s.classLevel === classTitle);
+          if (!exists) {
+            scheduleSlots.push({ subject: subjectName, classLevel: classTitle });
+          }
+        });
+      }
+    });
+  } 
+  // Fallback if teacher.schedule is an array
+  else if (Array.isArray(teacher.schedule)) {
+    teacher.schedule.forEach(slot => {
+      if (slot.subject) {
+        const classTitle = slot.classLevel || slot.className || slot.class || '';
+        const exists = scheduleSlots.some(s => s.subject === slot.subject && s.classLevel === classTitle);
+        if (!exists) {
+          scheduleSlots.push({ subject: slot.subject, classLevel: classTitle });
+        }
+      }
+    });
+  }
+
+  // Final fallback to teacher.subjects array
+  const displayItems = scheduleSlots.length > 0 
+    ? scheduleSlots 
+    : (teacher.subjects || []).map(s => ({
+        subject: typeof s === 'object' ? (s.name || s.subject) : s,
+        classLevel: teacher.classLevel || ''
       }));
 
-  return uniqueSlots.length > 0 ? (
-    uniqueSlots.map((slot, sIdx) => (
-      <button
-        key={sIdx}
-        onClick={() => setSelectedTeacherForLogs({ teacher, subject: slot.subject, className: slot.className || 'General Education' })}
-        className="bg-blue-900/40 border border-blue-600/50 hover:bg-blue-600 text-blue-200 text-xs px-2.5 py-1 rounded-md flex items-center gap-1 transition-all"
-      >
-        <span>📄</span>
-        <span>{slot.className} - {slot.subject} (View Logs & Progression)</span>
-      </button>
-    ))
-  ) : (
-    teacher.subjects && teacher.subjects.length > 0 ? (
-      teacher.subjects.map((sub, sIdx) => {
-        const subName = typeof sub === 'object' ? sub.name || sub.label || sub.subject : sub;
-        const clsName = typeof sub === 'object' ? (sub.class || sub.className || sub.form || '') : (teacher.assigned_classes?.[sIdx] || teacher.class_name || teacher.className || '');
-        const displayLabel = clsName ? `${clsName} - ${subName}` : subName;
-        return (
-          <button
-            key={sIdx}
-            onClick={() => setSelectedTeacherForLogs({ teacher, subject: subName, className: clsName || 'General Education' })}
-            className="bg-blue-900/40 border border-blue-600/50 hover:bg-blue-600 text-blue-200 text-xs px-2.5 py-1 rounded flex items-center gap-1.5 transition-colors"
-          >
-            <span>📄</span>
-            <span>{displayLabel} (View Logs & Progression)</span>
-          </button>
-        );
-      })
-    ) : (
-      <span className="text-xs text-gray-500 italic">No log subjects assigned</span>
-    )
-  );
+  if (displayItems.length === 0) {
+    return <span className="text-xs text-gray-500 italic">No log subjects assigned</span>;
+  }
+
+  return displayItems.map((item, sIdx) => (
+    <button
+      key={sIdx}
+      onClick={() => setSelectedTeacherForLogs({
+        teacher,
+        subject: item.subject,
+        classLevel: item.classLevel,
+        className: item.classLevel,
+        section: teacher.section
+      })}
+      className="bg-blue-900/40 border border-blue-600/50 hover:bg-blue-600 text-blue-200 text-xs px-2.5 py-1 rounded flex items-center gap-2 mb-1.5"
+    >
+      <span>📄</span>
+      <span>
+        <strong>{item.subject}</strong>
+        {item.classLevel && (
+          <span className="ml-1.5 bg-blue-800/80 text-blue-100 px-1.5 py-0.5 rounded text-[10px] font-bold">
+            ({item.classLevel})
+          </span>
+        )}
+      </span>
+      <span className="text-gray-400 text-[11px]">(View Logs & Progression)</span>
+    </button>
+  ));
 })()}
   </div>
 </div>
@@ -3499,13 +4566,23 @@ const uniqueSlots = scheduleList
         </button>
 
         <button
-          onClick={() => {
-            const confirmDelete = window.confirm(`Are you sure you want to delete ${teacher.name}? This action cannot be undone.`);
-            if (confirmDelete) {
-              setTeachersList((prev) => prev.filter((t) => t.id !== teacher.id));
-              alert(`${teacher.name} has been successfully deleted.`);
-            }
-          }}
+          onClick={async () => {
+              const confirmDelete = window.confirm(`Are you sure you want to delete ${teacher.name}? This action cannot be undone.`);
+              if (confirmDelete) {
+                const targetId = teacher.teacher_id || teacher.id;
+                const { error } = await supabase
+                  .from('teachers')
+                  .delete()
+                  .eq('teacher_id', targetId);
+                if (error) {
+                  alert(`Error deleting teacher from database: ${error.message}`);
+                  return;
+                }
+
+                setTeachersList((prev) => prev.filter((t) => (t.teacher_id || t.id) !== targetId));
+                alert(`${teacher.name} has been permanently deleted.`);
+              }
+            }}
           className="bg-red-900/40 hover:bg-red-800/60 border border-red-700/60 text-red-300 font-bold text-xs py-2 px-3 rounded transition-colors flex items-center justify-center gap-1"
           title="Delete Teacher"
         >
@@ -3543,6 +4620,7 @@ const uniqueSlots = scheduleList
                       <th className="p-3 border border-gray-700">Name</th>
                       <th className="p-3 border border-gray-700">Unique ID (Click to Copy)</th>
                       <th className="p-3 border border-gray-700">Contact / Email</th>
+                      <th className="p-3 border border-gray-700">Signup Link</th>
                       <th className="p-3 border border-gray-700 text-center">Action</th>
                     </tr>
                   </thead>
@@ -3567,6 +4645,23 @@ const uniqueSlots = scheduleList
                           <div>{person.phone}</div>
                           <div className="text-gray-400 text-[11px]">{person.email}</div>
                         </td>
+                        <td className="p-3 border border-gray-700">
+              {person.signup_link || person.signupLink ? (
+                <button
+                  onClick={() => {
+                    const link = person.signup_link || person.signupLink;
+                    navigator.clipboard.writeText(link);
+                    alert(`Signup Link copied: ${link}`);
+                  }}
+                  className="px-2 py-1 bg-emerald-900/40 text-emerald-300 border border-emerald-700/60 rounded text-xs hover:bg-emerald-800/60 font-mono flex items-center gap-1 cursor-pointer transition-colors"
+                  title="Click to copy signup link"
+                >
+                  <span>📋</span> Copy Link
+                </button>
+              ) : (
+                <span className="text-gray-500 italic text-[11px]">N/A</span>
+              )}
+            </td>
                       <td className="p-3 border border-gray-700 text-center">
                   <div className="flex items-center justify-center gap-2">
                     <button
@@ -3602,7 +4697,12 @@ const uniqueSlots = scheduleList
           {/* Header Controls */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-gray-800">
             <div>
-              <h2 className="text-xl font-bold text-white">Class & Subject Coefficients</h2>
+              <div className="flex items-center gap-3">
+  <h2 className="text-xl font-bold text-white">Class & Subject Coefficients</h2>
+  <span className="bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs px-2.5 py-1 rounded-full font-semibold">
+    {subjectCoefficients.filter(s => s.selected || s.included).length} Subjects Selected
+  </span>
+</div>
               <p className="text-xs text-gray-400">Select section, class, and set individual subject coefficients for report card calculations.</p>
             </div>
             <div className="flex items-center gap-3">
@@ -3613,38 +4713,52 @@ const uniqueSlots = scheduleList
                 + Add Custom Subject
               </button>
               <button
-                onClick={async () => {
-                  const currentSchoolId = activeSchool?.id || activeSchool?.school_id || session?.user?.user_metadata?.school_id || session?.user?.id;
+               onClick={async () => {
+  const currentSchoolId = activeSchool?.id || activeSchool?.school_id || session?.user?.user_metadata?.school_id;
 
-      if (!currentSchoolId) {
-        alert("School ID missing. Please refresh or select a school.");
-        return;
-      }
-                 const payload = subjectCoefficients
-  .filter(s => s.selected)
-  .map(s => ({
-    school_id: currentSchoolId,
-    section: selectedSection,
-    classLevel: selectedClass,
-   trades_series: selectedTradeSeries || null,
-    subject_code: s.subject_code || (s.name ? s.name.substring(0, 4).toUpperCase() : 'SUBJ'),
-    subject_name: s.name || s.subject_name,
-    category: s.category || 'General Core Subjects',
-    coefficient: parseFloat(s.coefficient) || 1,
-    is_included: true
-  }));
+  if (!currentSchoolId) {
+    alert("School ID missing");
+    return;
+  }
 
-let deleteQuery = supabase
-  .from('class_coefficients')
-  .delete()
-  .eq('school_id', currentSchoolId)
-  .eq('section', selectedSection)
-  .eq('classLevel', selectedClass);
+  // Create clean payload for the exact selected class
+  const payload = subjectCoefficients
+    .filter(s => s.selected)
+    .filter((s, idx, self) => idx === self.findIndex(t => (t.name || t.subject_name) === (s.name || s.subject_name)))
+    .map(s => ({
+      school_id: currentSchoolId,
+      section: selectedSection,
+      classLevel: selectedClass.trim(),
+      trades_series: selectedTradeSeries || null,
+      subject_code: s.subject_code || (s.name ? s.name.substring(0, 4).toUpperCase() : 'SUBJ'),
+      subject_name: s.name || s.subject_name,
+      category: s.category || 'General Core Subjects',
+      coefficient: parseFloat(s.coefficient) || 1,
+      is_included: true
+    }));
 
-if (selectedTradeSeries) {
-  deleteQuery = deleteQuery.eq('trades_series', selectedTradeSeries);
-} else {
+  // Safeguard: Alert only if zero changes were made to an already saved class
+  if (isSavedForCurrentClass && payload.length === 0) {
+    alert(`Subjects and coefficients for "${selectedClass?.trim()}" are already assigned. Modify a subject selection or coefficient before updating.`);
+    return;
+  }
+
+          // Delete ONLY records matching the exact unique class level
+          let deleteQuery = supabase
+            .from('class_coefficients')
+            .delete()
+            .eq('school_id', currentSchoolId)
+            .eq('section', selectedSection)
+            .eq('classLevel', selectedClass.trim());
+
+const targetTradeSeries = GENERAL_LOWER_CLASSES.includes(selectedClass.trim()) 
+  ? 'N/A' 
+  : (selectedTradeSeries || null);
+
+if (targetTradeSeries === null) {
   deleteQuery = deleteQuery.is('trades_series', null);
+} else {
+  deleteQuery = deleteQuery.eq('trades_series', targetTradeSeries);
 }
 
 const { error: deleteError } = await deleteQuery;
@@ -3662,8 +4776,9 @@ if (payload.length > 0) {
       if (insertError) {
         alert("Error saving coefficients: " + insertError.message);
       } else {
-        alert("Coefficients saved successfully! Report cards will automatically reflect these values.");
-      }
+  setIsSavedForCurrentClass(true);
+  alert("Coefficients saved successfully! Report cards will automatically reflect these values.");
+}
     } else {
       alert("Please check at least one subject before saving.");
     }
@@ -3700,41 +4815,6 @@ if (payload.length > 0) {
             <div>
               <label className="block text-xs font-semibold text-gray-400 mb-1 uppercase">Class Level</label>
               <select
-                value={selectedClass}
-                onChange={async (e) => {
-  const newClass = e.target.value;
-  setSelectedClass(newClass);
-  setSelectedTradeSeries('');
-
-  if (!newClass || !activeSchool?.id) return;
-
-  // Fetch saved coefficients/subjects for this class from Supabase
-  const { data, error } = await supabase
-    .from('class_coefficients')
-    .select('*')
-    .eq('school_id', activeSchool.id)
-    .eq('classLevel', newClass);
-
-  if (error) {
-    console.error("Error fetching class subjects:", error.message);
-    return;
-  }
-
-  if (data && data.length > 0) {
-    // Map fetched records back into your local subject state array
-    setSubjectCoefficients(prevSubjects => 
-      prevSubjects.map(sub => {
-        const found = data.find(d => d.subject_name === (sub.name || sub.subject_name));
-        return found ? { ...sub, selected: true, coefficient: found.coefficient } : { ...sub, selected: false };
-      })
-    );
-  } else {
-    // Reset selections if no template exists yet for this class
-    setSubjectCoefficients(prevSubjects => 
-      prevSubjects.map(sub => ({ ...sub, selected: false }))
-    );
-  }
-}}
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
               >
               {(selectedSection === 'General Education' ? GENERAL_CLASSES_CATALOG : selectedSection === 'Technical Industrial (IND)' ? TECHNICAL_INDUSTRIAL_CATALOG : TECHNICAL_COMMERCIAL_CATALOG).map((cls) => (
@@ -3984,6 +5064,7 @@ if (payload.length > 0) {
                   <tr className="bg-[#1B4D3E] text-white border-b border-emerald-900 text-center">
                     <th className="p-3 border-r border-gray-700 w-10 sticky left-0 z-20 bg-[#1B4D3E]" rowSpan={2}>N°</th>
                     <th className="p-3 border-r border-gray-700 text-left min-w-[180px] sticky left-10 z-20 bg-[#1B4D3E]" rowSpan={2}>Student Name</th>
+                    <th className="p-3 border-r border-gray-700 text-center min-w-[120px] bg-[#1B4D3E]" rowSpan={2}>unique_code</th>
                     {masterSubjects.map((sub) => (
                       <th key={sub.id || sub.subject_name} className="p-2 border-r border-gray-700 min-w-[120px]" colSpan={2}>
                         <div className="font-bold text-white text-xs leading-tight line-clamp-2 min-h-[28px] flex items-center justify-center">{sub.subject_name}</div>
@@ -3999,8 +5080,8 @@ if (payload.length > 0) {
                   <tr className="bg-[#1B4D3E] text-white border-b border-emerald-900 text-center text-[10px]">
                     {masterSubjects.map((sub) => (
                       <React.Fragment key={`seq-hdr-${sub.id || sub.subject_name}`}>
-                        <th className="p-1 border-r border-gray-700 w-1/2 min-w-[60px] text-[10px] font-semibold text-center uppercase tracking-wider text-gray-300">Seq 1</th>
-<th className="p-1 border-r border-gray-700 w-1/2 min-w-[60px] text-[10px] font-semibold text-center uppercase tracking-wider text-gray-300">Seq 2</th>
+<th className="p-1 border-r border-gray-700 w-1/2 min-w-[60px] text-[10px] font-semibold text-center uppercase">{seq1Label}</th>
+  <th className="p-1 border-r border-gray-700 w-1/2 min-w-[60px] text-[10px] font-semibold text-center uppercase">{seq2Label}</th>
                       </React.Fragment>
                     ))}
                   </tr>
@@ -4011,20 +5092,38 @@ if (payload.length > 0) {
                     let totalCoeffs = 0;
 
                    const missingSubjects = [];
-
   masterSubjects.forEach((sub) => {
     const coef = Number(sub.coefficient) || 1;
     totalCoeffs += coef;
 
-    const m = student.marks?.find((item) => (item.subject || item.subject_name) === (sub.subject || sub.subject_name));
-    
+const marksList = Array.isArray(student.marks) ? student.marks : [];
+const m = marksList.find((item) => 
+  (sub.id && item.subject_id === sub.id) ||
+  (item.subject_name && sub.subject_name && item.subject_name.trim().toLowerCase() === sub.subject_name.trim().toLowerCase()) ||
+  (item.subject && sub.subject && item.subject.trim().toLowerCase() === sub.subject.trim().toLowerCase())
+);  
     // Check available sequence marks dynamically
-    const seq1Valid = m?.seq1_mark !== undefined && m?.seq1_mark !== null && m?.seq1_mark !== '' && m?.seq1 !== '-';
-    const seq2Valid = m?.seq2_mark !== undefined && m?.seq2_mark !== null && m?.seq2_mark !== '' && m?.seq2 !== '-';
+        let raw1 = null;
+        let raw2 = null;
 
-    const s1 = seq1Valid ? Number(m.seq1_mark ?? m.seq1) : null;
-    const s2 = seq2Valid ? Number(m.seq2_mark ?? m.seq2) : null;
-
+        if (masterTerm?.includes('Term 2')) {
+          raw1 = m?.seq3_mark || m?.seq3 || student?.seq3_mark || student?.seq3 || null;
+          raw2 = m?.seq4_mark || m?.seq4 || student?.seq4_mark || student?.seq4 || null;
+        } else if (masterTerm?.includes('Term 3')) {
+          raw1 = m?.seq5_mark || m?.seq5 || student?.seq5_mark || student?.seq5 || null;
+          raw2 = m?.seq6_mark || m?.seq6 || student?.seq6_mark || student?.seq6 || null;
+        } else {
+          raw1 = m?.seq1_mark || m?.seq1 || student?.seq1_mark || student?.seq1 || null;
+          raw2 = m?.seq2_mark || m?.seq2 || student?.seq2_mark || student?.seq2 || null;
+        }
+        const s1 = (raw1 !== undefined && raw1 !== null && raw1 !== '' && Number(raw1) !== 0) ? Number(raw1) : null;
+const s2 = (raw2 !== undefined && raw2 !== null && raw2 !== '' && Number(raw2) !== 0) ? Number(raw2) : null;
+console.log(`[Master Sheet Log] Student: ${student.name} | Term: ${masterTerm}`, {
+  subject: sub.subject_name || sub.subject,
+  markRecord: m,
+  extractedS1: s1,
+  extractedS2: s2
+});
     let subAvg = 0;
     if (s1 !== null && s2 !== null) {
       subAvg = (s1 + s2) / 2;
@@ -4044,19 +5143,24 @@ if (payload.length > 0) {
                     return (
                       <tr key={student.id} className="hover:bg-amber-50/60 transition border-b border-gray-300">
                         <td className="p-2 border-r border-gray-800 text-center font-mono text-gray-400">{idx + 1}</td>
-                        <td className="p-2 border-r border-gray-300 font-semibold text-gray-900 min-w-[180px] sticky left-10 z-10 bg-white">
-  <div className="flex items-center justify-between gap-2">
-    <span>{student.name}</span>
-    {missingSubjects.length > 0 && (
-      <span 
-        className="px-1.5 py-0.5 text-[9px] bg-amber-100 text-amber-800 border border-amber-300 rounded cursor-help font-normal"
-        title={`Pending mark entry for: ${missingSubjects.join(', ')}`}
-      >
-        ⚠️ {missingSubjects.length} Pending
-      </span>
-    )}
-  </div>
-</td>
+                       <td className="p-2 border-r border-gray-300 font-semibold text-gray-900 min-w-[180px]">
+            <span>{student.name || student.full_name || student.student_name}</span>
+          </td>
+          <td className="p-1 border-r border-gray-300 text-center min-w-[120px]">
+            <input
+              type="text"
+              value={student.unique_code || student.matricule || ''}
+              onChange={(e) => {
+                const updatedCode = e.target.value;
+
+                setMasterStudentsData(prev => 
+                  prev.map(s => s.id === student.id ? { ...s, unique_code: updatedCode } : s)
+                );
+              }}
+              placeholder="Enter Code"
+              className="w-full text-center text-xs font-mono py-1 px-1 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-emerald-600 bg-white text-gray-900"
+            />
+          </td>
                         {masterSubjects.map((sub) => {
                           const m = student.marks?.find((item) => (item.subject_id === sub.id || item.subject_name === sub.subject_name || item.subject === (sub.subject_name || sub.name || sub)));
                           return (
@@ -4072,15 +5176,7 @@ if (payload.length > 0) {
   onChange={(e) => handleAdminMarkChange(student.id, sub.id || sub.subject || sub.subject_name, 'seq1_mark', e.target.value)}
   className="w-12 text-center bg-transparent border-b border-transparent hover:border-amber-500 focus:border-amber-600 focus:bg-amber-50 focus:outline-none font-mono text-xs font-semibold text-gray-900 transition-colors"
 />
-                  {m?.edit_count > 0 && m?.id && (
-                    <button
-                      onClick={() => handleUnlockMarks(m.id)}
-                      className="ml-1 text-[10px] text-amber-400 hover:text-amber-300 font-bold"
-                      title="Unlock mark for teacher edit"
-                    >
-                      🔓
-                    </button>
-                  )}
+                
                 </td>
                               <td className="p-2 border-r border-gray-800 text-center font-mono relative group">
                   <input
@@ -4124,7 +5220,7 @@ if (payload.length > 0) {
                 <tfoot>
             {/* Subject Average Row */}
             <tr className="bg-slate-900/90 font-semibold border-t-2 border-emerald-600/60 text-white">
-              <td colSpan={2} className="px-4 py-2 text-right text-xs text-slate-300">
+            <td colSpan={3} className="px-4 py-2 text-right text-xs text-slate-300">
                 Subject Average (/20):
               </td>
               {masterSubjects?.map((sub) => {
@@ -4142,12 +5238,12 @@ if (payload.length > 0) {
                   </td>
                 );
               })}
-              <td colSpan={3} className="bg-slate-900/90"></td>
+              <td colSpan={3} className="px-4 py-2 text-right text-xs text-slate-300"></td>
             </tr>
 
             {/* Pass Percentage Row */}
             <tr className="bg-slate-900 font-semibold border-b border-slate-700 text-white">
-              <td colSpan={2} className="px-4 py-2 text-right text-xs text-slate-300">
+              <td colSpan={3} className="px-4 py-2 text-right text-xs text-slate-300">
                 Passed (% ≥ 10/20):
               </td>
               {masterSubjects?.map((sub) => {
@@ -4161,7 +5257,7 @@ if (payload.length > 0) {
                   : '-';
 
                 return (
-                  <td key={`pct_${sub.id}`} colSpan={2} className="text-center py-2 text-xs text-emerald-400">
+                  <td key={`pct_${sub.id}`} colSpan={3} className="text-center py-2 text-xs text-emerald-400">
                     {passPct}
                   </td>
                 );
@@ -4185,7 +5281,7 @@ if (payload.length > 0) {
         
       )}
         {activeTab === 'details' && (
-          <div className="bg-[#111827] border border-gray-800 p-8 rounded-xl max-w-2xl mx-auto shadow-2xl space-y-6">
+          <div className="bg-[#0b1329] border border-gray-800 p-4 sm:p-8 rounded-2xl w-full max-w-7xl mx-auto shadow-2xl space-y-6">
             <h2 className="text-lg font-bold text-white border-b border-gray-800 pb-3">School Parameters & Configuration</h2>
             
             <div className="space-y-4">
@@ -4198,6 +5294,18 @@ if (payload.length > 0) {
                   className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-gray-400 cursor-not-allowed"
                 />
               </div>
+              <div>
+  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
+    School Motto
+  </label>
+  <input
+    type="text"
+    value={schoolMotto || ''}
+    onChange={(e) => setSchoolMotto(e.target.value)}
+    placeholder="e.g. Discipline, Hard Work, Success"
+    className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none"
+  />
+</div>
               <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
               School Official Logo
@@ -4271,10 +5379,39 @@ if (payload.length > 0) {
     className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500"
   />
 </div>
-
+{/* SCHOOL RULES & REGULATIONS */}
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
+              School Rules & Regulations
+            </label>
+            <textarea
+              rows={6}
+              value={schoolRules}
+              onChange={(e) => setSchoolRules(e.target.value)}
+              placeholder="Type, paste, or format internal school rules, policies, or code of conduct..."
+              className="w-full bg-white border border-gray-300 rounded-lg p-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-500 font-sans shadow-inner"
+            />
+            {/* DOCUMENT UPLOAD (PDF / WORD <= 0.5MB) */}
+            <div className="bg-[#1f2937] p-3 rounded-lg border border-gray-700 mt-3">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-amber-400 mb-1">
+                Upload Official Rules Document (PDF / Word — Max 0.5MB)
+              </label>
+              <input
+                type="file"
+                accept=".pdf,.doc,.docx"
+                onChange={handleRulesFileUpload}
+                className="block w-full text-xs text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-blue-600 hover:file:bg-blue-500 file:text-white hover:file:bg-amber-500 cursor-pointer"
+              />
+              {rulesFileUrl && (
+                <p className="mt-2 text-xs text-green-400 font-medium truncate">
+                  Attached: {rulesFileUrl}
+                </p>
+              )}
+            </div>
+          </div>
               <button 
-                onClick={() => alert('School parameters updated successfully!')}
-                className="w-full bg-amber-600 hover:bg-amber-500 text-white font-semibold py-3 rounded-lg shadow-lg transition-all"
+              onClick={handleSaveSchoolDetails}
+              className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 rounded-lg shadow-lg transition-all"
               >
                 Save Changes
               </button>
@@ -4612,12 +5749,15 @@ if (payload.length > 0) {
                 No, Cancel
               </button>
               <button
-                type="button"
-                onClick={confirmDeleteStudent}
-                className="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white font-semibold text-sm rounded-xl shadow-lg shadow-red-600/30 transition-all flex items-center gap-2"
-              >
-                Yes, Delete Student
-              </button>
+  type="button"
+  disabled={isDeleting}
+  onClick={confirmDeleteStudent}
+  className={`px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white font-semibold text-sm rounded-xl shadow-lg transition-all ${
+    isDeleting ? 'opacity-50 cursor-not-allowed' : ''
+  }`}
+>
+  {isDeleting ? 'Deleting...' : 'Yes, Delete Student'}
+</button>
             </div>
           </div>
         </div>
@@ -5091,7 +6231,7 @@ return (
                 <div className="text-xs text-emerald-100 mt-1 flex items-center gap-2 flex-wrap">
                   <span>Teacher: <strong className="text-white">{selectedTeacherForLogs?.teacher?.name || selectedTeacherForLogs?.teacher?.full_name || 'Staff Member'}</strong></span>
                   <span className="text-emerald-300">|</span>
-                  <span>Subject: <strong className="text-white">{selectedTeacherForLogs?.subject || 'N/A'}</strong></span>
+                  <span>Subject: <strong className="text-white">{selectedTeacherForLogs?.subject || 'N/A'}</strong></span> | <span>classLevel: <strong className="text-white">{selectedTeacherForLogs?.classLevel || selectedTeacherForLogs?.className || 'N/A'}</strong></span>
                 </div>
               </div>
               <button
@@ -5107,7 +6247,7 @@ return (
               <div className="flex items-center gap-2 text-xs text-[#2D5A27] font-bold">
                 <span className="text-gray-700">Active Class Sheet:</span>
                 <span className="bg-[#2D5A27] text-white px-3 py-1 rounded-md text-xs font-bold tracking-wide shadow-sm">
-                  {selectedTeacherForLogs?.className || 'General'}
+                  {selectedTeacherForLogs?.teacher?.section || selectedTeacherForLogs?.section || 'General Education'}
                 </span>
               </div>
               <div className="flex items-center gap-4">
