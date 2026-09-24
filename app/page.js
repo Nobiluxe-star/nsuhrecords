@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
 // Initialize Supabase Client
@@ -13,6 +13,11 @@ export default function LandingPage() {
   const [selectedSchool, setSelectedSchool] = useState('');
   const [studentId, setStudentId] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+
+  // Searchable School Dropdown State
+  const [schoolSearchQuery, setSchoolSearchQuery] = useState('');
+  const [isSchoolDropdownOpen, setIsSchoolDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
 
   // Authentication Modals State
   const [activeModal, setActiveModal] = useState(null); // 'staff' | 'forgot_password' | null
@@ -43,6 +48,25 @@ export default function LandingPage() {
     fetchAssignedSchools();
   }, []);
 
+  // Close searchable dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsSchoolDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Filtered schools based on search input
+  const filteredSchools = assignedSchools.filter((school) => {
+    const name = school.name || school.institution_name || '';
+    return name.toLowerCase().includes(schoolSearchQuery.toLowerCase());
+  });
+
+  const selectedSchoolObj = assignedSchools.find(s => (s.school_id || s.id) === selectedSchool);
+
   // Handlers
   const handleStudentLogin = async (e) => {
     e.preventDefault();
@@ -56,43 +80,73 @@ export default function LandingPage() {
       return;
     }
 
-    const isGeneral = studentId.startsWith('GE');
-    const isTechnical = studentId.startsWith('TE');
-
-    if (!isGeneral && !isTechnical) {
-      setErrorMessage('Invalid Student ID format. ID must start with "GE" (General) or "TE" (Technical). Contact your school administration.');
-      return;
-    }
-
     setErrorMessage('');
-    // Strict Tenant Isolation: Ensure the unique_code exists and belongs directly to the selected school_id
-    const tableName = isTechnical ? 'technical_education_students' : 'general_education_students';
 
-    const { data: matchedStudent, error } = await supabase
-      .from(tableName)
+    // Query student tables directly with school and unique ID matching without prefix barriers
+    let matchedStudent = null;
+
+    const { data: studentData, error: studentErr } = await supabase
+      .from('students')
       .select('id, school_id, unique_code')
       .eq('unique_code', studentId.trim())
       .eq('school_id', selectedSchool)
       .maybeSingle();
 
-    if (error || !matchedStudent) {
+    if (!studentErr && studentData) {
+      matchedStudent = studentData;
+    } else {
+      const { data: techData } = await supabase
+        .from('technical_commercial_students')
+        .select('id, school_id, unique_code')
+        .eq('unique_code', studentId.trim())
+        .eq('school_id', selectedSchool)
+        .maybeSingle();
+
+      if (techData) {
+        matchedStudent = techData;
+      } else {
+        const { data: indData } = await supabase
+          .from('technical_industrial_students')
+          .select('id, school_id, unique_code')
+          .eq('unique_code', studentId.trim())
+          .eq('school_id', selectedSchool)
+          .maybeSingle();
+
+        if (indData) {
+          matchedStudent = indData;
+        } else {
+          const { data: genData } = await supabase
+            .from('general_education_students')
+            .select('id, school_id, unique_code')
+            .eq('unique_code', studentId.trim())
+            .eq('school_id', selectedSchool)
+            .maybeSingle();
+
+          if (genData) {
+            matchedStudent = genData;
+          }
+        }
+      }
+    }
+
+    if (!matchedStudent) {
       setErrorMessage('Authentication Failed: Student ID not found for the selected school.');
       return;
     }
-    // 1. Bind active school context for multi-tenant isolation
+
+    // Bind active school context for multi-tenant isolation
     localStorage.setItem('active_school_id', selectedSchool);
     localStorage.setItem('student_unique_id', studentId.trim());
-    // Store the verified student primary key ID
     localStorage.setItem('student_row_id', matchedStudent.id);
 
     // Set active school session context in PostgreSQL
     await supabase.rpc('set_active_school', { school_id: selectedSchool });
 
-    // 2. Redirect to Student Dashboard with student ID, unique code, and school parameters
+    // Redirect to Student Dashboard Router
     const targetSchool = assignedSchools.find(s => (s.school_id || s.id) === selectedSchool);
     const schoolName = targetSchool ? (targetSchool.name || targetSchool.institution_name) : '';
 
-    window.location.href = `/student-dashboard?id=${encodeURIComponent(studentId.trim())}&row_id=${encodeURIComponent(matchedStudent.id)}&school_name=${encodeURIComponent(schoolName)}&school_id=${encodeURIComponent(selectedSchool)}`;   
+    window.location.href = `/student-dashboard?id=${encodeURIComponent(studentId.trim())}&row_id=${encodeURIComponent(matchedStudent.id)}&school_name=${encodeURIComponent(schoolName)}&school_id=${encodeURIComponent(selectedSchool)}`;  
   };
 
   const handleStaffLogin = async (e) => {
@@ -112,7 +166,6 @@ export default function LandingPage() {
       let targetEmail = inputIdentifier.toLowerCase();
       let teacherData = null;
 
-      // Fetch teacher details AND join assigned_schools to get institution_name
       let teacherQuery = supabase
         .from('teachers')
         .select('*');
@@ -135,7 +188,6 @@ export default function LandingPage() {
         ? teacher.email.trim().toLowerCase()
         : `${teacher.teacher_id.toLowerCase()}@nsuhrecords.internal`;
 
-      // Validate credentials against Supabase Auth
       const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
         email: targetEmail,
         password: inputPassword,
@@ -146,7 +198,6 @@ export default function LandingPage() {
         return;
       }
 
-      // Store teacher identity & multi-tenant school context
       const teacherName = teacherData.full_name || teacherData.name || teacherData.teacher_name || 'Teacher';
       const schoolName = teacherData.assigned_schools?.institution_name || teacherData.school_name || 'Assigned School';
 
@@ -180,12 +231,10 @@ export default function LandingPage() {
         return;
       }
 
-      // Resolve target email for Supabase Auth
       const targetEmail = personnel.email
         ? personnel.email.trim().toLowerCase()
         : `${personnel.unique_id.toLowerCase()}@nsuhrecords.internal`;
 
-      // Authenticate password securely against Supabase Auth
       const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
         email: targetEmail,
         password: inputPassword,
@@ -196,7 +245,6 @@ export default function LandingPage() {
         return;
       }
 
-      // Fetch ground-truth school details from assigned_schools table
       let verifiedSchoolName = personnel.school_name || '';
       if (personnel.school_id) {
         const { data: schoolData } = await supabase
@@ -212,7 +260,6 @@ export default function LandingPage() {
 
       const staffName = personnel.full_name || personnel.name || 'Staff Member';
 
-      // Persist identity and ground-truth multi-tenant context
       localStorage.setItem('active_staff_id', personnel.unique_id || '');
       localStorage.setItem('active_staff_name', staffName);
 
@@ -222,7 +269,6 @@ export default function LandingPage() {
         await supabase.rpc('set_active_school', { school_id: personnel.school_id });
       }
 
-      // SAFEGUARD OVERRIDE FOR BURSAR
       if (personnel?.role && personnel.role.toLowerCase().trim() === 'bursar') {
         window.location.href = '/bursar-dashboard';
         return;
@@ -266,7 +312,6 @@ export default function LandingPage() {
     window.location.href = rolePath;
   };
 
-  // Supabase Password Reset Handler
   const handlePasswordReset = async (e) => {
     e.preventDefault();
     setResetStatusMessage('');
@@ -348,28 +393,72 @@ export default function LandingPage() {
               STUDENT / PARENT DIRECT ACCESS
             </span>
             
-            <div>
+            <div className="relative" ref={dropdownRef}>
               <label className="block text-xs font-semibold text-slate-300 mb-1">Select School</label>
-              <select 
-                value={selectedSchool} 
-                onChange={(e) => setSelectedSchool(e.target.value)}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                required
+              <div 
+                onClick={() => setIsSchoolDropdownOpen(!isSchoolDropdownOpen)}
+                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white cursor-pointer flex justify-between items-center focus:border-blue-500"
               >
-                <option value="">{assignedSchools.length === 0 ? '-- No schools assigned yet --' : '-- Choose your school --'}</option>
-                {assignedSchools.map((school) => (
-                  <option key={school.school_id || school.name} value={school.school_id}>
-                    {school.name}
-                  </option>
-                ))}
-              </select>
+                <span className={selectedSchoolObj ? 'text-white' : 'text-slate-400'}>
+                  {selectedSchoolObj ? (selectedSchoolObj.name || selectedSchoolObj.institution_name) : (assignedSchools.length === 0 ? '-- No schools assigned yet --' : '-- Choose your school --')}
+                </span>
+                <span className="text-slate-400 text-xs">▼</span>
+              </div>
+
+              {isSchoolDropdownOpen && (
+                <div className="absolute z-20 mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
+                  <div className="p-2 border-b border-slate-700">
+                    <input
+                      type="text"
+                      placeholder="Type school name to search..."
+                      value={schoolSearchQuery}
+                      onChange={(e) => setSchoolSearchQuery(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="max-h-48 overflow-y-auto">
+                    <div
+                      onClick={() => {
+                        setSelectedSchool('');
+                        setIsSchoolDropdownOpen(false);
+                        setSchoolSearchQuery('');
+                      }}
+                      className="px-3 py-2 text-xs text-slate-400 hover:bg-slate-700 cursor-pointer"
+                    >
+                      -- Choose your school --
+                    </div>
+                    {filteredSchools.length === 0 ? (
+                      <div className="px-3 py-2 text-xs text-slate-500 text-center">No school found</div>
+                    ) : (
+                      filteredSchools.map((school) => {
+                        const sName = school.name || school.institution_name;
+                        const sId = school.school_id || school.id;
+                        return (
+                          <div
+                            key={sId}
+                            onClick={() => {
+                              setSelectedSchool(sId);
+                              setIsSchoolDropdownOpen(false);
+                              setSchoolSearchQuery('');
+                            }}
+                            className={`px-3 py-2 text-xs cursor-pointer hover:bg-blue-600 hover:text-white ${selectedSchool === sId ? 'bg-blue-600/30 text-blue-400 font-bold' : 'text-slate-200'}`}
+                          >
+                            {sName}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">Student Unique ID</label>
               <input 
                 type="text" 
-                placeholder="E.G. TEF1NG100126 OR GEF1NG100126"
+                placeholder="E.G. DT-TACY1COM15G26"
                 value={studentId}
                 onChange={(e) => setStudentId(e.target.value.toUpperCase())}
                 className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 uppercase"

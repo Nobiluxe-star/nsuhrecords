@@ -1,7 +1,14 @@
 'use client';
-import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import * as XLSX from 'xlsx';
+
+import { getCurrentAcademicYear } from '../../lib/academicYear';
+
+import GeneralMarkSheet from './components/mark-sheets/GeneralMarkSheet';
+import TechnicalCommercialMarkSheet from './components/mark-sheets/TechnicalCommercialMarkSheet';
+import TechnicalIndustrialMarkSheet from './components/mark-sheets/TechnicalIndustrialMarkSheet';
+import SubjectCoefficientsManager from './components/SubjectCoefficientsManager';
 
 // Cameroon Ministry of Secondary Education Official Classes, Technical & Commercial Trades, Subjects & Series Catalog
 export const GENERAL_LOWER_CLASSES = [
@@ -69,11 +76,11 @@ export const GENERAL_SERIES_CATALOG = {
   SCIENCE: ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8'],
   series: {
     ARTS: [
-      { code: 'A1', subjects: ['Literature in English', 'History', 'French Language'] },
+      { code: 'A1', subjects: ['Literature', 'History', 'French Language'] },
       { code: 'A2', subjects: ['Geography', 'Economics', 'History'] },
-      { code: 'A3', subjects: ['Literature in English', 'Economics', 'History'] },
+      { code: 'A3', subjects: ['Literature', 'Economics', 'History'] },
       { code: 'A4', subjects: ['Economics', 'Geography', 'Mathematics'] },
-      { code: 'A5', subjects: ['Literature in English', 'History', 'Philosophy'] }
+      { code: 'A5', subjects: ['Literature', 'History', 'Philosophy'] }
     ],
     SCIENCE: [
       { code: 'S1', subjects: ['Physics', 'Chemistry', 'Mathematics'] },
@@ -189,7 +196,7 @@ const generateTeacherId = (schoolName, section, fullName, phoneNumber) => {
   return `${schoolCode}-${secCode}${initials}${phoneSuffix}${yearSuffix}${randomLetter}`;
 };
 const START_TIME_OPTIONS = [
-  "07:30 AM", "08:15 AM", "09:00 AM", "09:45 AM", "10:30 AM", "11:15 AM",
+  "07:30 AM", "08:15 AM", "09:00 AM", "09:45 AM", "10:30 AM", "1:15 AM",
   "12:00 PM", "12:30 PM", "12:45 PM", "01:00 PM", "01:15 PM", "01:30 PM",
   "01:45 PM", "02:00 PM", "02:15 PM", "02:30 PM", "02:45 PM", "03:00 PM",
   "03:15 PM", "03:30 PM", "03:45 PM", "04:00 PM", "04:15 PM"
@@ -204,7 +211,7 @@ const END_TIME_OPTIONS = [
 export const getAcademicYear = () => {
     const now = new Date();
     const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth(); // 0-indexed: 8 is September
+    const currentMonth = now.getMonth(); // 0-indexed: 8 is Sept7ember
     
     if (currentMonth >= 8) {
       return `${currentYear}-${currentYear + 1}`;
@@ -241,7 +248,7 @@ export const ALL_SUBJECTS_LIST = [
   { name: "Computer Science / ICT", category: "General Core Subjects" },
   { name: "Economic Geography", category: "General Core Subjects" },
   { name: "English Language", category: "General Core Subjects" },
-  { name: "English Literature", category: "General Core Subjects" },
+  { name: "Literature", category: "General Core Subjects" },
   { name: "Food Science", category: "General Core Subjects" },
   { name: "French Language", category: "General Core Subjects" },
   { name: "Further Mathematics", category: "General Core Subjects" },
@@ -261,7 +268,7 @@ export const ALL_SUBJECTS_LIST = [
   { name: "Pure Mathematics with Statistics", category: "General Core Subjects" },
   { name: "Religious Studies", category: "General Core Subjects" },
   { name: "School Orientation", category: "General Core Subjects" },
-  { name: "Sports and Physical Education", category: "General Core Subjects" },
+  { name: "Sports & Physical Education", category: "General Core Subjects" },
 
   // Commercial Subjects
   { name: "Application of Management Software", category: "Commercial Subjects" },
@@ -348,12 +355,62 @@ export default function AdminDashboardPage() {
   const [navigationHistory, setNavigationHistory] = useState(['overview']);
   const [showWelcomeOverlay, setShowWelcomeOverlay] = useState(true);
   const [hasMounted, setHasMounted] = useState(false);
-const [editingPersonnel, setEditingPersonnel] = useState(null);
+  const [masterClass, setMasterClass] = useState('');
+  const [editingPersonnel, setEditingPersonnel] = useState(null);
   const [isEditPersonnelModalOpen, setIsEditPersonnelModalOpen] = useState(false);
   const [pendingUncheckSubject, setPendingUncheckSubject] = useState(null);
   const [isEditingSchedule, setIsEditingSchedule] = useState(false);
-const [teacherToEdit, setTeacherToEdit] = useState(null);
-const [selectedTeacherForLogs, setSelectedTeacherForLogs] = useState(null);
+  const [teacherToEdit, setTeacherToEdit] = useState(null);
+  const [selectedSection, setSelectedSection] = useState('');
+  const [selectedTeacherForLogs, setSelectedTeacherForLogs] = useState(null);
+  const [fetchedLessonLogs, setFetchedLessonLogs] = useState([]);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+
+  useEffect(() => {
+    if (!selectedTeacherForLogs) return;
+
+    const loadTeacherLogs = async () => {
+      setIsLoadingLogs(true);
+      const teacherId = selectedTeacherForLogs.teacher_id || selectedTeacherForLogs.id;
+      const subjectName = selectedTeacherForLogs.subject;
+      const cacheKey = `nsuh_logs_${teacherId}_${subjectName}`;
+
+      try {
+        if (navigator.onLine) {
+          const { data, error } = await supabase
+            .from('lesson_logs')
+            .select('*')
+            .eq('teacher_id', teacherId)
+            .eq('subject_name', subjectName)
+            .order('created_at', { ascending: true });
+
+          if (!error && data) {
+            setFetchedLessonLogs(data);
+            localStorage.setItem(cacheKey, JSON.stringify(data));
+            setIsLoadingLogs(false);
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Online fetch failed, loading offline logs:", err);
+      }
+
+      // Offline Fallback
+      const localData = localStorage.getItem(cacheKey);
+      if (localData) {
+        try {
+          setFetchedLessonLogs(JSON.parse(localData));
+        } catch (e) {
+          setFetchedLessonLogs([]);
+        }
+      } else {
+        setFetchedLessonLogs([]);
+      }
+      setIsLoadingLogs(false);
+    };
+
+    loadTeacherLogs();
+  }, [selectedTeacherForLogs]);
 const [isSubmittingTeacher, setIsSubmittingTeacher] = useState(false);
 const [isDeleting, setIsDeleting] = useState(false);
 const [schoolMotto, setSchoolMotto] = useState('');
@@ -362,6 +419,7 @@ const [schoolMotto, setSchoolMotto] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [registrationMode, setRegistrationMode] = useState('single'); // 'single' or 'bulk'
+  const [teacherSubTab, setTeacherSubTab] = useState('assigned');
   const handleRulesFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -693,548 +751,51 @@ const directSchoolName = (rawName && rawName.toLowerCase() !== 'assigned school'
     setHasMounted(true);
     setShowWelcomeOverlay(true);
   }, []);
-  // Class & Coefficient Settings States
-  const [selectedSection, setSelectedSection] = useState('General Education');
-  const [selectedClass, setSelectedClass] = useState('Form 1 (F1)');
-  const [selectedTradeSeries, setSelectedTradeSeries] = useState('');
-  const [customSubjectModal, setCustomSubjectModal] = useState(false);
-  const [newSubjectTitle, setNewSubjectTitle] = useState('');
-  const [newSubjectCategory, setNewSubjectCategory] = useState('General Core Subjects');
-  const [subjectCoefficients, setSubjectCoefficients] = useState([]);
-  const [isSavedForCurrentClass, setIsSavedForCurrentClass] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [teacherSubTab, setTeacherSubTab] = useState('assigned');
-const [logSectionFilter, setLogSectionFilter] = useState('General');
-// Master Mark Sheet States
-  const [masterSection, setMasterSection] = useState('General Education');
-  const [masterClass, setMasterClass] = useState(GENERAL_CLASSES_CATALOG[0]);
-  const [masterSeries, setMasterSeries] = useState('');
-  const [masterTerm, setMasterTerm] = useState('Term 1');
-  const seq1Label = masterTerm === 'Term 2' ? 'seq3_mark' : masterTerm === 'Term 3' ? 'seq5_mark' : 'seq1_mark';
-  const seq2Label = masterTerm === 'Term 2' ? 'seq3_mark' : masterTerm === 'Term 3' ? 'seq6_mark' : 'seq2_mark';
-  // Helper function to update coefficient state
-  const handleCoefficientChange = (subjectName, coefValue) => {
-     setIsSavedForCurrentClass(false);
-    setSubjectCoefficients(prev =>
-      prev.map(item =>
-        item.name === subjectName ? { ...item, coefficient: Number(coefValue) || 1 } : item
-      )
-    );
-  };
- const handleCoefficientSubjectToggle = (subjectName) => {
-    setIsSavedForCurrentClass(false);
-
-    setSubjectCoefficients(prev =>
-      prev.map(sub =>
-        sub.name === subjectName ? { ...sub, selected: !sub.selected } : sub
-      )
-    );
-  };
-
-  // Master Mark Sheet States & Fetcher
-  const [masterSubjects, setMasterSubjects] = useState([]);
-  const [masterStudentsData, setMasterStudentsData] = useState([]);
-  const [isMasterLoading, setIsMasterLoading] = useState(false);
-
-const handleSaveMasterMarks = async () => {
-    try {
-      setIsMasterLoading(true);
-      const updates = [];
-// Step 1: Fetch class coefficients directly from DB to resolve UUIDs (Multi-tenant secured)
-    const { data: activeCoefficients } = await supabase
-      .from('class_coefficients')
-      .select('id, subject_name, subject_code, trades_series')
-      .eq('school_id', activeSchool?.id || activeSchool?.school_id);
-
-const coeffMap = new Map();
-(activeCoefficients || []).forEach(c => {
-  if (c.id) coeffMap.set(c.id, c.subject_name);
-  
-  const rawSeries = c.trades_series ? String(c.trades_series).trim().toLowerCase() : '';
-  const rawName = c.subject_name ? String(c.subject_name).trim().toLowerCase() : '';
-  const rawCode = c.subject_code ? String(c.subject_code).trim().toLowerCase() : '';
-
-  if (rawName) coeffMap.set(rawName, c.subject_name);
-  if (rawCode) coeffMap.set(rawCode, c.subject_name);
-
-  // Matches full string trades_series like "Applied Mechanics"
-  if (rawSeries) {
-    if (rawName) coeffMap.set(`${rawName}_${rawSeries}`, c.subject_name);
-    if (rawCode) coeffMap.set(`${rawCode}_${rawSeries}`, c.subject_name);
-  }
-});
-      (masterStudentsData || []).forEach((student) => {
-        // Safely extract trades_series
-        let formattedTradesSeries = null;
-        if (student.trades_series) {
-          formattedTradesSeries = Array.isArray(student.trades_series)
-            ? student.trades_series.join(', ')
-            : String(student.trades_series);
-        }
-
-        if (Array.isArray(student.marks)) {
-          student.marks.forEach((m) => {
-        // Step 2: Resolve human-readable subject name directly from DB Map
-        const subjectName = m.subject_name || m.subject || coeffMap.get(m.subject_id) || coeffMap.get(m.id);
-          if (!subjectName) return;
-        const record = {
-        school_id: activeSchool?.id || activeSchool?.school_id,
-        student_id: student.id,
-        unique_code: student.unique_code || student.matricule || null,
-        classLevel: masterClass || student.class_level || student.classLevel || null,
-        section: masterSection || student.section || null,
-        subject_name: subjectName,
-        term: masterTerm?.includes('Term 2') ? 'Term 2' : masterTerm?.includes('Term 3') ? 'Term 3' : 'Term 1',
-        academic_year: activeSchool?.academic_year || getAcademicYear(),
-        trades_series: formattedTradesSeries,
-      };
-     let hasMarks = false;
-
-// Universal safe numerical mark parser
-const parseMark = (val) => {
-  if (val === undefined || val === null || val === '') return null;
-  const num = Number(val);
-  return isNaN(num) ? null : num;
-};
-
-// Map input fields dynamically based on active term
-if (masterTerm?.includes('Term 2')) {
-  const s3 = parseMark(m.seq3_mark ?? m.seq3);
-  const s4 = parseMark(m.seq4_mark ?? m.seq4);
-  if (s3 !== null) { record.seq3_mark = s3; hasMarks = true; }
-  if (s4 !== null) { record.seq4_mark = s4; hasMarks = true; }
-} else if (masterTerm?.includes('Term 3')) {
-  const s5 = parseMark(m.seq5_mark ?? m.seq5);
-  const s6 = parseMark(m.seq6_mark ?? m.seq6);
-  if (s5 !== null) { record.seq5_mark = s5; hasMarks = true; }
-  if (s6 !== null) { record.seq6_mark = s6; hasMarks = true; }
-} else {
-  const s1 = parseMark(m.seq1_mark ?? m.seq1);
-  const s2 = parseMark(m.seq2_mark ?? m.seq2);
-  if (s1 !== null) { record.seq1_mark = s1; hasMarks = true; }
-  if (s2 !== null) { record.seq2_mark = s2; hasMarks = true; }
-}
-
-  // Pro Rata Dynamic Term Score Calculation
-  let sum = 0;
-  let count = 0;
-  if (masterTerm?.includes('Term 2')) {
-    if (record.seq3_mark > 0) { sum += record.seq3_mark; count++; }
-    if (record.seq4_mark > 0) { sum += record.seq4_mark; count++; }
-  } else if (masterTerm?.includes('Term 3')) {
-    if (record.seq5_mark > 0) { sum += record.seq5_mark; count++; }
-    if (record.seq6_mark > 0) { sum += record.seq6_mark; count++; }
-  } else {
-    if (record.seq1_mark > 0) { sum += record.seq1_mark; count++; }
-    if (record.seq2_mark > 0) { sum += record.seq2_mark; count++; }
-  }
-
-  if (hasMarks) {
-    updates.push(record);
-  }
-           
-          });
-        }
-      });
-const uniqueMap = new Map();
-  updates.forEach((item) => {
-    const key = `${item.school_id}_${item.student_id}_${item.subject_name}_${item.term}_${item.academic_year}`;
-    uniqueMap.set(key, item);
-  });
-  const cleanUpdates = Array.from(uniqueMap.values());
-     if (cleanUpdates.length === 0) {
-    alert('No marks to update.');
-    setIsMasterLoading(false);
-    return;
-  }
-
-  // Upsert matching the existing unique constraint in PostgreSQL
-  const { error } = await supabase
-    .from('marks')
-    .upsert(cleanUpdates, { onConflict: 'school_id,student_id,subject_name,term,academic_year' });
-
-      if (error) throw error;
-
-      alert('Marks saved and updated successfully!');
-      await fetchMasterMarkSheetData();
-    } catch (err) {
-      console.error('Error saving master marks:', err.message);
-      alert('Failed to save marks: ' + err.message);
-    } finally {
-      setIsMasterLoading(false);
-    }
-  };
-  const fetchMasterMarkSheetData = async () => {
-    const schoolId = activeSchool?.id || activeSchool?.school_id;
-    if (!schoolId || !masterClass) return;
-
-const TECHNICAL_COMMERCIAL_CATALOG = [
-  'First Year Commercial (Y1Com)',
-  'Second Year Commercial (Y2Com)',
-  'Third Year Commercial (Y3Com)',
-  'Fourth Year Commercial / CAP / CAPIET (Y4Com)',
-  'Fifth Year Commercial / Seconde (Y5Com)',
-  'Lower Sixth Commercial / Première (Probatoire Com)',
-  'Upper Sixth Commercial / Terminale (Baccalauréat Com)'
-];
-
-const TECHNICAL_INDUSTRIAL_CATALOG = [
-  'First Year Industrial (Y1Ind)',
-  'Second Year Industrial (Y2Ind)',
-  'Third Year Industrial (Y3Ind)',
-  'Fourth Year Industrial / CAP / CAPIET (Y4Ind)',
-  'Fifth Year Industrial / Seconde (Y5Ind)',
-  'Lower Sixth Industrial / Première (Probatoire Ind)',
-  'Upper Sixth Industrial / Terminale (Baccalauréat Ind)'
-];
-setIsMasterLoading(true);
-    try {
-      // 1. Fetch configured subjects & coefficients for table headers (class_coefficients table)
-// 1. Fetch configured subjects & coefficients for table headers
-   let coefQuery = supabase
-  .from('class_coefficients')
-  .select('*')
-  .eq('school_id', schoolId)
-  .eq('classLevel', masterClass);
-
-if (masterSection) {
-  coefQuery = coefQuery.eq('section', masterSection);
-}
-
-    // 2. Build student query for active class level
-    let studentQuery = supabase
-      .from('students')
-      .select('*')
-      .eq('school_id', schoolId)
-      .eq('classLevel', masterClass);
-
-   // Fetch students by school and class level only (Supabase query)
-// JS will safely filter section and trade in memory below
-
-    // 3. Execute all queries concurrently
-    const [
-      { data: savedCoeffs, error: coefErr },
-      { data: students, error: studentErr },
-      { data: marksData, error: marksErr }
-    ] = await Promise.all([
-      coefQuery,
-      studentQuery.order('fullName', { ascending: true }),
-      supabase
-        .from('marks')
-        .select('*')
-        .eq('school_id', activeSchool?.id || activeSchool?.school_id)
-        .eq('term', masterTerm)
-        .eq('classLevel', masterClass)
-    ]);
-    if (coefErr) console.warn("Notice loading coefficients:", coefErr.message);
-    if (studentErr) throw studentErr;
-    if (marksErr) console.warn("Notice loading marks:", marksErr.message);
-// 2. Active subjects become horizontal table headers
-const isTechnical = masterSection === 'Technical Commercial (STT)' || 
-                    masterSection === 'Technical Industrial (IND)' || 
-                    TECHNICAL_COMMERCIAL_CATALOG.includes(masterClass) || 
-                    TECHNICAL_INDUSTRIAL_CATALOG.includes(masterClass);
-
-const activeSubs = (savedCoeffs || []).filter(s => {
-  const trade = s.trades_series ? s.trades_series.trim() : '';
-
-  // Discard specific Technical subjects when viewing General section
-  if (!isTechnical && trade) return false;
-
-  // Filter Technical specialty subjects if a specific series is selected
-  if (isTechnical && masterSeries && masterSeries !== 'FOUNDATIONAL' && masterSeries !== 'COMMON') {
-    const isFoundationalOrCommon = trade === 'FOUNDATIONAL' || trade === 'COMMON' || !trade;
-    const isExactTradeMatch = trade === masterSeries.trim();
-    const isSubTradeMatch = masterSeries.includes(trade) || trade.includes(masterSeries);
-
-    if (!isFoundationalOrCommon && !isExactTradeMatch && !isSubTradeMatch) {
-      return false;
-    }
-  }
-
-  return s.coefficient > 0 || s.is_included !== false;
+// Dynamic state initialization based on active school tenant
+const [masterSection, setMasterSection] = useState(() => {
+  const schoolType = activeSchool?.school_type || activeSchool?.section || '';
+  if (schoolType.includes('Commercial')) return 'Technical Commercial (STT)';
+  if (schoolType.includes('Industrial')) return 'Technical Industrial (IND)';
+  return 'General Education';
 });
 
-// CRITICAL: Commit calculated subjects to table headers state immediately
-setMasterSubjects(activeSubs);
-
-// CASE 2: Subjects loaded successfully, but zero students registered
-if (!students || students.length === 0) {
-  setMasterStudentsData([]);
-  setIsMasterLoading(false);
-  return;
-}
-console.log("DEBUG marksData:", marksData);
-console.log("DEBUG students:", students);
-  const marksMap = new Map();
- (marksData || []).forEach(m => {
-  const normalizedMark = {
-    ...m,
-    seq1: m.seq1 ?? m.seq1_mark ?? null,
-    seq2: m.seq2 ?? m.seq2_mark ?? null,
-    seq3: m.seq3 ?? m.seq3_mark ?? null,
-    seq4: m.seq4 ?? m.seq4_mark ?? null,
-    seq5: m.seq5 ?? m.seq5_mark ?? null,
-    seq6: m.seq6 ?? m.seq6_mark ?? null,
-  };
-
-  // Map to both student_id (UUID) and unique_code so the UI lookup succeeds regardless of format
-  if (m.student_id) {
-    if (!marksMap.has(m.student_id)) marksMap.set(m.student_id, []);
-    marksMap.get(m.student_id).push(normalizedMark);
+// Auto-sync if activeSchool loads asynchronously after initial mount
+useEffect(() => {
+  const schoolType = activeSchool?.school_type || activeSchool?.section || '';
+  if (schoolType.includes('Commercial')) {
+    setMasterSection('Technical Commercial (STT)');
+  } else if (schoolType.includes('Industrial')) {
+    setMasterSection('Technical Industrial (IND)');
   }
-  if (m.unique_code) {
-    if (!marksMap.has(m.unique_code)) marksMap.set(m.unique_code, []);
-    marksMap.get(m.unique_code).push(normalizedMark);
-  }
-});
- const formatted = (students || [])
-  .filter(st => {
-    // 1. Strict Class Level
-    if (st.classLevel !== masterClass) return false;
-
-    // 2. Section Matching
-    const studentSec = (st.section || st.school_section || '').trim().toLowerCase();
-    const selectedSec = (masterSection || '').trim().toLowerCase();
-    if (selectedSec && studentSec && !studentSec.includes(selectedSec) && !selectedSec.includes(studentSec)) {
-      return false;
-    }
-
-    // 3. Technical Trade/Specialty Matching
-if (isTechnical && masterSeries) {
-  const stTrade = (st.trades_series || st.series_specialty || st.series || '').trim();
-  const selectedSeries = masterSeries.trim();
-
-  if (selectedSeries !== 'FOUNDATIONAL' && selectedSeries !== 'COMMON') {
-    if (!stTrade || (stTrade !== selectedSeries && !selectedSeries.includes(stTrade) && !stTrade.includes(selectedSeries))) {
-      return false;
-    }
-  }
-}
-
-    return true;
-  })
-  .map(st => {
-    const code = st.unique_code || st.student_matricule;
-    return {
-      ...st,
-      name: st.fullName || st.name,
-      unique_code: code,
-      marks: marksMap.get(st.id) || marksMap.get(st.student_id) || marksMap.get(st.unique_code) || marksMap.get(code) || []
-    };
-  });
-      setMasterStudentsData(formatted);
-    } catch (err) {
-      console.error("Error fetching master sheet data:", err);
-    } finally {
-      setIsMasterLoading(false);
-    }
-  };
-const handleUnlockMarks = async (markId) => {
-    try {
-      const { error } = await supabase
-        .from('marks')
-        .update({ edit_count: 0 })
-        .eq('id', markId);
-
-      if (error) throw error;
-
-      toast.success('Marks unlocked successfully for teacher editing!');
-      fetchMasterMarkSheetData();
-    } catch (err) {
-      console.error('Error unlocking marks:', err?.message || err);
-      toast.error('Failed to unlock marks');
-    }
-  };
-  const autoSaveTimerRef = useRef(null);
-  const handleAdminMarkChange = (studentId, subjectId, field, value) => {
-    let parsedValue = value === '' ? null : Math.min(20, Math.max(0, parseFloat(value) || 0));
-
-    setMasterStudentsData((prev) =>
-      prev.map((student) => {
-        if (student.id !== studentId && student.unique_code !== studentId) return student;
-
-        const currentMarks = student.marks || [];
-        const existingIdx = currentMarks.findIndex(
-          (m) => (m.subject_id === subjectId || m.subject === subjectId || (m.subject_name || m.subject) === subjectId)
-        );
-
-        let updatedMarks = [...currentMarks];
-        if (existingIdx > -1) {
-          updatedMarks[existingIdx] = { ...updatedMarks[existingIdx], [field]: parsedValue };
-        } else {
-          updatedMarks.push({
-            school_id: activeSchool?.id || activeSchool?.school_id,
-        student_id: student.id,
-        unique_code: student.unique_code || student.matricule || null,
-        classLevel: masterClass || student.class_level || student.classLevel || null,
-        section: masterSection || student.section || null,
-        subject_name: m.subject_name || m.subject || coeffMap.get(m.subject_id) || coeffMap.get(m.id),
-        term: masterTerm?.includes('Term 2') ? 'Term 2' : masterTerm?.includes('Term 3') ? 'Term 3' : 'Term 1',
-        academic_year: activeSchool?.academic_year || getAcademicYear(),
-        trades_series: formattedTradesSeries,
-            [field]: parsedValue
-          });
-        }
-        return { ...student, marks: updatedMarks };
-      })
-    );
-  };
-  // Auto-fetch whenever Master Mark Sheet filters change or tab becomes active
-  useEffect(() => {
-    if (activeTab === 'master-marks') {
-      fetchMasterMarkSheetData();
-    }
-  }, [activeTab, masterSection, masterClass, masterSeries, masterTerm, activeSchool?.id]);
-  // Auto-populate initial subject list on change
- // Dedicated Series Subject Mapping Lookup (Aligned with ALL_SUBJECTS_LIST)
-  const SERIES_LOOKUP = {
-    A1: ["English Literature", "History", "French Language"],
-    A2: ["Geography", "Economics", "History"],
-    A3: ["English Literature", "Economics", "History"],
-    A4: ["Economics", "Geography", "Pure Mathematics with Statistics"],
-    A5: ["English Literature", "History", "Philosophy"],
-    S1: ["Physics", "Chemistry", "Pure Mathematics"],
-    S2: ["Chemistry", "Physics", "Biology"],
-    S3: ["Biology", "Chemistry", "Pure Mathematics"],
-    S4: ["Biology", "Chemistry", "Geology"],
-    S5: ["Chemistry", "Computer Science", "Mathematics"],
-    S6: ["Chemistry", "Physics", "Mathematics", "Further Mathematics"],
-    S7: ["Chemistry", "Biology", "Physics", "Mathematics"],
-    S8: ["Biology", "Chemistry", "Physics", "Mathematics", "Further Mathematics"]
-  };
-
- useEffect(() => {
-   const MANDATORY_GENERAL_CLASSES = [
-      'Form 1 (F1)',
-      'Form 2 (F2)',
-      'Form 3 (F3)',
-      'Form 4 (F4)'
-    ];
-
-    const isMandatoryClass = 
-      (selectedSection === "General Education" || selectedSection === "General Education") && 
-      MANDATORY_GENERAL_CLASSES.includes(selectedClass);
-
-    let initialList = ALL_SUBJECTS_LIST.map((sub) => ({
-      ...sub,
-      coefficient: 1,
-      selected: false
-    }));
-
-    const activeSeriesCode = selectedTradeSeries?.trim()?.toUpperCase();
-
-    if (activeSeriesCode && SERIES_LOOKUP[activeSeriesCode]) {
-      const targetSubjects = SERIES_LOOKUP[activeSeriesCode];
-
-      initialList = initialList.map((sub) => {
-        const isMatch = targetSubjects.some((target) => {
-          const tName = target.toLowerCase().trim();
-          const sName = sub.name.toLowerCase().trim();
-
-          if (sName === tName) return true;
-          if (tName.includes("pure mathematics") && sName.includes("pure mathematics")) return true;
-
-          return false;
-        });
-        return { ...sub, selected: isMatch };
-      });
-    }
-
-    // Check Supabase for previously saved/validated coefficients
-   const loadSavedCoefficients = async () => {
-    if (!activeSchool?.id || !selectedClass) {
-      setSubjectCoefficients(initialList);
-      return;
-    }
-
-    // Extract raw class level (e.g., "Form 1A (F1A)")
-   let query = supabase
-        .from('class_coefficients')
-        .select('*')
-        .eq('school_id', activeSchool.id)
-        .eq('section', selectedSection)
-        .eq('classLevel', selectedClass.trim())
-    if (selectedTradeSeries) {
-      query = query.eq('trades_series', selectedTradeSeries);
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      console.error("Error loading class coefficients:", error.message);
-      setSubjectCoefficients(initialList);
-      return;
-    }
-
-    // Match Form 1 to Form 5 or Sub-Form variations
-    const isLowerForm = /Form\s*[1-5]/i.test(selectedClass);
-
-    if (data && data.length > 0) {
-        setIsSavedForCurrentClass(true);
-        setSubjectCoefficients(
-          initialList.map(item => {
-            const code = (item.subject_code || item.code || '').trim().toUpperCase();
-            const name = (item.name || item.subject_name || '').trim().toLowerCase();
-
-            // Match against DB subject_code OR DB subject_name if present
-            const matched = data.find(d => {
-              const dbCode = (d.subject_code || '').trim().toUpperCase();
-              const dbName = (d.subject_name || '').trim().toLowerCase();
-              return (dbCode && dbCode === code) || (dbName && dbName === name);
-            });
-
-            if (matched) {
-              return {
-                ...item,
-                selected: matched.is_included !== false,
-                coefficient: parseFloat(matched.coefficient) || 1,
-                subject_code: matched.subject_code || item.subject_code
-              };
-            }
-            return { ...item, selected: false };
-          })
-        );
-      } else {
-        setIsSavedForCurrentClass(false);
-        setSubjectCoefficients(
-          initialList.map(item => ({
-            ...item,
-            selected: false
-          }))
-        );
-      }
-  };
-
-    loadSavedCoefficients();
-  }, [activeSchool?.id, selectedSection, selectedClass, selectedTradeSeries]);
-  // TWO-LEVEL VERIFICATION FUNCTION
- const verifySchoolIdentity = async (schoolId, expectedSchoolName) => {
+}, [activeSchool]);
+ // TWO-LEVEL VERIFICATION FUNCTION
+const verifySchoolIdentity = async (schoolId, expectedSchoolName) => {
     if (!schoolId || !expectedSchoolName) {
-      console.warn("Security Notice: School ID or Name not available yet.");
-      return false;
+        console.warn("Security Notice: School ID or Name not available yet.");
+        return false;
     }
 
     const { data, error } = await supabase
-      .from('assigned_schools')
-      .select('school_id, name')
-      .eq('school_id', schoolId)
-      .single();
+        .from('assigned_schools')
+        .select('school_id, name')
+        .eq('school_id', schoolId)
+        .single();
 
     if (error || !data) {
-      console.warn("Security Notice: School ID not found in assigned_schools.");
-      return false;
+        console.warn("Security Notice: School ID not found in assigned_schools.");
+        return false;
     }
 
     if (expectedSchoolName && expectedSchoolName.trim().toLowerCase() !== 'assigned school') {
-  if (data.name.trim().toLowerCase() !== expectedSchoolName.trim().toLowerCase()) {
-    console.warn("Security Notice: School Name mismatch.");
-    return false;
-  }
-}
+        if (data.name.trim().toLowerCase() !== expectedSchoolName.trim().toLowerCase()) {
+            console.warn("Security Notice: School Name mismatch.");
+            return false;
+        }
+    }
 
     return true;
-  };
+};
+
  const [printSection, setPrintSection] = useState('All');
 const [printClass, setPrintClass] = useState('All');
 const [printTrade, setPrintTrade] = useState('All');
@@ -1438,7 +999,19 @@ if (!active.has_onboarded) {
       if (!currentSchoolId || !currentSchoolName) {
         return; // Wait silently until fetchActiveSchool populates state
       }
-
+// ⚡ INSTANT OFFLINE LOAD
+      const studentCacheKey = `nsuh_students_${currentSchoolId}`;
+      const cachedStudents = localStorage.getItem(studentCacheKey);
+      if (cachedStudents) {
+        setStudentsList(JSON.parse(cachedStudents));
+      }
+      if (!navigator.onLine) return;
+      // ⚡ INSTANT OFFLINE TEACHER LOAD
+      const teacherCacheKey = `nsuh_teachers_${currentSchoolId}`;
+      const cachedTeachers = localStorage.getItem(teacherCacheKey);
+      if (cachedTeachers) {
+        setTeachersList(JSON.parse(cachedTeachers));
+      }
       // 2. Run Two-Level Security Check
         const isVerified = await verifySchoolIdentity(currentSchoolId, currentSchoolName);
         console.log("VERIFY DEBUG -> isVerified:", isVerified, "ID:", currentSchoolId, "Name:", currentSchoolName);
@@ -1447,7 +1020,6 @@ if (!active.has_onboarded) {
           setStudentsList([]);
           return;
         }
-
       // 3. Fetch students strictly belonging to this school_id
       const { data, error } = await supabase
         .from('students')
@@ -1457,6 +1029,7 @@ if (!active.has_onboarded) {
 
       if (!error && data) {
         setStudentsList(data);
+        localStorage.setItem(`nsuh_students_${currentSchoolId}`, JSON.stringify(data));
       }
     };
 
@@ -1571,41 +1144,110 @@ if (!active.has_onboarded) {
   const [schoolContact, setSchoolContact] = useState(activeSchool?.phone || activeSchool?.contact_phone || '');
   const [schoolEmail, setSchoolEmail] = useState(activeSchool?.email || activeSchool?.contact_email || '');
   const [schoolLocation, setSchoolLocation] = useState(activeSchool?.location || activeSchool?.region || '');
+
 // Unified lightning-fast data loader for students and teachers
   useEffect(() => {
     const fetchAllSchoolData = async () => {
-      if (typeof window === 'undefined') return;
-
       let schoolIdToUse = typeof activeSchool === 'object' ? (activeSchool?.id || activeSchool?.school_id) : activeSchool;
-    if (!schoolIdToUse || typeof schoolIdToUse !== 'string' || schoolIdToUse.includes(' ')) {
-      schoolIdToUse = localStorage.getItem('school_id');
-    }
-      if (!schoolIdToUse) return;
-console.log('Active School ID inside fetch:', schoolIdToUse);
-      // Parallel fetch for sub-second performance across devices
-      const [studentsRes, teachersRes] = await Promise.all([
-        supabase.from('students').select('*').eq('school_id', schoolIdToUse),
-        supabase.from('teachers').select('*').eq('school_id', schoolIdToUse)
-      ]);
-console.log('Students Response:', studentsRes);
-      if (studentsRes.data) {
-        setStudentsList(studentsRes.data);
+      if (!schoolIdToUse || typeof schoolIdToUse !== 'string' || schoolIdToUse.includes(' ')) {
+        schoolIdToUse = localStorage.getItem('school_id');
       }
 
-      if (teachersRes.data) {
-        const formattedTeachers = teachersRes.data.map((t) => ({
-          ...t,
-          id: t.teacher_id || t.id,
-          phone: t.contact || t.phone,
-          signupLink: t.signup_link || t.signupLink,
-          schedules: t.schedules || {}
-        }));
-        setTeachersList(formattedTeachers);
+      if (!schoolIdToUse) return;
+
+      const studentCacheKey = `nsuh_students_${schoolIdToUse}`;
+      const teacherCacheKey = `nsuh_teachers_${schoolIdToUse}`;
+
+      // 1. INSTANT OFFLINE LOAD from cache
+      const cachedStudents = localStorage.getItem(studentCacheKey);
+      const cachedTeachers = localStorage.getItem(teacherCacheKey);
+
+      if (cachedStudents) {
+        try { setStudentsList(JSON.parse(cachedStudents)); } catch (e) {}
+      }
+      if (cachedTeachers) {
+        try { setTeachersList(JSON.parse(cachedTeachers)); } catch (e) {}
+      }
+
+      // 2. LIVE FETCH FROM SUPABASE 'teachers' AND 'students' TABLES
+      try {
+        const [studentsRes, teachersRes] = await Promise.all([
+          supabase.from('students').select('*').eq('school_id', schoolIdToUse),
+          supabase.from('teachers').select('*').eq('school_id', schoolIdToUse)
+          
+        ]);
+
+        if (studentsRes.error) console.error('Students fetch error:', studentsRes.error);
+        if (teachersRes.error) console.error('Teachers fetch error:', teachersRes.error);
+
+        if (studentsRes.data) {
+          setStudentsList(studentsRes.data);
+          localStorage.setItem(studentCacheKey, JSON.stringify(studentsRes.data));
+        }
+
+       if (teachersRes.data) {
+          // Map teachers targeting teacher_id first, falling back to id if missing
+          const formattedTeachers = teachersRes.data.map((t) => ({
+            ...t,
+            id: t.teacher_id || t.id,
+            name: t.name,
+            phone: t.contact || t.phone || '',
+            email: t.email || '',
+            signupLink: t.signup_link || t.signupLink || '',
+            schedules: t.schedules || {}
+          }));
+          setTeachersList(formattedTeachers);
+          localStorage.setItem(teacherCacheKey, JSON.stringify(formattedTeachers));
+        }
+      } catch (err) {
+        console.warn('Network offline or slow; using locally cached data.', err);
       }
     };
 
     fetchAllSchoolData();
-  }, [activeSchool]);
+    // ⚡ OFFLINE QUEUE AUTO-SYNC ENGINE
+    const syncOfflineStudents = async () => {
+      const pendingQueue = JSON.parse(localStorage.getItem('nsuh_pending_students') || '[]');
+      if (pendingQueue.length === 0) return;
+
+      const schoolIdToUse = localStorage.getItem('school_id');
+      if (!schoolIdToUse) return;
+
+      console.log(`Syncing ${pendingQueue.length} offline student(s) to Supabase...`);
+
+      const remainingQueue = [];
+
+      for (const student of pendingQueue) {
+        // Enforce 100% multi-tenancy isolation
+        const payload = { ...student, school_id: schoolIdToUse };
+        
+        const { error } = await supabase.from('students').insert([payload]);
+
+        if (error) {
+          console.error('Failed to sync student:', student, error);
+          remainingQueue.push(student);
+        }
+      }
+
+      localStorage.setItem('nsuh_pending_students', JSON.stringify(remainingQueue));
+
+      if (remainingQueue.length < pendingQueue.length) {
+        console.log('Successfully synced offline students!');
+        fetchAllSchoolData(); 
+      }
+    };
+
+    // Listen for network recovery & sync every 15 seconds
+    window.addEventListener('online', syncOfflineStudents);
+    const syncInterval = setInterval(syncOfflineStudents, 15000);
+
+    if (navigator.onLine) syncOfflineStudents();
+
+    return () => {
+      window.removeEventListener('online', syncOfflineStudents);
+      clearInterval(syncInterval);
+    };
+  }, [activeSchool]);  
 
   // Auto-fetch other school personnel from Supabase with strict two-level verification
   useEffect(() => {
@@ -1818,7 +1460,7 @@ const handleExportPDF = async (exportType = 'all') => {
     }
 // Calculate dynamic academic year using system utility/state
     const activeAcademicYear = 
-      (typeof getAcademicYear === 'function' && getAcademicYear()) ||
+      (typeof getAcademicYear === 'function' && getCurrentAcademicYear()) ||
       (typeof currentAcademicYear !== 'undefined' && currentAcademicYear) ||
       localStorage.getItem('selectedAcademicYear') ||
       "";
@@ -1862,7 +1504,7 @@ const handleExportPDF = async (exportType = 'all') => {
     doc.setTextColor(71, 85, 105);
 
     if (activeAcademicYear) {
-      doc.text(`Academic Year: ${activeAcademicYear}`, 105, currentY, { align: 'center' });
+      doc.text(`Academic Year: $getCurrentAcademicYear()`, 105, currentY, { align: 'center' });
       currentY += 5;
     }
 
@@ -2133,26 +1775,39 @@ if (sec.includes('commercial') && (!selectedTechnicalSubject || !COMMERCIAL_TRAD
       setIsSubmitting(false);
       return;
     }
-// Direct Multi-Tenant Resolution (Bypasses verification query failures)
-    const { data: { session } } = await supabase.auth.getSession();
+// Direct Multi-Tenant Resolution with Local Storage Offline Fallback
+  const { data: { session } } = await supabase.auth.getSession();
 
-    // Resolve tenant school details directly from active state or user session
-    const currentSchoolId = 
-      activeSchool?.id || 
-      activeSchool?.school_id || 
-      session?.user?.user_metadata?.school_id || 
-      session?.user?.id;
+  // 1. Resolve school ID with persistent local fallback for offline reboots
+  const cachedSchool = JSON.parse(localStorage.getItem('nsuh_active_school') || '{}');
 
-    const currentSchoolName = 
-      activeSchool?.school_name || 
-      activeSchool?.name || 
-      session?.user?.user_metadata?.school_name || 
-      "Official Registry";
+  const currentSchoolId = 
+    activeSchool?.id || 
+    activeSchool?.school_id || 
+    session?.user?.user_metadata?.school_id || 
+    session?.user?.id ||
+    cachedSchool?.id;
 
-    if (!currentSchoolId) {
-      alert("Security Error: No active school session or tenant ID found. Please re-select your school.");
-      return;
-    }
+  const currentSchoolName = 
+    activeSchool?.school_name || 
+    activeSchool?.name || 
+    session?.user?.user_metadata?.school_name || 
+    cachedSchool?.school_name ||
+    "Official Registry";
+
+  // Auto-cache active school details for future offline boots
+  if (activeSchool?.id || activeSchool?.school_id) {
+    localStorage.setItem('nsuh_active_school', JSON.stringify({
+      id: currentSchoolId,
+      school_name: currentSchoolName
+    }));
+  }
+
+  if (!currentSchoolId) {
+    alert("Security Error: No active school session or tenant ID found. Please re-select your school.");
+    setIsSubmitting(false);
+    return;
+  }
 
     // Duplicate Check: Verify if student already exists in this school
      const { data: potentialDuplicate } = await supabase
@@ -2176,9 +1831,10 @@ if (sec.includes('commercial') && (!selectedTechnicalSubject || !COMMERCIAL_TRAD
     const uniqueStudentId = generateStudentId(currentSchoolName, section, fullName, classLevel, age, gender);
     const newStudentRecord = {
       school_id: currentSchoolId,
+      academic_year: getAcademicYear(),
       created_at: new Date().toISOString(),
-  unique_code: uniqueStudentId,
-  fullName,
+      unique_code: uniqueStudentId,
+      fullName,
       section,
       classLevel,
       gender,
@@ -2193,10 +1849,29 @@ if (sec.includes('commercial') && (!selectedTechnicalSubject || !COMMERCIAL_TRAD
       trades_series: chosenSeriesOrTrade,
     };
 
+    const studentCacheKey = `nsuh_students_${currentSchoolId}`;
+
+    // ⚡ OFFLINE FALLBACK: Save locally if network is down
+    if (!navigator.onLine) {
+     const pendingKey = `nsuh_pending_students_${currentSchoolId}`;
+      const pendingQueue = JSON.parse(localStorage.getItem(pendingKey) || '[]');
+      pendingQueue.push(newStudentRecord);
+      localStorage.setItem(pendingKey, JSON.stringify(pendingQueue));
+
+      setStudentsList((prev) => [newStudentRecord, ...prev]);
+      setSuccessPopup(uniqueStudentId);
+      const cachedStudents = JSON.parse(localStorage.getItem(studentCacheKey) || '[]');
+      localStorage.setItem(studentCacheKey, JSON.stringify([newStudentRecord, ...cachedStudents]));
+      setIsSubmitting(false);
+      setFullName(''); setPhone(''); setResidence(''); setPicturePreview(null); setAge('');
+      alert('Registered OFFLINE! Saved locally and will auto-sync when network restores.');
+      return;
+    }
+
     // 1. Insert new student into Supabase database
-const { error } = await supabase
-  .from('students')
-  .insert([newStudentRecord]);
+    const { error } = await supabase
+      .from('students')
+      .insert([newStudentRecord]);
 
 if (error) {
       if (error.message?.includes('EXACT_DUPLICATE_RECORD') || error.code === '23505') {
@@ -2210,6 +1885,8 @@ if (error) {
 
 // 2. Update UI locally
 setStudentsList((prev) => [newStudentRecord, ...prev]);
+const cachedStudents = JSON.parse(localStorage.getItem(studentCacheKey) || '[]');
+    localStorage.setItem(studentCacheKey, JSON.stringify([newStudentRecord, ...cachedStudents]));
     setSuccessPopup(uniqueStudentId);
 
     setFullName('');
@@ -2736,6 +2413,7 @@ const payloadData = {
 };
 
 let error = null;
+const currentSchoolId = localStorage.getItem('active_school_id') || localStorage.getItem('activeSchoolId');
 
 if (teacherToEdit) {
   // Exclude key identifiers from payload so Supabase update doesn't hit UUID conflicts
@@ -2744,13 +2422,14 @@ if (teacherToEdit) {
   const res = await supabase
     .from('teachers')
     .update(updateFields)
-    .eq('teacher_id', teacherToEdit.teacher_id || teacherToEdit.id);
+    .eq('teacher_id', teacherToEdit.teacher_id || teacherToEdit.id)
+    .eq('school_id', currentSchoolId);
   error = res.error;
 } else {
   // INSERT new teacher when not in edit mode
   const res = await supabase
     .from('teachers')
-    .insert([payloadData]);
+    .insert([{ ...payloadData, school_id: currentSchoolId }]);
   error = res.error;
 }
 
@@ -2815,9 +2494,9 @@ setTeacherPhotoPreview(null);
           )}
           <div>
             <h1 className="text-xl font-bold tracking-tight text-blue-500 uppercase">
-              {hasMounted ? (localStorage.getItem('active_school_name') || localStorage.getItem('activeSchoolName') || schoolName || '') : ''}
+              {hasMounted ? (localStorage.getItem('active_school_name') || localStorage.getItem('activeSchoolName') || 'School Admin Portal') : 'School Admin Portal'}
 </h1>
-<p className="text-xs text-gray-400">Academic Year: {getAcademicYear()} | Administrator Portal | Contact: {schoolContact}</p>          </div>
+<p className="text-xs text-gray-400">Academic Year: {getCurrentAcademicYear()} | Administrator Portal | Contact: {schoolContact}</p>          </div>
         </div>
        {/* High-Resolution School Logo Container */}
 <div className="hidden md:flex items-center justify-center p-1">
@@ -2870,7 +2549,7 @@ setTeacherPhotoPreview(null);
           </button>
         ))}
       </nav>
-<div className="flex flex-col gap-2 p-3 md:hidden w-full">
+      <div className={`${activeTab !== 'overview' ? 'hidden' : 'flex'} flex-col gap-2 p-3 md:hidden w-full`}>
         {[
           { id: 'overview', label: 'Overview' },
           { id: 'register', label: 'Register New Member' },
@@ -2897,7 +2576,18 @@ setTeacherPhotoPreview(null);
           </button>
         ))}
       </div>
-      <main className="p-3 sm:p-6 max-w-7xl mx-auto space-y-6 sm:space-y-8">
+<main className="p-3 sm:p-6 max-w-7xl mx-auto space-y-6 sm:space-y-8">
+  {activeTab !== 'overview' && activeTab !== null && (
+  <div className="block md:hidden">
+    <button
+      type="button"
+      onClick={() => setActiveTab('overview')}
+      className="flex items-center space-x-2 text-xs font-semibold bg-[#111827] text-amber-100 px-3 py-2 rounded-lg mb-4"
+    >
+      <span>← Back to Overview</span>
+    </button>
+  </div>
+)}       
         {/* OVERVIEW TAB */}
         {activeTab === 'overview' && (
           <div className="space-y-6">
@@ -2931,7 +2621,7 @@ setTeacherPhotoPreview(null);
 
             {/* General Teacher Timetable Collected Summary */}
             <div className="bg-[#111827] border border-gray-800 p-6 rounded-xl shadow-xl space-y-4">
-              <h3 className="text-sm font-bold uppercase tracking-wider text-amber-400 border-b border-gray-800 pb-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-amber-100 border-b border-gray-800 pb-3">
                 General School Master Timetable & Teacher Subject Allocation Summary
               </h3>
               {teachersList.length === 0 ? (
@@ -2939,26 +2629,9 @@ setTeacherPhotoPreview(null);
                   No teacher timetables collected yet. Assign teachers to build the master schedule.
                 </div>
               ) : (
-                <div className="hidden md:block overflow-x-auto">
-                  {/* Mobile Responsive Card Stack */}
-       <div className="grid grid-cols-1 gap-2.5 md:hidden">
-  {teachersList.map((t, i) => (
-    <div key={i} className="p-3 rounded-lg bg-gray-900/90 border border-gray-800 space-y-2">
-      <div className="flex items-center justify-between border-b border-gray-800 pb-1.5">
-        <h4 className="font-bold text-xs text-white">{t.name}</h4>
-        <span className="text-[10px] font-mono text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">{t.id || t.teacherId}</span>
-      </div>
-      <div className="text-[11px] text-gray-300">
-        <p className="font-semibold text-amber-400 mb-1 text-[10px] uppercase tracking-wider">Schedule Summary</p>
-        <div className="space-y-1 font-mono text-[10px] leading-tight text-gray-300 bg-gray-950/60 p-2 rounded border border-gray-800/80">
-          {t.scheduleSummary || "No schedule assigned"}
-        </div>
-      </div>
-    </div>
-  ))}
-</div>
+                <div className="overflow-x-auto w-full">
                   <table className="w-full text-left text-xs text-gray-300 border border-gray-700">
-                    <thead className="bg-[#1f2937] text-amber-400 uppercase font-semibold">
+                    <thead className="bg-[#1f2937] text-amber-100 uppercase font-semibold">
                       <tr>
                         <th className="p-3 border border-gray-700">Teacher Name (ID)</th>
                         <th className="p-3 border border-gray-700">Subjects Taught</th>
@@ -2971,9 +2644,9 @@ setTeacherPhotoPreview(null);
                         <tr key={i} className="hover:bg-gray-800/40">
                           <td className="p-3 border border-gray-700 font-bold text-white">
                             <div>{t.name}</div>
-                            <span className="text-[10px] font-mono text-amber-400">{t.id || t.teacherId}</span>
+                            <span className="text-[10px] font-mono text-amber-100/80">{t.id || t.teacher_id}</span>
                           </td>
-                          <td className="p-3 border border-gray-700">
+                          <td className="p-3 border text-amber-100">
   <div className="flex flex-col gap-1.5 items-start">
     {t.subjects.map((sub, sIdx) => (
       <span key={sIdx} className="inline-block bg-blue-900/30 text-blue-300 border border-blue-700/50 rounded px-2 py-1 text-xs whitespace-normal max-w-full">
@@ -3308,9 +2981,9 @@ setTeacherPhotoPreview(null);
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800">
-              {bulkParsedData.map((row, idx) => (
-                <tr key={idx} className="hover:bg-gray-800/40">
-                  <td className="p-2 font-medium text-white">{row.full_name || row["Full Name"] || '-'}</td>
+               {bulkParsedData.map((row, idx) => (
+              <tr key={idx} className="hover:bg-gray-800/40">
+              <td className="p-2 text-xs sm:text-base font-medium text-[#FDFBF7]">{row.full_name || row["Full Name"] || '-'}</td>
               <td className="p-2">{row.gender || row["Gender"] || '-'}</td>
               <td className="p-2">{row.dob || row["Date of Birth"] || row["DOB"] || '-'}</td>
               <td className="p-2">{row.residence || row["Residence"] || '-'}</td>
@@ -3340,23 +3013,23 @@ setTeacherPhotoPreview(null);
   <label className="block text-xs font-semibold uppercase tracking-wider text-amber-400 mb-1">SECTION</label>
   <select
     value={section}
-    onChange={(e) => {
-      const newSec = e.target.value;
-      setSection(newSec);
-      setMasterSection(newSec);
-      if (newSec === 'General Education') {
-              setClassLevel(GENERAL_CLASSES_CATALOG[0]);
-              setMasterClass(GENERAL_CLASSES_CATALOG[0]);
-            } else if (newSec === 'Technical Commercial (STT)') {
-              setClassLevel(TECHNICAL_COMMERCIAL_CATALOG[0]);
-              setMasterClass(TECHNICAL_COMMERCIAL_CATALOG[0]);
-            } else if (newSec === 'Technical Industrial (IND)') {
-              setClassLevel(TECHNICAL_INDUSTRIAL_CATALOG[0]);
-              setMasterClass(TECHNICAL_INDUSTRIAL_CATALOG[0]);
-            }
-      setSelectedSeries('');
-      setSelectedTechnicalSubject('');
-    }}
+   onChange={(e) => {
+  const newSec = e.target.value;
+  setSection(newSec);
+  setMasterSection(newSec);
+  if (newSec === 'General Education') {
+    setClassLevel(GENERAL_CLASSES_CATALOG[0]);
+    setMasterClass(GENERAL_CLASSES_CATALOG[0]);
+  } else if (newSec === 'Technical Commercial (STT)') {
+    setClassLevel(TECHNICAL_COMMERCIAL_CATALOG[0]);
+    setMasterClass(TECHNICAL_COMMERCIAL_CATALOG[0]);
+  } else if (newSec === 'Technical Industrial (IND)') {
+    setClassLevel(TECHNICAL_INDUSTRIAL_CATALOG[0]);
+    setMasterClass(TECHNICAL_INDUSTRIAL_CATALOG[0]);
+  }
+  setSelectedSeries('');
+  setSelectedTechnicalSubject('');
+}}
     className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none"
   >
     <option value="General Education">General Education</option>
@@ -3442,7 +3115,7 @@ setTeacherPhotoPreview(null);
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
                       required
-                      placeholder="e.g. Taku Cecilia"
+                      placeholder="e.g. Ngo Cecilia Taku"
                       className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white"
                     />
                   </div>
@@ -3727,31 +3400,34 @@ setTeacherPhotoPreview(null);
         {/* ALL STUDENT LIST TAB */}
         {activeTab === 'students' && (
           <div className="bg-[#111827] border border-gray-800 p-6 rounded-xl shadow-xl space-y-4">
-            <h2 className="text-lg font-bold text-white border-b border-gray-800 pb-3 flex justify-between items-center">
-              <span>All Registered Students</span>
-              {/* Smart Search Bar */}
-            <div className="relative flex-1 max-w-xs">
-              <input
-                type="text"
-                placeholder="🔍 Search ID, Name, Class, Trade..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-gray-900/90 text-white placeholder-gray-400 text-xs px-3 py-1.5 rounded-lg border border-gray-700 focus:border-amber-400 focus:outline-none transition shadow-inner"
-              />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-xs font-bold px-1"
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-              <span className="text-xs bg-amber-500/20 text-amber-400 px-3 py-1 rounded-full border border-amber-500/30 font-mono">
-              Total: {studentsList.length} (TE: {studentsList.filter(s => s.section === 'Technical Commercial(STT)' || s.section === 'Technical Industrial(IND)' || s.section?.toLowerCase().includes('technical')).length} | General: {studentsList.filter(s => s.section === 'General Education' || s.section?.toLowerCase().includes('general')).length})
-              </span>
-            </h2>
+           <div className="flex justify-between items-center border-b border-gray-800 pb-3 gap-2">
+    <h2 className="text-base sm:text-lg font-bold text-white">
+      All Registered Students
+    </h2>
+    <span className="text-[11px] sm:text-xs bg-amber-500/20 text-amber-400 px-2.5 py-1 rounded-full border border-amber-500/30 whitespace-nowrap">
+      Total: {studentsList.length} (TE: {studentsList.filter(s => s.section === 'Technical Commercial (STT)' || s.section === 'Technical Industrial (STI)').length} | General: {studentsList.filter(s => s.section === 'General Education').length})
+    </span>
+  </div>
+
+  {/* Smart Search Bar - Broad and full-width on mobile */}
+  <div className="relative w-full">
+    <input
+      type="text"
+      placeholder="Search ID, Name, Class, Trade..."
+      value={searchQuery}
+      onChange={(e) => setSearchQuery(e.target.value)}
+      className="w-full bg-gray-900/90 text-white placeholder-gray-400 text-xs sm:text-sm px-3 py-2.5 rounded-lg border border-gray-700 focus:outline-none focus:border-amber-500"
+    />
+    {searchQuery && (
+      <button
+        type="button"
+        onClick={() => setSearchQuery('')}
+        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-xs font-bold"
+      >
+        ✕
+      </button>
+    )}
+  </div>
 {/* Export & Print Action Bar */}
 <div className="flex flex-col sm:flex-row gap-3 mb-4 justify-between items-start sm:items-center bg-gray-800/80 p-3 rounded-lg border border-gray-700">
   <h3 className="text-lg font-bold text-white">Student Directory Actions</h3>
@@ -3863,17 +3539,16 @@ setTeacherPhotoPreview(null);
               ))}
           </select>
           {/* Print Trigger Button */}
-         <button
+        <button
   type="button"
   onClick={handlePrint}
-  className="w-full sm:w-auto px-3 py-1.5 bg-gray-700 hover:bg-gray-600 active:scale-95 transition-transform text-white font-semibold text-xs rounded border border-gray-600 flex items-center justify-center gap-1.5 cursor-pointer"
+  className="hidden sm:flex w-full sm:w-auto px-3 py-1.5 bg-gray-700 hover:bg-gray-600 active:scale-95 transition-transform text-white font-medium rounded text-xs items-center justify-center gap-2"
 >
   🖨️ Print List
 </button>
-{/* Add right after </button> on line 3216 */}
-<span className="px-2.5 py-1.5 bg-amber-500/10 border border-amber-500/30 rounded text-amber-400 font-semibold text-xs whitespace-nowrap">
-  Filtered: {
-    studentsList.filter((stu) => {
+  <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 w-full my-3">
+    <span className="w-full sm:w-auto px-2.5 py-1.5 bg-amber-500/10 border border-amber-500/30 rounded text-amber-400 font-semibold text-xs text-center sm:text-left">
+    Filtered: {studentsList.filter((stu) => {
       // 1. Flexible Section Filter (STT = Commercial, IND = Industrial, TE = Technical)
       if (printSection !== 'All' && printSection !== 'All Sections') {
         const pSec = printSection.toLowerCase();
@@ -3919,6 +3594,7 @@ setTeacherPhotoPreview(null);
     }).length
   }
 </span>
+</div>
 </div>
 
 <div className="relative group sm:w-auto w-full">
@@ -4065,39 +3741,41 @@ setTeacherPhotoPreview(null);
                 onClick={() => handleRowClick(stu)}
                 className="hover:bg-gray-800/60 cursor-pointer transition"
               >
-                <td className="p-3 font-mono text-amber-400 font-bold">{stu.unique_code || stu.id}</td>
-<td className="p-3">
+<td className="p-3 font-mono text-[10px] sm:text-sm text-amber-100 font-bold whitespace-nowrap">{stu.unique_code || stu.id}</td>
+<td className="p-3"> 
   {stu.picture ? (
     <img src={stu.picture} alt="" className="w-12 h-12 rounded-lg object-cover border border-amber-500/50 shadow-sm" />
   ) : (
     <div className="w-12 h-12 rounded-lg bg-gray-700 flex items-center justify-center text-[10px] text-gray-400">No Photo</div>
   )}
 </td>
-                <td className="p-3 font-semibold text-white text-base">{stu.fullName}</td>
+<td className="p-3 font-semibold text-[11px] sm:text-base text-amber-100 whitespace-nowrap">{stu.fullName}</td>
              <td className="p-3">
-      <span className="bg-blue-900/40 text-blue-300 px-2 py-0.5 rounded border border-blue-700/40">
-        {stu.section}
-      </span>
-      <div className="text-gray-400 mt-1 text-xs">
-        {stu.classLevel}
-      </div>
+  <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2">
+  <span className="text-[11px] bg-blue-900/40 text-blue-300 px-1.5 py-0.5 rounded border border-blue-700/40">
+    {stu.section}
+  </span>
+  <span className="text-[11px] text-gray-400">
+    {stu.classLevel}
+  </span>
+</div>
     </td>
-    <td className="p-3">
-      <div className="font-semibold text-white">
-        {stu.section?.toLowerCase() === 'general' ? 'N/A' : (stu.trades_series || stu.trade || stu.trade_series || stu.specialty || 'N/A')}
-      </div>
-    </td>
-                <td className="p-3"><span className="text-amber-300 font-medium">{stu.gender}</span>, {stu.age} yrs</td>
+          <td className="p-3">
+  <div className="font-semibold text-[14px] sm:text-sm text-amber-100">
+    {stu.section?.toLowerCase() === 'general' ? 'N/A' : (stu.trades_series || stu.trade || stu.trade_series || stu.series || stu.specialty || '-')}
+  </div>
+</td>
+                <td className="p-3"><span className="text-amber-200 font-medium">{stu.gender}</span>, {stu.age} yrs</td>
                 <td className="p-3">
                   <div className="font-semibold text-white">{stu.guardianName}</div>
-                  <div className="text-amber-300 font-mono text-xs">{stu.guardian_phone || stu.guardianPhone || 'N/A'}</div>
+                  <div className="text-amber-200 font-mono text-xs">{stu.guardian_phone || stu.guardianPhone || 'N/A'}</div>
                 </td>
                 <td className="p-3">
   <div className="font-semibold text-white">{stu.residence || 'N/A'}</div>
 </td>
                {/* REG DATE / TIME CELL */}
-          <td className="p-3 text-[11px] leading-tight text-amber-400/90 whitespace-nowrap">
-            <div className="font-semibold text-[11px] text-amber-400">
+          <td className="p-3 text-[11px] leading-tight text-amber-200/90 whitespace-nowrap">
+            <div className="font-semibold text-[11px] text-amber-200">
               {stu.created_at ? new Date(stu.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}
             </div>
             <div className="text-[10px] text-blue-300/80 font-mono mt-0.5">
@@ -4411,16 +4089,16 @@ setTeacherPhotoPreview(null);
           <div className="bg-[#111827] border border-gray-800 p-6 rounded-xl shadow-xl space-y-4">
            {/* Sub-tab buttons */}
         <div className="flex border-b border-gray-800 pb-3 space-x-4">
-          <button
-            onClick={() => setTeacherSubTab('assigned')}
-            className={`px-4 py-2 text-sm font-bold rounded-lg transition ${
-              teacherSubTab === 'assigned'
-                ? 'bg-amber-500 text-black'
-                : 'bg-gray-800 text-gray-400 hover:text-white'
-            }`}
-          >
-            Assigned Teachers
-          </button>
+         <button
+          onClick={() => setTeacherSubTab('assigned')}
+          className={`px-4 py-2 text-sm font-bold rounded-lg transition ${
+            teacherSubTab === 'assigned'
+              ? 'bg-blue-600 text-white'
+              : 'bg-gray-800 text-gray-400 hover:text-white'
+          }`}
+        >
+          Assigned Teachers
+        </button>
 
         </div>
 
@@ -4560,9 +4238,9 @@ setTeacherPhotoPreview(null);
       <div className="flex items-center gap-2">
         <button
           onClick={() => setSelectedTeacherModal(teacher)}
-          className="flex-1 bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs py-2 px-3 rounded transition-colors flex items-center justify-center gap-1.5"
+          className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs py-2 px-3 rounded transition-colors"
         >
-          <span>📋</span> Click to See Timetable & Details
+          <span>📑</span> Click to See Timetable & Details
         </button>
 
         <button
@@ -4570,10 +4248,13 @@ setTeacherPhotoPreview(null);
               const confirmDelete = window.confirm(`Are you sure you want to delete ${teacher.name}? This action cannot be undone.`);
               if (confirmDelete) {
                 const targetId = teacher.teacher_id || teacher.id;
+                const currentSchoolId = localStorage.getItem('active_school_id') || localStorage.getItem('activeSchoolId');
+
                 const { error } = await supabase
-                  .from('teachers')
-                  .delete()
-                  .eq('teacher_id', targetId);
+               .from('teachers')
+               .delete()
+               .eq('teacher_id', targetId)
+               .eq('school_id', currentSchoolId);
                 if (error) {
                   alert(`Error deleting teacher from database: ${error.message}`);
                   return;
@@ -4692,594 +4373,46 @@ setTeacherPhotoPreview(null);
 
         {/* SCHOOL DETAILS TAB */}
         {/* CLASS & COEFFICIENT SETTINGS TAB */}
-      {activeTab === 'coefficients' && (
-        <div className="bg-[#111827] border border-gray-800 rounded-xl p-6 space-y-6 shadow-xl">
-          {/* Header Controls */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-gray-800">
-            <div>
-              <div className="flex items-center gap-3">
-  <h2 className="text-xl font-bold text-white">Class & Subject Coefficients</h2>
-  <span className="bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs px-2.5 py-1 rounded-full font-semibold">
-    {subjectCoefficients.filter(s => s.selected || s.included).length} Subjects Selected
-  </span>
-</div>
-              <p className="text-xs text-gray-400">Select section, class, and set individual subject coefficients for report card calculations.</p>
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setCustomSubjectModal(true)}
-                className="bg-gray-800 hover:bg-gray-700 text-blue-400 border border-blue-500/30 text-xs font-semibold px-4 py-2 rounded-lg flex items-center gap-2 transition"
-              >
-                + Add Custom Subject
-              </button>
-              <button
-               onClick={async () => {
-  const currentSchoolId = activeSchool?.id || activeSchool?.school_id || session?.user?.user_metadata?.school_id;
+     {activeTab === 'coefficients' && (
+  <SubjectCoefficientsManager activeSchool={activeSchool} />
+)} 
+      
+        {/* MASTER MARK SHEET TAB */}
+{activeTab === 'master-marks' && (
+  <div className="bg-[#111827] border border-gray-800 rounded-xl p-6 space-y-6 shadow-xl">
+    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-gray-800">
+      <div>
+        <h2 className="text-xl font-bold text-white">Master Mark Sheet</h2>
+        <p className="text-xs text-gray-400">View complete class performance breakdown across sequence evaluations</p>
+      </div>
+    </div>
 
-  if (!currentSchoolId) {
-    alert("School ID missing");
-    return;
-  }
+    {/* Section Selector Bar */}
+    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-gray-900/60 p-4 rounded-lg border border-gray-800">
+      <div>
+        <label className="block text-xs font-semibold text-gray-400 mb-1 uppercase">Section</label>
+        <select
+          value={masterSection}
+          onChange={(e) => setMasterSection(e.target.value)}
+          className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-xs text-white focus:outline-none"
+        >
+          <option value="General Education">General Education</option>
+          <option value="Technical Commercial (STT)">Technical Commercial (STT)</option>
+          <option value="Technical Industrial (IND)">Technical Industrial (IND)</option>
+        </select>
+      </div>
+    </div>
 
-  // Create clean payload for the exact selected class
-  const payload = subjectCoefficients
-    .filter(s => s.selected)
-    .filter((s, idx, self) => idx === self.findIndex(t => (t.name || t.subject_name) === (s.name || s.subject_name)))
-    .map(s => ({
-      school_id: currentSchoolId,
-      section: selectedSection,
-      classLevel: selectedClass.trim(),
-      trades_series: GENERAL_LOWER_CLASSES.includes(selectedClass.trim()) ? 'N/A' : (selectedTradeSeries || null),
-      subject_code: s.subject_code || (s.name ? s.name.substring(0, 4).toUpperCase() : 'SUBJ'),
-      subject_name: s.name || s.subject_name,
-      category: s.category || 'General Core Subjects',
-      coefficient: parseFloat(s.coefficient) || 1,
-      is_included: true
-    }));
-
-  // Safeguard: Alert only if zero changes were made to an already saved class
-  if (isSavedForCurrentClass && payload.length === 0) {
-    alert(`Subjects and coefficients for "${selectedClass?.trim()}" are already assigned. Modify a subject selection or coefficient before updating.`);
-    return;
-  }
-
-          // Delete ONLY records matching the exact unique class level
-          let deleteQuery = supabase
-            .from('class_coefficients')
-            .delete()
-            .eq('school_id', currentSchoolId)
-            .eq('section', selectedSection)
-            .eq('classLevel', selectedClass.trim());
-
-const targetTradeSeries = GENERAL_LOWER_CLASSES.includes(selectedClass.trim()) 
-  ? 'N/A' 
-  : (selectedTradeSeries || null);
-
-if (targetTradeSeries === null) {
-  deleteQuery = deleteQuery.is('trades_series', null);
-} else {
-  deleteQuery = deleteQuery.eq('trades_series', targetTradeSeries);
-}
-
-const { error: deleteError } = await deleteQuery;
-
-if (deleteError) {
-  alert("Error clearing old coefficients: " + deleteError.message);
-  return;
-}
-
-if (payload.length > 0) {
-      const { error: insertError } = await supabase
-        .from('class_coefficients')
-        .insert(payload);
-
-      if (insertError) {
-        alert("Error saving coefficients: " + insertError.message);
-      } else {
-  setIsSavedForCurrentClass(true);
-  alert("Coefficients saved successfully! Report cards will automatically reflect these values.");
-}
-    } else {
-      alert("Please check at least one subject before saving.");
-    }
-                }}
-                className="bg-amber-500 hover:bg-amber-400 text-gray-950 font-bold text-xs px-5 py-2 rounded-lg shadow-md transition"
-              >
-                Save & Validate
-              </button>
-            </div>
-          </div>
-
-          {/* Section & Class Selectors */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-gray-900/60 p-4 rounded-lg border border-gray-800">
-            <div>
-              <label className="block text-xs font-semibold text-gray-400 mb-1 uppercase">Section</label>
-              <select
-                value={selectedSection}
-               onChange={(e) => {
-  const newSec = e.target.value;
-  setSelectedSection(newSec);
-  setSelectedTradeSeries('');
-  if (newSec === 'General Education') setSelectedClass('Form 1A (F1A)');
-  else if (newSec === 'Technical Commercial (STT)') setSelectedClass('First Year Commercial (Y1Com)');
-  else if (newSec === 'Technical Industrial (IND)') setSelectedClass('First Year Industrial (Y1Ind)');
-}}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
-              >
-                <option value="General Education">General Education</option>
-<option value="Technical Commercial (STT)">Technical Commercial (STT)</option>
-<option value="Technical Industrial (IND)">Technical Industrial (IND)</option> 
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-gray-400 mb-1 uppercase">Class Level</label>
-              <select
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
-              >
-              {(selectedSection === 'General Education' ? GENERAL_CLASSES_CATALOG : selectedSection === 'Technical Industrial (IND)' ? TECHNICAL_INDUSTRIAL_CATALOG : TECHNICAL_COMMERCIAL_CATALOG).map((cls) => (
-                  <option key={cls} value={cls}>{cls}</option>
-                ))}
-              </select>
-            </div>
-
-           <div>
-              <label className="block text-xs font-semibold text-gray-400 mb-1 uppercase">Series / Specialty</label>
-              {(selectedClass?.toUpperCase().includes('ARTS') || selectedClass?.toUpperCase().includes('SCI') || selectedClass?.toUpperCase().includes('L6') || selectedClass?.toUpperCase().includes('U6') || selectedSection !== 'General Education') ? (
-                <select
-                  value={selectedTradeSeries}
-                  onChange={(e) => setSelectedTradeSeries(e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-amber-500 cursor-pointer"
-                >
-                  <option value="">e.g. A4, S1, G2, </option>
-                  {(selectedClass?.toUpperCase().includes('ARTS') || selectedClass?.toUpperCase().includes('L6A') || selectedClass?.toUpperCase().includes('U6A')) ? (
-              <>
-                <option value="A1">A1</option>
-                <option value="A2">A2</option>
-                <option value="A3">A3</option>
-                <option value="A4">A4</option>
-                <option value="A5">A5</option>
-              </>
-            ) : (selectedClass?.toUpperCase().includes('SCIENCE') || selectedClass?.toUpperCase().includes('L6S') || selectedClass?.toUpperCase().includes('U6S')) ? (
-              <>
-                <option value="S1">S1</option>
-                <option value="S2">S2</option>
-                <option value="S3">S3</option>
-                <option value="S4">S4</option>
-                <option value="S5">S5</option>
-                <option value="S6">S6</option>
-                <option value="S7">S7</option>
-                <option value="S8">S8</option>
-              </>
-            ) : selectedSection?.includes("Commercial") ? (
-              COMMERCIAL_TRADE_SERIES.map((trade) => (
-                <option key={trade} value={trade}>{trade}</option>
-              ))
-            ) : selectedSection?.includes("Industrial") ? (
-              INDUSTRIAL_TRADE_SERIES.map((trade) => (
-                <option key={trade} value={trade}>{trade}</option>
-              ))
-            ) : null}
-                  
-                </select>
-              ) : (
-                <input
-                  disabled
-                  type="text"
-                  placeholder="e.g. A4, S1, G2, Specialty Code"
-                  className="w-full bg-gray-900 border border-gray-800 rounded-lg p-2.5 text-xs text-gray-500 cursor-not-allowed"
-                />
-              )}
-            </div>
-          </div>
-
-          {/* Tabular Table with Visible Lines */}
-          <div className="overflow-x-auto border border-gray-700 rounded-lg">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="bg-gray-800 text-gray-300 border-b border-gray-700 uppercase tracking-wider font-semibold">
-                  <th className="p-3 border-r border-gray-700 w-12 text-center">Include</th>
-                  <th className="p-3 border-r border-gray-700">Subject Code</th>
-                  <th className="p-3 border-r border-gray-700">Subject Name</th>
-                  <th className="p-3 border-r border-gray-700">Category</th>
-                  <th className="p-3 w-36 text-center">Coefficient</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-800 text-gray-200">
-                {[...subjectCoefficients].sort((a, b) => {
-  const targetCategory = selectedSection?.includes("Commercial") ? "Commercial Subjects" : selectedSection?.includes("Industrial") ? "Industrial Subjects" : "General Core Subjects";
-  const aCatMatch = a.category === targetCategory ? 1 : 0;
-  const bCatMatch = b.category === targetCategory ? 1 : 0;
-  if (bCatMatch !== aCatMatch) return bCatMatch - aCatMatch;
-  return (b.selected ? 1 : 0) - (a.selected ? 1 : 0);
-}).map((sub, idx) => (
-                  <tr key={sub.code || idx} className={`hover:bg-gray-800/50 transition ${sub.selected ? '' : 'opacity-40 bg-gray-900/40'}`}>
-                   <td className="p-3 border-r border-gray-800 text-center">
-                  {pendingUncheckSubject === sub.name ? (
-                    <div className="flex items-center justify-center space-x-1 text-xs">
-                      <button
-                        type="button"
-                        onClick={() => confirmUncheckCoreSubject(sub.name)}
-                        className="px-2 py-0.5 bg-red-600 hover:bg-red-700 text-white rounded font-semibold text-[10px]"
-                      >
-                        Yes
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPendingUncheckSubject(null)}
-                        className="px-2 py-0.5 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded font-semibold text-[10px]"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
-                    <input
-                      type="checkbox"
-                      checked={sub.selected}
-                      onChange={() => handleCoefficientSubjectToggle(sub.name)}
-                      className="w-4 h-4 rounded accent-amber-500 bg-gray-800 border-gray-700 focus:ring-0 cursor-pointer"
-                    />
-                  )}
-                </td>
-                    <td className="p-3 border-r border-gray-800 font-mono text-amber-400 font-semibold">{sub.code}</td>
-                    <td className="p-3 border-r border-gray-800 font-medium text-white">{sub.name}</td>
-                    <td className="p-3 border-r border-gray-800 text-gray-400">{sub.category || 'General Core Subjects'}</td>
-                    <td className="p-3 text-center">
-                      <input
-                        type="number"
-                        min="1"
-                        max="10"
-                        value={sub.coefficient || 1}
-                        onChange={(e) => handleCoefficientChange(sub.name, e.target.value)}
-                        disabled={!sub.selected}
-                        className="w-20 bg-gray-900 border border-amber-500/50 rounded p-1.5 text-center text-xs text-amber-300 font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-30 disabled:border-gray-700"
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-      {/* MASTER MARK SHEET TAB */}
-      {activeTab === 'master-marks' && (
-        <div className="bg-[#111827] border border-gray-800 rounded-xl p-6 space-y-6 shadow-xl">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-gray-800">
-            <div>
-              <h2 className="text-xl font-bold text-white">Master Mark Sheet</h2>
-              <p className="text-xs text-gray-400">View complete class performance breakdown across sequence evaluations</p>
-            </div>
-          </div>
-
-          {/* Filters Bar */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-gray-900/60 p-4 rounded-lg border border-gray-800">
-            <div>
-              <label className="block text-xs font-semibold text-gray-400 mb-1 uppercase">Section</label>
-              <select
-                value={masterSection}
-                onChange={(e) => {
-                  setMasterSection(e.target.value);
-                  setMasterSeries('');
-                }}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-xs text-white focus:outline-none"
-              >
-                <option value="General Education">General Education</option>
-<option value="Technical Commercial (STT)">Technical Commercial (STT)</option>
-<option value="Technical Industrial (IND)">Technical Industrial (IND)</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-gray-400 mb-1 uppercase">Class Level</label>
-              <select
-                value={masterClass}
-               onChange={(e) => {
-  const selectedClass = e.target.value;
-  setMasterClass(selectedClass);
-  setMasterSeries('');
-
-  // Auto-sync Section state using Catalogs as the Single Source of Truth (General First)
-  if (GENERAL_CLASSES_CATALOG.includes(selectedClass)) {
-    setMasterSection('General Education');
-  } else if (TECHNICAL_COMMERCIAL_CATALOG.includes(selectedClass)) {
-    setMasterSection('Technical Commercial (STT)');
-  } else if (TECHNICAL_INDUSTRIAL_CATALOG.includes(selectedClass)) {
-    setMasterSection('Technical Industrial (IND)');
-  }
-}}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-xs text-white focus:outline-none"
-              >
-                {((masterSection === 'General Education' || masterSection?.includes('General'))
-  ? GENERAL_CLASSES_CATALOG
-  : masterSection?.includes('Commercial')
-  ? TECHNICAL_COMMERCIAL_CATALOG
-  : masterSection?.includes('Industrial')
-  ? TECHNICAL_INDUSTRIAL_CATALOG
-  : []
-).map((cls) => (
-  <option key={cls} value={cls}>{cls}</option>
-))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-gray-400 mb-1 uppercase">Series / Specialty</label>
-              <select
-                value={masterSeries}
-                onChange={(e) => {
-                  const selectedSeries = e.target.value;
-                  setMasterSeries(selectedSeries);
-                 if (
-    GENERAL_SERIES_CATALOG.ARTS.includes(selectedSeries) || 
-    GENERAL_SERIES_CATALOG.SCIENCE.includes(selectedSeries)
-  ) {
-    setMasterSection('General Education');
-  } else if (COMMERCIAL_TRADE_SERIES.includes(selectedSeries)) {
-    setMasterSection('Technical Commercial (STT)');
-  } else if (INDUSTRIAL_TRADE_SERIES.includes(selectedSeries)) {
-    setMasterSection('Technical Industrial (IND)');
-  }
-                }}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-xs text-white focus:outline-none"
-              >
-                <option value="">e.g. A4, S1, G2, Specialty Code</option>
-                {(masterClass?.toUpperCase().includes('ARTS') || masterClass?.toUpperCase().includes('L6A') || masterClass?.toUpperCase().includes('U6A')) && (
-              GENERAL_SERIES_CATALOG.ARTS.map((s) => <option key={s} value={s}>{s}</option>)
-            )}
-            {(masterClass?.toUpperCase().includes('SCIENCE') || masterClass?.toUpperCase().includes('L6S') || masterClass?.toUpperCase().includes('U6S')) && (
-              GENERAL_SERIES_CATALOG.SCIENCE.map((s) => <option key={s} value={s}>{s}</option>)
-            )}
-            {masterSection?.includes("Commercial") && COMMERCIAL_TRADE_SERIES.map((trade) => (
-              <option key={trade} value={trade}>{trade}</option>
-            ))}
-            {masterSection?.includes("Industrial") && INDUSTRIAL_TRADE_SERIES.map((trade) => (
-              <option key={trade} value={trade}>{trade}</option>
-            ))}
-            </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-400 mb-1 uppercase">Term</label>
-              <select
-                value={masterTerm}
-                onChange={(e) => setMasterTerm(e.target.value)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-xs text-white focus:outline-none"
-              >
-                <option value="Term 1">Term 1 (Seq 1 & 2)</option>
-                <option value="Term 2">Term 2 (Seq 3 & 4)</option>
-                <option value="Term 3">Term 3 (Seq 5 & 6)</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Master Table */}
-          {isMasterLoading ? (
-            <div className="py-12 text-center text-gray-400 text-sm">Loading master mark sheet...</div>
-          ) : masterStudentsData.length === 0 ? (
-            <div className="py-12 text-center text-gray-400 text-sm">No registered students found for this selection.</div>
-          ) : (
-            <div className="overflow-x-auto border border-gray-700 rounded-lg">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-[#1B4D3E] text-white border-b border-emerald-900 text-center">
-                    <th className="p-3 border-r border-gray-700 w-10 sticky left-0 z-20 bg-[#1B4D3E]" rowSpan={2}>N°</th>
-                    <th className="p-3 border-r border-gray-700 text-left min-w-[180px] sticky left-10 z-20 bg-[#1B4D3E]" rowSpan={2}>Student Name</th>
-                    <th className="p-3 border-r border-gray-700 text-center min-w-[120px] bg-[#1B4D3E]" rowSpan={2}>unique_code</th>
-                    {masterSubjects.map((sub) => (
-                      <th key={sub.id || sub.subject_name} className="p-2 border-r border-gray-700 min-w-[120px]" colSpan={2}>
-                        <div className="font-bold text-white text-xs leading-tight line-clamp-2 min-h-[28px] flex items-center justify-center">{sub.subject_name}</div>
-<div className="text-[10px] text-amber-400 font-mono mt-1 bg-black/20 py-0.5 px-1.5 rounded inline-block">Coef: {sub.coefficient || 1}</div>
-                      </th>
-                    ))}
-                    <th className="p-3 border-r border-emerald-900 bg-[#12362B] text-amber-300 font-bold min-w-[90px]" rowSpan={2}>TOTAL COEF</th>
-<th className="p-3 border-r border-emerald-900 bg-[#12362B] text-amber-300 font-bold min-w-[90px]" rowSpan={2}>TOTAL MARKS</th>
-<th className="p-3 border-r border-emerald-900 bg-[#12362B] text-emerald-300 font-extrabold min-w-[100px]" rowSpan={2}>TERM AVG (/20)</th>
-<th className="p-3 border-r border-emerald-900 bg-[#12362B] text-amber-300 font-bold min-w-[70px]" rowSpan={2}>RANK</th>
-<th className="p-3 border-emerald-900 bg-[#12362B] text-white font-bold min-w-[110px]" rowSpan={2}>REMARKS</th>
-                  </tr>
-                  <tr className="bg-[#1B4D3E] text-white border-b border-emerald-900 text-center text-[10px]">
-                    {masterSubjects.map((sub) => (
-                      <React.Fragment key={`seq-hdr-${sub.id || sub.subject_name}`}>
-<th className="p-1 border-r border-gray-700 w-1/2 min-w-[60px] text-[10px] font-semibold text-center uppercase">{seq1Label}</th>
-  <th className="p-1 border-r border-gray-700 w-1/2 min-w-[60px] text-[10px] font-semibold text-center uppercase">{seq2Label}</th>
-                      </React.Fragment>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-300 bg-[#FDFBF7] text-gray-900">
-                  {masterStudentsData.map((student, idx) => {
-                    let totalWeighted = 0;
-                    let totalCoeffs = 0;
-
-                   const missingSubjects = [];
-  masterSubjects.forEach((sub) => {
-    const coef = Number(sub.coefficient) || 1;
-    totalCoeffs += coef;
-
-const marksList = Array.isArray(student.marks) ? student.marks : [];
-const m = marksList.find((item) => 
-  (sub.id && item.subject_id === sub.id) ||
-  (item.subject_name && sub.subject_name && item.subject_name.trim().toLowerCase() === sub.subject_name.trim().toLowerCase()) ||
-  (item.subject && sub.subject && item.subject.trim().toLowerCase() === sub.subject.trim().toLowerCase())
-);  
-    // Check available sequence marks dynamically
-        let raw1 = null;
-        let raw2 = null;
-
-        if (masterTerm?.includes('Term 2')) {
-          raw1 = m?.seq3_mark || m?.seq3 || student?.seq3_mark || student?.seq3 || null;
-          raw2 = m?.seq4_mark || m?.seq4 || student?.seq4_mark || student?.seq4 || null;
-        } else if (masterTerm?.includes('Term 3')) {
-          raw1 = m?.seq5_mark || m?.seq5 || student?.seq5_mark || student?.seq5 || null;
-          raw2 = m?.seq6_mark || m?.seq6 || student?.seq6_mark || student?.seq6 || null;
-        } else {
-          raw1 = m?.seq1_mark || m?.seq1 || student?.seq1_mark || student?.seq1 || null;
-          raw2 = m?.seq2_mark || m?.seq2 || student?.seq2_mark || student?.seq2 || null;
-        }
-        const s1 = (raw1 !== undefined && raw1 !== null && raw1 !== '' && Number(raw1) !== 0) ? Number(raw1) : null;
-const s2 = (raw2 !== undefined && raw2 !== null && raw2 !== '' && Number(raw2) !== 0) ? Number(raw2) : null;
-console.log(`[Master Sheet Log] Student: ${student.name} | Term: ${masterTerm}`, {
-  subject: sub.subject_name || sub.subject,
-  markRecord: m,
-  extractedS1: s1,
-  extractedS2: s2
-});
-    let subAvg = 0;
-    if (s1 !== null && s2 !== null) {
-      subAvg = (s1 + s2) / 2;
-    } else if (s1 !== null) {
-      subAvg = s1;
-    } else if (s2 !== null) {
-      subAvg = s2;
-    } else {
-      missingSubjects.push(sub.subject_name || sub.subject || 'Unknown Subject');
-    }
-
-    totalWeighted += subAvg * coef;
-  });
-
-                    const termAvg = totalCoeffs > 0 ? (totalWeighted / totalCoeffs).toFixed(2) : '0.00';
-
-                    return (
-                      <tr key={student.id} className="hover:bg-amber-50/60 transition border-b border-gray-300">
-                        <td className="p-2 border-r border-gray-800 text-center font-mono text-gray-400">{idx + 1}</td>
-                       <td className="p-2 border-r border-gray-300 font-semibold text-gray-900 min-w-[180px]">
-            <span>{student.name || student.full_name || student.student_name}</span>
-          </td>
-          <td className="p-1 border-r border-gray-300 text-center min-w-[120px]">
-            <input
-              type="text"
-              value={student.unique_code || student.matricule || ''}
-              onChange={(e) => {
-                const updatedCode = e.target.value;
-
-                setMasterStudentsData(prev => 
-                  prev.map(s => s.id === student.id ? { ...s, unique_code: updatedCode } : s)
-                );
-              }}
-              placeholder="Enter Code"
-              className="w-full text-center text-xs font-mono py-1 px-1 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-emerald-600 bg-white text-gray-900"
-            />
-          </td>
-                        {masterSubjects.map((sub) => {
-                          const m = student.marks?.find((item) => (item.subject_id === sub.id || item.subject_name === sub.subject_name || item.subject === (sub.subject_name || sub.name || sub)));
-                          return (
-                            <React.Fragment key={`mark-${student.id}-${sub.id || sub.subject_name}`}>
-                              <td className="p-2 border-r border-gray-800 text-center font-mono relative group">
-                  <input
-  type="number"
-  min="0"
-  max="20"
-  step="0.5"
-  value={m?.seq1_mark !== undefined && m?.seq1_mark !== null ? m.seq1_mark : (m?.seq1 !== undefined && m?.seq1 !== null ? m.seq1 : '')}
-  placeholder="-"
-  onChange={(e) => handleAdminMarkChange(student.id, sub.id || sub.subject || sub.subject_name, 'seq1_mark', e.target.value)}
-  className="w-12 text-center bg-transparent border-b border-transparent hover:border-amber-500 focus:border-amber-600 focus:bg-amber-50 focus:outline-none font-mono text-xs font-semibold text-gray-900 transition-colors"
-/>
-                
-                </td>
-                              <td className="p-2 border-r border-gray-800 text-center font-mono relative group">
-                  <input
-  type="number"
-  min="0"
-  max="20"
-  step="0.5"
-  value={m?.seq2_mark !== undefined && m?.seq2_mark !== null ? m.seq2_mark : (m?.seq2 !== undefined && m?.seq2 !== null ? m.seq2 : '')}
-  placeholder="-"
-  onChange={(e) => handleAdminMarkChange(student.id, sub.id || sub.subject || sub.subject_name, 'seq2_mark', e.target.value)}
-  className="w-12 text-center bg-transparent border-b border-transparent hover:border-amber-500 focus:border-amber-600 focus:bg-amber-50 focus:outline-none font-mono text-xs font-semibold text-gray-900 transition-colors"
-/>
-                  {m?.edit_count > 0 && m?.id && (
-                    <button
-                      onClick={() => handleUnlockMarks(m.id)}
-                      className="ml-1 text-[10px] text-amber-400 hover:text-amber-300 font-bold"
-                      title="Unlock mark for teacher edit"
-                    >
-                      🔓
-                    </button>
-                  )}
-                </td>
-                            </React.Fragment>
-                          );
-                        })}
-                        <td className="p-2 border-r border-gray-800 text-center font-mono font-semibold text-amber-400">{totalCoeffs}</td>
-                        <td className="p-2 border-r border-gray-800 text-center font-mono font-bold text-gray-900">{totalWeighted.toFixed(2)}</td>
-                        <td className={`p-2 border-r border-gray-800 text-center font-mono font-bold ${Number(termAvg) >= 10 ? 'text-blue-600' : 'text-red-600'}`}>{termAvg}</td>
-                        <td className="p-2 border-r border-gray-800 text-center font-mono text-gray-300">-</td>
-                        <td className="p-2 text-center text-xs font-semibold">
-                          {Number(termAvg) >= 10 ? (
-                            <span className="text-blue-600 font-bold">Passed</span>
-                          ) : (
-                            <span className="text-red-600 font-bold">Failed</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-                <tfoot>
-            {/* Subject Average Row */}
-            <tr className="bg-slate-900/90 font-semibold border-t-2 border-emerald-600/60 text-white">
-            <td colSpan={3} className="px-4 py-2 text-right text-xs text-slate-300">
-                Subject Average (/20):
-              </td>
-              {masterSubjects?.map((sub) => {
-                const validMarks = (masterStudentsData || [])
-                  .map((s) => parseFloat(s.marks?.[sub.id] || s[sub.id]))
-                  .filter((val) => !isNaN(val));
-
-                const avg = validMarks.length
-                  ? (validMarks.reduce((a, b) => a + b, 0) / validMarks.length).toFixed(2)
-                  : '-';
-
-                return (
-                  <td key={`avg_${sub.id}`} colSpan={2} className="text-center py-2 text-xs text-amber-400">
-                    {avg}
-                  </td>
-                );
-              })}
-              <td colSpan={3} className="px-4 py-2 text-right text-xs text-slate-300"></td>
-            </tr>
-
-            {/* Pass Percentage Row */}
-            <tr className="bg-slate-900 font-semibold border-b border-slate-700 text-white">
-              <td colSpan={3} className="px-4 py-2 text-right text-xs text-slate-300">
-                Passed (% ≥ 10/20):
-              </td>
-              {masterSubjects?.map((sub) => {
-                const validMarks = (masterStudentsData || [])
-                  .map((s) => parseFloat(s.marks?.[sub.id] || s[sub.id]))
-                  .filter((val) => !isNaN(val));
-
-                const passedCount = validMarks.filter((val) => val >= 10).length;
-                const passPct = validMarks.length
-                  ? ((passedCount / validMarks.length) * 100).toFixed(1) + '%'
-                  : '-';
-
-                return (
-                  <td key={`pct_${sub.id}`} colSpan={3} className="text-center py-2 text-xs text-emerald-400">
-                    {passPct}
-                  </td>
-                );
-              })}
-              <td colSpan={3} className="bg-slate-900/90"></td>
-            </tr>
-          </tfoot>
-              </table>
-              <div className="mt-4 flex justify-end">
-  <button
-    type="button"
-    onClick={handleSaveMasterMarks}
-    className="bg-[#1b4332] hover:bg-[#2d6a4f] text-white text-xs font-semibold px-4 py-2 rounded-lg shadow transition-colors flex items-center gap-2"
-  >
-    Save and Update Marks
-  </button>
-</div>
-            </div>
-          )}
-        </div>
-        
-      )}
+    {/* Render Section Specific Mark Sheet Component */}
+    {masterSection?.includes('Commercial') ? (
+      <TechnicalCommercialMarkSheet activeSchool={activeSchool} />
+    ) : masterSection?.includes('Industrial') ? (
+      <TechnicalIndustrialMarkSheet activeSchool={activeSchool} />
+    ) : (
+      <GeneralMarkSheet activeSchool={activeSchool} />
+    )}
+  </div>
+)}
         {activeTab === 'details' && (
           <div className="bg-[#0b1329] border border-gray-800 p-4 sm:p-8 rounded-2xl w-full max-w-7xl mx-auto shadow-2xl space-y-6">
             <h2 className="text-lg font-bold text-white border-b border-gray-800 pb-3">School Parameters & Configuration</h2>
@@ -5361,7 +4494,7 @@ console.log(`[Master Sheet Log] Student: ${student.name} | Term: ${masterTerm}`,
   </label>
   <input
     type="text"
-    value={activeSchool?.academic_year || getAcademicYear()}
+    value={activeSchool?.academic_year || getCurrentAcademicYear()}
     disabled
     readOnly
     className="w-full bg-[#111827] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-gray-400 cursor-not-allowed"
@@ -5878,7 +5011,7 @@ console.log(`[Master Sheet Log] Student: ${student.name} | Term: ${masterTerm}`,
     doc.setFontSize(16);
     doc.text(`Teacher Timetable - ${teacherName}`, 14, 15);
     doc.setFontSize(10);
-    doc.text(`School: ${school} | Academic Year: ${getAcademicYear()}`, 14, 22);
+    doc.text(`School: ${school} | Academic Year: ${getCurrentAcademicYear()}`, 14, 22);
 
     // 4. Construct Table Header & Body
     const head = [['SUBJECTS', ...dynamicClasses]];
@@ -5941,7 +5074,7 @@ console.log(`[Master Sheet Log] Student: ${student.name} | Term: ${masterTerm}`,
           <div className="text-center text-amber-400 font-extrabold">
   {activeSchool?.name || activeSchool?.school_name || (typeof window !== 'undefined' ? (localStorage.getItem('active_school_name') || localStorage.getItem('school_name')) : '') || '-'}
 </div>
-          <div className="text-right text-emerald-400">ACADEMIC YEAR: {getAcademicYear()}</div>
+          <div className="text-right text-emerald-400">ACADEMIC YEAR: {getCurrentAcademicYear()}</div>
         </div>
             {/* Assigned Classes & Subjects */}
             <div className="mb-4">
@@ -6103,70 +5236,7 @@ return (
     </div>
   </div>
 )}
-      {/* CUSTOM SUBJECT MODAL */}
-      {customSubjectModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-gray-900 border border-gray-700 rounded-xl max-w-md w-full p-6 text-white shadow-2xl">
-            <h3 className="text-lg font-bold text-blue-400 mb-4">Add Custom Subject</h3>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-gray-400 mb-1">Subject Title</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Robotics, Home Economics"
-                  value={newSubjectTitle}
-                  onChange={(e) => setNewSubjectTitle(e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-gray-400 mb-1">Category</label>
-                <select
-                  value={newSubjectCategory}
-                  onChange={(e) => setNewSubjectCategory(e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                >
-                  <option value="General Core Subjects">General Core Subjects</option>
-                  <option value="Arts & Humanities Series">Arts & Humanities Series</option>
-                  <option value="Science & Technology Series">Science & Technology Series</option>
-                  <option value="Commercial & Business Series">Commercial & Business Series</option>
-                  <option value="Industrial & Technical Trades">Industrial & Technical Trades</option>
-                  <option value="Custom/Other Subjects">Custom/Other Subjects</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="mt-6 flex justify-end space-x-3">
-              <button
-                onClick={() => setCustomSubjectModal(false)}
-                className="bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-semibold px-4 py-2 rounded"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  if (!newSubjectTitle.trim()) return;
-                  const newSub = {
-                    code: newSubjectTitle.trim().toUpperCase().replace(/\s+/g, '_'),
-                    name: newSubjectTitle.trim(),
-                    category: newSubjectCategory,
-                    coefficient: 1,
-                    selected: true
-                  };
-                  setSubjectCoefficients(prev => [...prev, newSub]);
-                  setNewSubjectTitle('');
-                  setCustomSubjectModal(false);
-                }}
-                className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-4 py-2 rounded"
-              >
-                Add Subject
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+     
       {showWelcomeOverlay && (
   <div className="fixed inset-0 z-50 bg-black bg-opacity-80 flex items-center justify-center p-4">
     <div className="bg-gray-900 border border-gray-700 rounded-xl max-w-2xl w-full p-6 sm:p-8 text-white shadow-2xl relative">
@@ -6251,13 +5321,20 @@ return (
                 </span>
               </div>
               <div className="flex items-center gap-4">
-                <span className="text-xs text-[#2D5A27] font-bold">Academic Year: {activeSchool?.academic_year || '2026/2027'}</span>
-                <button
-                  onClick={() => window.print()}
-                  className="bg-[#2D5A27] hover:bg-[#1E3E1A] text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors shadow-sm"
-                >
-                  <span>🖨️</span> One-Click Print / Download PDF
-                </button>
+                <span className="text-xs text-[#2D5A27] font-bold">Academic Year: {getCurrentAcademicYear() || '2026/2027'}</span>
+               <button
+  onClick={() => {
+    const teacherId = selectedTeacherForLogs.teacher_id || selectedTeacherForLogs.id;
+    const subject = encodeURIComponent(selectedTeacherForLogs.subject);
+    const shareableUrl = `${window.location.origin}/progression-sheet?teacherId=${teacherId}&subject=${subject}`;
+    
+    navigator.clipboard.writeText(shareableUrl);
+    alert("Copied shareable link to clipboard! Anyone with this link can view the progression sheet.");
+  }}
+  className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 shadow-sm transition-colors"
+>
+  <span>🔗</span> Copy Supervisor Link
+</button>
               </div>
             </div>
 
@@ -6274,28 +5351,49 @@ return (
                       <th className="p-3 border border-[#2D5A27] w-[20%]">Status / Remarks</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#2D5A27]/30 text-xs">
-                    <tr className="bg-[#FDFBF7]">
-                      <td className="p-3 border border-[#2D5A27]/40 text-center font-bold text-[#2D5A27] bg-[#EFECE6]" rowSpan={2}>
-                        <div className="text-xs font-extrabold">W1</div>
-                        <div className="text-[10px] text-gray-600 font-normal">07/09 - 11/09</div>
+                 <tbody className="divide-y divide-[#2D5A27]/30 text-xs">
+              {isLoadingLogs ? (
+                <tr>
+                  <td colSpan="4" className="text-center py-6 text-gray-600 font-medium bg-[#FDFBF7]">
+                    Loading teacher logs...
+                  </td>
+                </tr>
+              ) : fetchedLessonLogs.length > 0 ? (
+                fetchedLessonLogs.map((log, index) => {
+                  const logDate = log.date_logged || log.created_at;
+                  const formattedDate = logDate 
+                    ? new Date(logDate).toLocaleDateString('en-GB', { weekday: 'short', month: 'short', day: '2-digit' })
+                    : '-';
+                  const formattedTime = logDate 
+                    ? new Date(logDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    : '';
+
+                  return (
+                    <tr key={log.id || index} className="bg-[#FDFBF7] hover:bg-[#EFECE6]/50">
+                      <td className="p-3 border border-[#2D5A27]/40 text-center font-bold text-[#2D5A27] bg-[#EFECE6]">
+                        <div className="text-xs font-extrabold">W{log.week_number || (index + 1)}</div>
                       </td>
                       <td className="p-3 border border-[#2D5A27]/40 text-center text-[11px] font-medium text-gray-800 bg-[#FDFBF7]">
-                        Mon, Sep 07<br />
-                        <span className="text-[10px] text-[#2D5A27] font-bold">07:30 - 08:15</span>
+                        <div>{formattedDate}</div>
+                        {formattedTime && <span className="text-[10px] text-[#2D5A27] font-bold">{formattedTime}</span>}
                       </td>
-                      <td className="p-3 border border-[#2D5A27]/40 font-medium text-gray-900 bg-[#FDFBF7]"></td>
-                      <td className="p-3 border border-[#2D5A27]/40 text-gray-700 bg-[#FDFBF7]"></td>
-                    </tr>
-                    <tr className="bg-[#FDFBF7]">
-                      <td className="p-3 border border-[#2D5A27]/40 text-center text-[11px] font-medium text-gray-800 bg-[#FDFBF7]">
-                        Wed, Sep 09<br />
-                        <span className="text-[10px] text-[#2D5A27] font-bold">08:15 - 09:00</span>
+                      <td className="p-3 border border-[#2D5A27]/40 font-medium text-gray-900 bg-[#FDFBF7]">
+                        {log.lesson_title || log.topic_taught || 'No lesson details entered'}
                       </td>
-                      <td className="p-3 border border-[#2D5A27]/40 font-medium text-gray-900 bg-[#FDFBF7]"></td>
-                      <td className="p-3 border border-[#2D5A27]/40 text-gray-700 bg-[#FDFBF7]"></td>
+                      <td className="p-3 border border-[#2D5A27]/40 text-gray-700 bg-[#FDFBF7]">
+                        {log.status || log.remarks || 'Completed'}
+                      </td>
                     </tr>
-                  </tbody>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan="4" className="text-center py-6 text-gray-500 italic bg-[#FDFBF7]">
+                    No lesson logs recorded for this subject yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
                 </table>
               </div>
             </div>

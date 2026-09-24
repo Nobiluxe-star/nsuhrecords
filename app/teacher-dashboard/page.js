@@ -1,19 +1,19 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
-// Calculates academic year based on September 1st rollover rule
-function getCalculatedAcademicYear() {
-  const now = new Date();
-  const currentYear = now.getFullYear();
-  const currentMonth = now.getMonth(); // 0 = Jan, 8 = Sept
+import { getCurrentAcademicYear } from '../../lib/academicYear';
+import { toast } from 'react-hot-toast';
 
-  if (currentMonth >= 8) {
-    return `${currentYear}/${currentYear + 1}`;
-  } else {
-    return `${currentYear - 1}/${currentYear}`;
-  }
-}
+import { 
+  GENERAL_LOWER_CLASSES,
+  GENERAL_CLASSES_CATALOG, 
+  GENERAL_SERIES_CATALOG, 
+  COMMERCIAL_TRADE_SERIES,
+  TECHNICAL_COMMERCIAL_CATALOG,
+  TECHNICAL_INDUSTRIAL_CATALOG
+} from '../admin-dashboard/page';
+
 const FORMULA_LIBRARY = {
   math: [
     { label: 'Fraction', symbol: '$$\\frac{a}{b}$$' },
@@ -58,19 +58,94 @@ const FORMULA_LIBRARY = {
     { label: 'Slenderness Ratio', symbol: '$$\\lambda = \\frac{L_{eff}}{r}$$' }
   ]
 };
-export default function TeacherDashboardPage() {
+  export default function TeacherDashboardPage() {
+  const [teacherProfile, setTeacherProfile] = useState({
+  school_id: '',
+  id: '',
+  name: '',
+  email: '',
+  phone: '',
+  residence: '',
+  section: '',
+  subjects: [],
+  schedules: {}
+});
+  const currentAcademicYear = getCurrentAcademicYear();
+  const [schoolDetails, setSchoolDetails] = useState(null);
+  const [selectedSubjectForAction, setSelectedSubjectForAction] = useState('');
+  const [selectedSectionForAction, setSelectedSectionForAction] = useState('General');
+  const [selectedClassForAction, setSelectedClassForAction] = useState('');
   const [activeTab, setActiveTab] = useState('overview');
   const [navigationHistory, setNavigationHistory] = useState(['overview']);
   const [currentTime, setCurrentTime] = useState(null);
-const [isLoadingStudents, setIsLoadingStudents] = useState(false);
-const [selectedClassLog, setSelectedClassLog] = useState(/** @type {any} */ (null));
+  const [isLoadingStudents, setIsLoadingStudents] = useState(false);
+  const [selectedClassLog, setSelectedClassLog] = useState(/** @type {any} */ (null));
+  const [selectedTrade, setSelectedTrade] = useState('ALL');
+  const [successBanner, setSuccessBanner] = useState(null);
+  // Dynamically resolve classes based strictly on the teacher's schedule assignment
+const assignedClassesForSubject = useMemo(() => {
+  if (!teacherProfile?.schedules || !selectedSubjectForAction) return [];
+  const subjectSchedules = teacherProfile.schedules[selectedSubjectForAction] || [];
+  const classes = new Set();
+  subjectSchedules.forEach((item) => {
+    if (item.className) {
+      classes.add(item.className);
+    }
+  });
+  return Array.from(classes);
+}, [teacherProfile, selectedSubjectForAction]);
+
+// Dynamically resolve trades/series from catalogs based on the selected class/form
+const assignedTradesForClass = useMemo(() => {
+  if (!selectedClassForAction) return [];
+
+  // If the selected class belongs to general lower classes, they have no trades or series
+  if (Array.isArray(GENERAL_LOWER_CLASSES) && GENERAL_LOWER_CLASSES.includes(selectedClassForAction)) {
+    return ['N/A'];
+  }
+
+  const className = selectedClassForAction.toLowerCase();
+
+  // For General 6th Form (Lower/Upper Sixth)
+  if (className.includes('sixth') || className.includes('form')) {
+    return GENERAL_SERIES_CATALOG || [];
+  }
+
+  // For Technical Commercial classes
+  if (className.includes('comm') || className.includes('market') || className.includes('account')) {
+    return COMMERCIAL_TRADE_SERIES || TECHNICAL_COMMERCIAL_CATALOG || [];
+  }
+
+  // For Technical Industrial classes
+  if (className.includes('ind') || className.includes('tech') || className.includes('elect')) {
+    return TECHNICAL_INDUSTRIAL_CATALOG || [];
+  }
+
+  // Default fallback to all general series if class type is general
+  return GENERAL_SERIES_CATALOG || [];
+}, [selectedClassForAction]);
+
+const assignedSectionsForSubject = useMemo(() => {
+  if (!teacherProfile?.schedules || !selectedSubjectForAction) return [];
+  const subjectsSchedules = teacherProfile.schedules[selectedSubjectForAction] || [];
+  const sectionsSet = new Set();
+  subjectsSchedules.forEach((item) => {
+    const sectionValue = item.section || item.schoolSection || item.sectionName;
+    if (sectionValue) sectionsSet.add(sectionValue);
+  });
+  if (sectionsSet.size === 0) {
+    return ['General Education', 'Technical Commercial (STT)', 'Technical Industrial (IND)'];
+  }
+  return Array.from(sectionsSet);
+}, [teacherProfile, selectedSubjectForAction]);
+
   // Motivational Quotes state
   const [currentQuote, setCurrentQuote] = useState({
     quote: "Education is the most powerful weapon which you can use to change the world.",
     author: "Nelson Mandela"
   });
 
- // 1. ALL HOOKS & REFS MUST BE AT THE TOP
+ 
   const canvasRef = useRef(null);
   const [isMounted, setIsMounted] = useState(false);
   const [savedLocalDocs, setSavedLocalDocs] = useState([]);
@@ -172,28 +247,14 @@ const startDrawing = (e) => {
   ];
 
   // Dynamically assigned Teacher Profile with real-world assignment data (reset/empty states for new assignments)
- const [schoolName, setSchoolName] = useState('Loading School...');
- const [selectedTerm, setSelectedTerm] = useState('Term 1');
-  const [selectedClassForAction, setSelectedClassForAction] = useState('');
-  const [selectedSubjectForAction, setSelectedSubjectForAction] = useState('');
+  const [schoolName, setSchoolName] = useState('Loading School...');
+  const [selectedTerm, setSelectedTerm] = useState('Term 1');
   const [selectedSection, setSelectedSection] = useState('General');
-const [teacherProfile, setTeacherProfile] = useState({
-  school_id: '',
-  id: '',
-  name: '',
-  email: '',
-  phone: '',
-  residence: '',
-  section: '',
-  subjects: [],
-  schedules: {}
-});
-const [assignedClassesForSubject, setAssignedClassesForSubject] = useState([]);
-const [lessonText, setLessonText] = useState('');
+  const [lessonText, setLessonText] = useState('');
   const [isSavingLog, setIsSavingLog] = useState(false);
-const [logsList, setLogsList] = useState([]);
+  const [logsList, setLogsList] = useState([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
-const [isMarksLocked, setIsMarksLocked] = useState(false);
+  const [isMarksLocked, setIsMarksLocked] = useState(false);
 // Lesson Notes & Test Bank Workspace State
   const [notesAndTests, setNotesAndTests] = useState([]);
   const [selectedDocType, setSelectedDocType] = useState('note'); // 'note' or 'test'
@@ -398,81 +459,84 @@ const [isMarksLocked, setIsMarksLocked] = useState(false);
   };
 useEffect(() => {
   if (!selectedSubjectForAction || !teacherProfile?.schedules) {
-    setAssignedClassesForSubject([]);
+    setSelectedClassForAction('');
     return;
   }
-
+  
   const slots = teacherProfile.schedules[selectedSubjectForAction] || [];
-  if (Array.isArray(slots)) {
+  if (Array.isArray(slots) && slots.length > 0) {
     const uniqueClasses = [...new Set(slots.map((s) => s.className).filter(Boolean))];
-    setAssignedClassesForSubject(uniqueClasses);
-
     if (uniqueClasses.length > 0) {
       setSelectedClassForAction(uniqueClasses[0]);
     } else {
       setSelectedClassForAction('');
     }
+  } else {
+    setSelectedClassForAction('');
   }
 }, [selectedSubjectForAction, teacherProfile?.schedules]);
-  useEffect(() => {
+ // 1. Define fetchClassLogs at the component level
+  const fetchClassLogs = async () => {
     if (!selectedClassLog || !teacherProfile?.school_id) return;
+    setIsLoadingLogs(true);
+    try {
+      const { data, error } = await supabase
+        .from('lesson_logs')
+        .select('*')
+        .eq('school_id', teacherProfile.school_id)
+        .eq('classLevel', selectedClassLog.className)
+        .eq('subject', selectedClassLog.subject)
+        .order('logged_at', { ascending: false });
 
-    const fetchClassLogs = async () => {
-      setIsLoadingLogs(true);
-      try {
-        const { data, error } = await supabase
-          .from('lesson_logs')
-          .select('*')
-          .eq('school_id', teacherProfile.school_id)
-          .eq('class_name', selectedClassLog.className)
-          .eq('subject', selectedClassLog.subject)
-          .order('logged_at', { ascending: false });
+      if (error) throw error;
+      setLogsList(data || []);
+    } catch (err) {
+      console.error('Error fetching logs:', err);
+      toast.error('Failed to load lesson logs');
+    } finally {
+      setIsLoadingLogs(false);
+    }
+  };
 
-        if (error) throw error;
-        setLogsList(data || []);
-      } catch (err) {
-        console.error('Error fetching logs:', err);
-      } finally {
-        setIsLoadingLogs(false);
-      }
-    };
-
+  useEffect(() => {
     fetchClassLogs();
   }, [selectedClassLog, teacherProfile?.school_id]);
 
   const handleSaveLessonLog = async () => {
-    if (!lessonText.trim() || !selectedClassLog) {
-      alert('Please enter lesson remarks before saving.');
-      return;
-    }
-    
-    setIsSavingLog(true);
+  setIsSavingLog(true);
+  try {
+    const activeSchoolId = localStorage.getItem('active_school_id') || teacherProfile?.school_id;
+    if (!activeSchoolId || !selectedClassLog) return;
 
-    try {
-      const { error } = await supabase.from('lesson_logs').insert([
+    const { error } = await supabase
+      .from('lesson_logs')
+      .insert([
         {
-          school_id: teacherProfile?.school_id || '',
-          teacher_id: teacherProfile?.teacher_id || '',
-          teacher_name: teacherProfile?.name || '',
-          class_name: selectedClassLog.className,
+          school_id: activeSchoolId,
+          teacher_id: teacherProfile?.id || teacherProfile?.teacher_id || null,
+          teacher_name: teacherProfile?.name || teacherProfile?.full_name || '',
           subject: selectedClassLog.subject,
+          classLevel: selectedClassLog.className, // Matches Supabase camelCase column
           lesson_content: lessonText,
           status: 'SUBMITTED',
           logged_at: new Date().toISOString(),
-        },
+          academic_year: typeof getCurrentAcademicYear === 'function' ? getCurrentAcademicYear() : null,
+          trades_series: selectedClassLog.trades_series || selectedClassLog.tradeSeries || null
+        }
       ]);
 
-      if (error) throw error;
+    if (error) throw error;
 
-      alert('Lesson log saved successfully!');
-      setLessonText('');
-    } catch (err) {
-      console.error('Error saving lesson log:', err);
-      alert('Failed to save log. Please try again.');
-    } finally {
-      setIsSavingLog(false);
-    }
-  };
+    toast.success('Lesson log saved successfully!');
+    setLessonText('');
+    fetchClassLogs();
+  } catch (err) {
+    console.error('Error saving lesson log:', err);
+    toast.error('Failed to save log.');
+  } finally {
+    setIsSavingLog(false);
+  }
+};
 useEffect(() => {
     const fetchTeacherAndSchool = async () => {
       const savedSchoolId = localStorage.getItem('active_school_id') || localStorage.getItem('activeSchoolId');
@@ -491,20 +555,18 @@ useEffect(() => {
         }
       }
 
-      const currentSchoolId = savedSchoolId || teacherProfile?.school_id;
-      if (currentSchoolId) {
-        const { data: schoolData } = await supabase
-          .from('assigned_schools')
-          .select('name')
-          .eq('school_id', currentSchoolId)
-          .maybeSingle();
+     const currentSchoolId = savedSchoolId || teacherProfile?.school_id;
+if (currentSchoolId) {
+  const { data: schoolData } = await supabase
+    .from('school_details')
+    .select('*')
+    .eq('school_id', currentSchoolId)
+    .maybeSingle();
 
-        if (schoolData?.name) {
-          setSchoolName(schoolData.name);
-        } else {
-          setSchoolName('Assigned School');
-        }
-      }
+  if (schoolData) {
+    setSchoolDetails(schoolData);
+  }
+}
     };
 
     fetchTeacherAndSchool();
@@ -546,32 +608,7 @@ useEffect(() => {
   if (term === 'Term 3') return { key1: 'seq5_mark', key2: 'seq6_mark', label1: 'SEQ 5', label2: 'SEQ 6' };
   return { key1: 'seq1_mark', key2: 'seq2_mark', label1: 'SEQ 1', label2: 'SEQ 2' };
 };
-  // Fetch students filtered by active school and selected class
-  const fetchStudents = async () => {
-    const activeSchoolId = localStorage.getItem('active_school_id') || teacherProfile?.school_id;
-    
-    if (!activeSchoolId || !selectedClassForAction) {
-      setClassStudents([]);
-      return;
-    }
 
-    const { data, error } = await supabase
-      .from('students')
-      .select('*')
-.eq('school_id', activeSchoolId)
-.eq('classLevel', selectedClassForAction);
-
-    if (data && !error) {
-     
-      setClassStudents(data);
-    } else {
-      setClassStudents([]);
-    }
-  };
-
-  useEffect(() => {
-    fetchStudents();
-  }, [selectedClassForAction, selectedTerm, selectedSubjectForAction, teacherProfile?.school_id]);
   useEffect(() => {
     setCurrentTime(new Date());
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -633,6 +670,43 @@ useEffect(() => {
       }
     }));
   };
+  // Trigger precise student fetch whenever teacher selectors change, matching master mark sheet logic
+useEffect(() => {
+  const fetchClassStudents = async () => {
+    const activeSchoolId = localStorage.getItem('active_school_id') || teacherProfile?.school_id;
+    if (!activeSchoolId || !selectedClassForAction) {
+      setClassStudents([]);
+      return;
+    }
+
+    setIsLoadingStudents(true);
+
+    try {
+      let studentQuery = supabase
+        .from('students')
+        .select('*')
+        .eq('school_id', activeSchoolId)
+        .eq('classLevel', selectedClassForAction.trim());
+
+      // Filter by trade/series if applicable
+      if (selectedTrade && selectedTrade !== 'ALL') {
+        studentQuery = studentQuery.eq('trades_series', selectedTrade);
+      }
+
+      const { data, error } = await studentQuery.order('fullName', { ascending: true });
+
+      if (error) throw error;
+      setClassStudents(data || []);
+    } catch (err) {
+      console.error('Error fetching filtered class students:', err.message || err);
+      setClassStudents([]);
+    } finally {
+      setIsLoadingStudents(false);
+    }
+  };
+
+  fetchClassStudents();
+}, [selectedClassForAction, selectedTrade, teacherProfile?.school_id]);
   useEffect(() => {
     const fetchExistingMarks = async () => {
       const activeSchoolId = localStorage.getItem('active_school_id') || teacherProfile?.school_id;
@@ -643,9 +717,9 @@ useEffect(() => {
 
       const { data, error } = await supabase
         .from('marks')
-        // Replace line 294 with this updated select statement:
-.select('student_id, seq1_mark, seq2_mark, seq3_mark, seq4_mark, seq5_mark, seq6_mark, seq1_edit_count, seq2_edit_count, seq3_edit_count, seq4_edit_count, seq5_edit_count, seq6_edit_count')
+        .select('student_id, seq1_mark, seq2_mark, seq3_mark, seq4_mark, seq5_mark, seq6_mark, seq1_edit_count, seq2_edit_count, seq3_edit_count, seq4_edit_count, seq5_edit_count, seq6_edit_count')
         .eq('school_id', activeSchoolId)
+        .eq('academic_year', getCurrentAcademicYear())
         .eq('classLevel', selectedClassForAction)
         .eq('subject_name', selectedSubjectForAction)
         .eq('term', selectedTerm);
@@ -762,97 +836,51 @@ if (!isMounted) {
     }
   };
  const submitMarks = async () => {
-  if (isMarksLocked) {
-      toast.error("You can only edit student marks once. Please contact your school administrator to request further modifications.");
-      return;
-    }
-    const activeSchoolId = localStorage.getItem('active_school_id') || teacherProfile?.school_id;
-    const teacherId = localStorage.getItem('teacher_id') || teacherProfile?.id;
+  console.log("Submit marks clicked!");
+  const activeSchoolId = localStorage.getItem('active_school_id') || teacherProfile?.school_id;
+  const teacherId = localStorage.getItem('teacher_id') || teacherProfile?.id;
 
-    if (!activeSchoolId || !selectedClassForAction || !selectedSubjectForAction) {
-      toast.error('Missing school, class, or subject selection');
-      return;
-    }
-
-    if (classStudents.length === 0) {
-      toast.error('No students found for this class');
-      return;
-    }
-
-    const today = new Date();
-    const currentDateStr = today.toISOString().split('T')[0];
-    const currentDayStr = today.toLocaleDateString('en-US', { weekday: 'long' });
-    const currentTimeStr = today.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-    // 1. Fetch class coefficients for multi-tenant mapping
-  const { data: activeCoefficients } = await supabase
-    .from('class_coefficients')
-    .select('id, subject_name, subject_code, trades_series')
-    .eq('school_id', activeSchoolId);
-
-  // 2. Build multi-tier resolution map
-  const coeffMap = new Map();
-  (activeCoefficients || []).forEach(c => {
-    if (c.id) coeffMap.set(c.id, c.subject_name);
-
-    const rawSeries = c.trades_series ? String(c.trades_series).trim().toLowerCase() : '';
-    const rawName = c.subject_name ? String(c.subject_name).trim().toLowerCase() : '';
-    const rawCode = c.subject_code ? String(c.subject_code).trim().toLowerCase() : '';
-
-    if (rawName) coeffMap.set(rawName, c.subject_name);
-    if (rawCode) coeffMap.set(rawCode, c.subject_name);
-
-    if (rawSeries) {
-      if (rawName) coeffMap.set(`${rawName}_${rawSeries}`, c.subject_name);
-      if (rawCode) coeffMap.set(`${rawCode}_${rawSeries}`, c.subject_name);
-    }
-  });
-
-  // 3. Prepare base subject key
-  const rawSubName = (selectedSubjectForAction || '').toString().trim().toLowerCase();
-  const activeSeqKey = selectedTerm === 'Term 1' ? 'seq1_edit_count' : selectedTerm === 'Term 2' ? 'seq3_edit_count' : 'seq5_edit_count';
-  const isLocked = classStudents.some(student => {
-    const count = marksRecords[student.id]?.[activeSeqKey] || 0;
-    return count >= 2;
-  });
-
-  if (isLocked) {
-    alert(`You have already reached the maximum limit of 2 edits for this sequence.`);
+  if (!activeSchoolId) {
+    toast.error('Active school ID is missing');
     return;
   }
-  const recordsToInsert = classStudents.map((student) => {
+
+  if (!selectedClassForAction || !selectedSubjectForAction) {
+    toast.error('Please select a class and subject first');
+    return;
+  }
+
+  const now = new Date();
+  const currentDayStr = now.toLocaleDateString('en-US', { weekday: 'long' });
+  const currentTimestr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const resolvedSubjectName = selectedSubjectForAction;
+
+  const uniqueStudents = Array.from(
+    new Map((classStudents || []).map((s) => [s.id, s])).values()
+  );
+
+  const recordsToInsert = uniqueStudents.map((student) => {
     const studentEntry = marksRecords[student.id] || {};
-
-    // Per-student trades_series resolution strictly inside map callback
-    const rawStudentSeries = (student?.trades_series || student?.series || '').toString().trim().toLowerCase();
-    const resolvedSubjectName = (rawStudentSeries ? coeffMap.get(`${rawSubName}_${rawStudentSeries}`) : null) || 
-                                coeffMap.get(rawSubName) || 
-                                selectedSubjectForAction;
-
-    // Parse individual sequence fields if present in UI state
+    
     const s1 = studentEntry.seq1_mark !== '' && studentEntry.seq1_mark !== undefined ? parseFloat(studentEntry.seq1_mark) : null;
-const s2 = studentEntry.seq2_mark !== '' && studentEntry.seq2_mark !== undefined ? parseFloat(studentEntry.seq2_mark) : null;
-const s3 = studentEntry.seq3_mark !== '' && studentEntry.seq3_mark !== undefined ? parseFloat(studentEntry.seq3_mark) : null;
-const s4 = studentEntry.seq4_mark !== '' && studentEntry.seq4_mark !== undefined ? parseFloat(studentEntry.seq4_mark) : null;
-const s5 = studentEntry.seq5_mark !== '' && studentEntry.seq5_mark !== undefined ? parseFloat(studentEntry.seq5_mark) : null;
-const s6 = studentEntry.seq6_mark !== '' && studentEntry.seq6_mark !== undefined ? parseFloat(studentEntry.seq6_mark) : null;
-    const record = {
-  school_id: activeSchoolId,
-  teacher_id: teacherId,
-  student_id: student.id,
-  unique_code: student.unique_code || student.matricule || null,
-  classLevel: selectedClassForAction,
-  section: student.section || null,
-  subject_name: resolvedSubjectName,
-  subject: resolvedSubjectName,
-  trades_series: student?.trades_series || student?.series || '',
-  term: selectedTerm,
-  academic_year: activeSchool?.academic_year || teacherProfile?.academic_year || getAcademicYear(),
-  date_recorded: currentDateStr,
-  [activeSeqKey]: (existingMarksMap?.[student.id]?.[activeSeqKey] || 0) + 1
-};
+    const s2 = studentEntry.seq2_mark !== '' && studentEntry.seq2_mark !== undefined ? parseFloat(studentEntry.seq2_mark) : null;
+    const s3 = studentEntry.seq3_mark !== '' && studentEntry.seq3_mark !== undefined ? parseFloat(studentEntry.seq3_mark) : null;
+    const s4 = studentEntry.seq4_mark !== '' && studentEntry.seq4_mark !== undefined ? parseFloat(studentEntry.seq4_mark) : null;
+    const s5 = studentEntry.seq5_mark !== '' && studentEntry.seq5_mark !== undefined ? parseFloat(studentEntry.seq5_mark) : null;
+    const s6 = studentEntry.seq6_mark !== '' && studentEntry.seq6_mark !== undefined ? parseFloat(studentEntry.seq6_mark) : null;
 
-    // Only attach non-null sequence values so existing DB sequence values are preserved on upsert
+    const record = {
+      school_id: activeSchoolId,
+      teacher_id: teacherId,
+      student_id: student.id,
+      unique_code: student.unique_code || student.matricule || null,
+      classLevel: selectedClassForAction,
+      section: student.section || null,
+      subject_name: resolvedSubjectName,
+      term: selectedTerm,
+      academic_year: getCurrentAcademicYear(),
+    };
+
     if (s1 !== null) record.seq1_mark = s1;
     if (s2 !== null) record.seq2_mark = s2;
     if (s3 !== null) record.seq3_mark = s3;
@@ -863,22 +891,30 @@ const s6 = studentEntry.seq6_mark !== '' && studentEntry.seq6_mark !== undefined
     return record;
   });
 
-    const { error } = await supabase
-      .from('marks')
-      .upsert(recordsToInsert, { onConflict: 'school_id,student_id,subject,term' });
+  console.log("Sending upsert request to Supabase with records:", recordsToInsert);
 
-    if (!error) {
-      toast.success(`Marks successfully submitted for ${selectedClassForAction} - ${selectedSubjectForAction}!`);
-      setSubmissionStatus((prev) => ({
-        ...prev,
-        marksSubmitted: true,
-        lastUpdated: `${currentDayStr} at ${currentTimeStr}`
-      }));
-    } else {
-      console.error('Error submitting marks:', error);
-      toast.error('Failed to submit marks to database');
-    }
-  };
+  const response = await supabase
+    .from('marks')
+    .upsert(recordsToInsert, { onConflict: 'school_id,student_id,subject_name,term,academic_year' });
+
+  console.log("Supabase raw response received:", response);
+
+  const { error } = response;
+
+  if (!error) {
+    console.log("Marks saved successfully!");
+    const successMsg = `Marks successfully submitted for ${selectedClassForAction} - ${selectedSubjectForAction} (${selectedTerm}). Report cards will reflect these values. Please check the marks carefully for any mistakes.`;
+    
+    setSuccessBanner(successMsg);
+    
+    toast.success('Marks saved successfully!');
+    setSubmissionStatus((prev) => ({
+      ...prev,
+      marksSubmitted: true,
+      lastUpdated: `${currentDayStr} at ${currentTimestr}`
+    }));
+  }
+};
 
   const downloadTimetable = () => {
     toast.success('Timetable downloaded successfully!');
@@ -886,54 +922,66 @@ const s6 = studentEntry.seq6_mark !== '' && studentEntry.seq6_mark !== undefined
 
   return (
     <div className="min-h-screen bg-[#0b0f19] text-white font-sans">
-      <header className="bg-[#111827] border-b border-gray-800 px-6 py-4 flex justify-between items-center shadow-lg">
-        <div className="flex items-center justify-between gap-4 w-full">
-          {navigationHistory.length > 1 && (
-            <button 
-              onClick={handleGoBack}
-              className="bg-gray-800 hover:bg-gray-700 text-amber-400 border border-gray-700 text-xs px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1 transition-colors"
-            >
-              ← Back
-            </button>
-          )}
-         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 w-full">
-          {/* Left: School Logo & Name */}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-slate-800 rounded-lg border border-slate-700 flex items-center justify-center text-xs font-bold text-amber-400">
-              LOGO
-            </div>
-            <div>
-  <h1 className="text-lg font-bold text-amber-400 tracking-tight">
-  {schoolName || teacherProfile?.school_name || teacherProfile?.schoolName || 'Assigned School'}
-</h1>
-  <p className="text-xs text-slate-400">
-    Teacher Portal | Welcome, <strong className="text-white">{teacherProfile?.name || 'Teacher'}</strong>
-  </p>
-</div>
-          </div>
+    <header className="bg-[#111827] border-b border-gray-800 px-6 py-4 shadow-lg">
+  <div className="flex items-center justify-between gap-4 w-full">
+    
+    {/* Left: Back button, Logo & Left-aligned Welcome info */}
+    <div className="flex items-center gap-3.5 shrink-0">
+      {navigationHistory.length > 1 && (
+        <button
+          onClick={handleGoBack}
+          className="bg-gray-800 hover:bg-gray-700 text-amber-100 border border-gray-700 text-xs px-3 py-1.5 rounded-lg flex items-center gap-1"
+        >
+          ← Back
+        </button>
+      )}
 
-          {/* Right: Clock & Teacher Active Session */}
-          <div className="flex items-center gap-4 ml-auto">
-            <div className="text-right hidden sm:block">
-              <div className="text-xs font-mono text-amber-300 font-semibold">
-                {currentTime ? currentTime.toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' }) : ''}
-              </div>
-              <div className="text-xs font-mono text-slate-400">
-                {currentTime ? currentTime.toLocaleTimeString() : ''}
-              </div>
-            </div>
-            <div className="flex flex-col items-end ml-auto gap-1">
-  <span className="text-xs bg-blue-900/60 text-blue-400 border border-blue-700/50 px-3 py-1 rounded-full font-medium whitespace-nowrap">
-    Teacher Active Session
-  </span>
-  <span className="text-[10px] text-emerald-400 mt-1 font-mono whitespace-nowrap">
-    Admin Sync: {submissionStatus?.marksSubmitted ? 'Marks Uploaded (Completed)' : 'Pending Marks Entry'}
-  </span>
-</div>
-        </div>
+      {/* School Logo */}
+      <div className="w-10 h-10 bg-slate-800 rounded-lg border border-slate-700 flex items-center justify-center overflow-hidden shadow-inner">
+        {schoolDetails?.logo_url ? (
+          <img src={schoolDetails.logo_url} alt="School Logo" className="w-full h-full object-cover" />
+        ) : (
+          <span className="text-[10px] font-bold text-amber-100">LOGO</span>
+        )}
+      </div>
+
+      {/* Left-Aligned Teacher Greeting */}
+      <div className="hidden sm:block text-left border-l border-gray-700 pl-3">
+        <p className="text-[11px] text-slate-400">
+          Welcome, <strong className="text-white">{teacherProfile?.name || teacherProfile?.full_name || 'Teacher'}</strong>
+        </p>
+        <p className="text-[10px] text-amber-100/80 font-mono">
+          {currentAcademicYear ? `AY: ${currentAcademicYear}` : 'Active Portal'}
+        </p>
       </div>
     </div>
-  </header>
+
+    {/* Center: School Title (Standard International Header Focus) */}
+    <div className="flex-1 text-center px-2">
+      <h1 className="text-sm sm:text-base font-bold text-amber-100 tracking-tight leading-tight truncate">
+        {schoolDetails?.name || schoolName || teacherProfile?.school_name || 'Assigned School'}
+      </h1>
+      <p className="text-[10px] text-slate-400 sm:hidden">
+        Welcome, {teacherProfile?.name || teacherProfile?.full_name || 'Teacher'}
+      </p>
+    </div>
+
+    {/* Right: Active Session & Status Badge */}
+    <div className="flex flex-col items-end gap-0.5 shrink-0">
+      <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-medium border ${
+        teacherProfile?.isAuthorized !== false 
+          ? 'bg-emerald-950/60 text-emerald-400 border-emerald-700/50' 
+          : 'bg-rose-950/60 text-rose-400 border-rose-700/50'
+      }`}>
+        {teacherProfile?.isAuthorized !== false ? 'Active Session' : 'Restricted'}
+      </span>
+      <span className="text-[9px] text-slate-400 font-mono whitespace-nowrap hidden md:inline">
+        {submissionStatus?.marksSubmitted ? 'Uploaded' : 'Pending Entry'}
+      </span>
+    </div>
+
+  </div>
+</header>
 
       {/* Motivational Quote Banner */}
       <div className="bg-gradient-to-r from-amber-900/40 via-blue-900/30 to-[#111827] border-b border-gray-800 px-6 py-3 text-center sm:text-left flex flex-col sm:flex-row justify-between items-center gap-2">
@@ -985,7 +1033,7 @@ const s6 = studentEntry.seq6_mark !== '' && studentEntry.seq6_mark !== undefined
             <div>
               <h2 className="text-lg font-bold text-white">{teacherProfile?.name || 'Teacher Profile'}</h2>
               <p className="text-xs text-slate-400">{teacherProfile?.email || 'No email provided'}</p>
-              <p className="text-xs text-slate-400">{teacherProfile?.phone || 'No phone provided'}</p>
+              <p className="text-xs text-slate-400">{teacherProfile?.contact || 'No phone provided'}</p>
             </div>
           </div>
 
@@ -1489,7 +1537,6 @@ const s6 = studentEntry.seq6_mark !== '' && studentEntry.seq6_mark !== undefined
         {activeTab === 'attendance' && (
           <div className="bg-slate-800/90 border border-slate-700 p-8 rounded-xl max-w-4xl mx-auto shadow-2xl space-y-6">
             <h2 className="text-lg font-bold text-white border-b border-slate-700 pb-3">Class Attendance — {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' })}</h2>
-
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Select Subject</label>
@@ -1533,11 +1580,11 @@ const s6 = studentEntry.seq6_mark !== '' && studentEntry.seq6_mark !== undefined
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-800">
-                    {classStudents.map((stu) => {
+                    {classStudents.map((stu, index) => {
                       const currentStatus = attendanceRecords[stu.id] || 'Present';
                       return (
                         <tr key={stu.id} className="hover:bg-gray-800/40">
-                          <td className="p-3 border border-gray-700 font-mono text-amber-400">{stu.id}</td>
+                          <td className="p-3 border border-gray-700 font-mono text-amber-400">{index + 1}</td>
                           <td className="p-3 border border-gray-700 font-semibold text-white">{stu.fullName}</td>
                           <td className="p-3 border border-gray-700 text-center">
                             <div className="inline-flex rounded-lg overflow-hidden border border-gray-700">
@@ -1585,7 +1632,7 @@ const s6 = studentEntry.seq6_mark !== '' && studentEntry.seq6_mark !== undefined
                 Fill Student Marks
               </h2>
               <p className="text-xs sm:text-sm text-gray-400 mt-1">
-                Marks entered are automatically sent to Student Reports and School Admin for checking.
+                Marks entered are automatically sent to Student Report cards and School Administrators for checking.Make sure marks are properly filled.
               </p>
             </div>
 
@@ -1597,60 +1644,83 @@ const s6 = studentEntry.seq6_mark !== '' && studentEntry.seq6_mark !== undefined
             </div>
           </div>
 
-          {/* Subject & Class Selectors */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
-            Select Term
-          </label>
-          <select
-            value={selectedTerm}
-            onChange={(e) => setSelectedTerm(e.target.value)}
-            className="w-full bg-[#1f2937] border border-gray-700 rounded-lg p-3 text-sm text-amber-300 font-bold focus:outline-none focus:border-amber-400"
-          >
-            <option value="Term 1">Term 1 (Seq 1 & 2)</option>
-            <option value="Term 2">Term 2 (Seq 3 & 4)</option>
-            <option value="Term 3">Term 3 (Seq 5 & 6)</option>
-          </select>
-        </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
-                Select Subject
-              </label>
-              <select
-                value={selectedSubjectForAction}
-                onChange={(e) => setSelectedSubjectForAction(e.target.value)}
-                className="w-full bg-[#1f2937] border border-gray-700 rounded-lg p-3 text-sm text-amber-300 font-bold focus:outline-none focus:border-amber-400"
-              >
-                {teacherProfile?.subjects && teacherProfile.subjects.length > 0 ? (
-                  teacherProfile.subjects.map((sub, i) => (
-                    <option key={i} value={sub}>{sub}</option>
-                  ))
-                ) : (
-                  <option value="">No Subjects Assigned</option>
-                )}
-              </select>
-            </div>
+         {/* Subject & Class Selectors */}
+<div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+  {/* 1. Term Selector */}
+  <div>
+    <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
+      Select Term
+    </label>
+    <select
+      value={selectedTerm}
+      onChange={(e) => setSelectedTerm(e.target.value)}
+      className="w-full bg-[#1f2937] border border-gray-700 rounded-lg p-3 text-sm text-amber-300 font-bold focus:outline-none"
+    >
+      <option value="Term 1">Term 1 (Seq 1 & 2)</option>
+      <option value="Term 2">Term 2 (Seq 3 & 4)</option>
+      <option value="Term 3">Term 3 (Seq 5 & 6)</option>
+    </select>
+  </div>
 
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
-                Select Class / Form
-              </label>
-              <select
-                value={selectedClassForAction}
-                onChange={(e) => setSelectedClassForAction(e.target.value)}
-                className="w-full bg-[#1f2937] border border-gray-700 rounded-lg p-3 text-sm text-white font-bold focus:outline-none focus:border-amber-400"
-              >
-                {assignedClassesForSubject && assignedClassesForSubject.length > 0 ? (
-  assignedClassesForSubject.map((cls, i) => (
-    <option key={i} value={cls}>{cls}</option>
-  ))
-) : (
-  <option value="">No Classes Assigned</option>
-)}
-              </select>
-            </div>
-          </div>
+  {/* 2. Subject Selector */}
+  <div>
+    <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
+      Select Subject
+    </label>
+    <select
+      value={selectedSubjectForAction}
+      onChange={(e) => setSelectedSubjectForAction(e.target.value)}
+      className="w-full bg-[#1f2937] border border-gray-700 rounded-lg p-3 text-sm text-amber-300 font-bold focus:outline-none"
+    >
+      {teacherProfile?.subjects && teacherProfile.subjects.length > 0 ? (
+        teacherProfile.subjects.map((sub, i) => (
+          <option key={i} value={sub}>{sub}</option>
+        ))
+      ) : (
+        <option value="">No Subjects Assigned</option>
+      )}
+    </select>
+  </div>
+
+  {/* 3. Class / Form Selector */}
+  <div>
+    <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
+      Select Class / Form
+    </label>
+    <select
+      value={selectedClassForAction}
+      onChange={(e) => setSelectedClassForAction(e.target.value)}
+      className="w-full bg-[#1f2937] border border-gray-700 rounded-lg p-3 text-sm text-amber-300 font-bold focus:outline-none"
+    >
+      {assignedClassesForSubject && assignedClassesForSubject.length > 0 ? (
+        assignedClassesForSubject.map((cls, i) => (
+          <option key={i} value={cls}>{cls}</option>
+        ))
+      ) : (
+        <option value="">No Classes Assigned</option>
+      )}
+    </select>
+  </div>
+
+  {/* 4. Trade / Series Selector */}
+  <div>
+    <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
+      Select Trade / Series
+    </label>
+    <select
+      value={selectedTrade}
+      onChange={(e) => setSelectedTrade(e.target.value)}
+      className="w-full bg-[#1f2937] border border-gray-700 rounded-lg p-3 text-sm text-amber-300 font-bold focus:outline-none"
+    >
+      <option value="ALL">All Trades / Series</option>
+      {Array.isArray(assignedTradesForClass) && assignedTradesForClass.map((t, idx) => (
+  <option key={idx} value={typeof t === 'string' ? t : t.code}>
+    {typeof t === 'string' ? t : t.name || t.code}
+  </option>
+))}
+    </select>
+  </div>
+</div>
 
           {/* Empty State: Unassigned Teacher */}
           {(!selectedClassForAction || !selectedSubjectForAction) ? (
@@ -1694,19 +1764,28 @@ const calculateSeqAverage = (seqKey) => {
           <thead>
             {/* Top Header Row */}
             <tr className="bg-[#134e35] text-white">
-              <th rowSpan="2" className="p-3 border-r border-emerald-900/40 w-12 text-center font-bold align-middle">
-                N°
-              </th>
-              <th rowSpan="2" className="p-3 border-r border-emerald-900/40 font-bold align-middle">
-                Student Name
-              </th>
-              <th rowSpan="2" className="p-3 border-r border-emerald-900/40 font-bold text-center align-middle">
-                unique_code
-              </th>
-              <th colSpan="2" className="p-3 border-b border-emerald-900/40 text-center font-bold bg-[#134e35]">
-                <div className="text-base font-extrabold">{selectedSubjectForAction || 'Subject'}</div>
-              </th>
-            </tr>
+  <th rowSpan="2" className="p-3 border-r border-emerald-900/40 w-12 text-center font-bold align-middle">
+    Nº
+  </th>
+  <th rowSpan="2" className="p-3 border-r border-emerald-900/40 font-bold text-center align-middle">
+    unique_code
+  </th>
+  <th rowSpan="2" className="p-3 border-r border-emerald-900/40 font-bold align-middle">
+    Student Name
+  </th>
+  <th rowSpan="2" className="p-3 border-r border-emerald-900/40 font-bold text-center align-middle">
+    Trade / Series
+  </th>
+  <th colSpan="2" className="p-3 border-b border-emerald-900/40 text-center font-bold bg-[#134e35]">
+    <div className="text-base font-extrabold">{selectedSubjectForAction || 'Subject'}</div>
+  </th>
+  <th rowSpan="2" className="p-3 border-l border-emerald-900/40 text-center font-bold align-middle bg-[#0f3d29]">
+    Term Score
+  </th>
+  <th rowSpan="2" className="p-3 border-l border-emerald-900/40 text-center font-bold align-middle bg-[#0f3d29]">
+    Rank
+  </th>
+</tr>
             {/* Sequence Sub-Header Row */}
             <tr className="bg-[#134e35] text-white text-xs font-bold uppercase tracking-wider">
               <th className="p-2 border-t border-r border-emerald-900/40 text-center w-28">{label1}</th>
@@ -1720,42 +1799,51 @@ const calculateSeqAverage = (seqKey) => {
                 const studentMarks = marksRecords[student.id] || {};
                 return (
                   <tr key={student.id || idx} className="hover:bg-amber-50/60 transition-colors">
-                    <td className="p-3 border-r border-slate-200 text-center font-bold text-slate-400">
-                      {idx + 1}
-                    </td>
-                    <td className="p-3 border-r border-slate-200 font-bold text-slate-900">
-                      {student.full_name || student.fullName || student.name}
-                    </td>
-                    <td className="p-3 border-r border-slate-200 text-center">
-                      <span className="px-2.5 py-1 rounded-md border border-slate-300 bg-white font-mono text-xs text-slate-700 shadow-sm">
-                        {student.unique_code || student.matricule || student.id || '-'}
-                      </span>
-                    </td>
-                    <td className="p-2 border-r border-slate-200 text-center">
-                      <input
-                        type="number"
-                        step="0.25"
-                        min="0"
-                        max="20"
-                        value={studentMarks[key1] ?? ''}
-                        onChange={(e) => handleMarkChange(student.id, key1, e.target.value)}
-                        className="w-full text-center font-extrabold bg-transparent text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-600 focus:outline-none p-1 rounded"
-                        placeholder="-"
-                      />
-                    </td>
-                    <td className="p-2 text-center">
-                      <input
-                        type="number"
-                        step="0.25"
-                        min="0"
-                        max="20"
-                        value={studentMarks[key2] ?? ''}
-                        onChange={(e) => handleMarkChange(student.id, key2, e.target.value)}
-                        className="w-full text-center font-extrabold bg-transparent text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-600 focus:outline-none p-1 rounded"
-                        placeholder="-"
-                      />
-                    </td>
-                  </tr>
+  <td className="p-3 border-r border-slate-200 text-center font-bold text-slate-400">
+    {idx + 1}
+  </td>
+ <td className="p-3 border-r border-slate-200 text-center">
+    <span className="px-2.5 py-1 rounded-md border border-slate-300 bg-white font-mono text-xs text-slate-700">
+      {student.unique_code || student.matricule || student.id || '-'}
+    </span>
+  </td>
+  <td className="p-3 border-r border-slate-200 font-bold text-slate-900">
+    {student.full_name || student.fullName || student.name}
+  </td>
+  <td className="p-3 border-r border-slate-200 text-center text-xs font-semibold text-slate-600">
+    {student.trade || student.series || student.specialty || '-'}
+  </td>
+  <td className="p-2 border-r border-slate-200 text-center">
+    <input
+      type="number"
+      step="0.25"
+      min="0"
+      max="20"
+      value={studentMarks[key1] ?? ''}
+      onChange={(e) => handleMarkChange(student.id, key1, e.target.value)}
+      className="w-full text-center font-extrabold bg-transparent text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-500 rounded px-1"
+      placeholder="-"
+    />
+  </td>
+  <td className="p-2 border-r border-slate-200 text-center">
+    <input
+      type="number"
+      step="0.25"
+      min="0"
+      max="20"
+      value={studentMarks[key2] ?? ''}
+      onChange={(e) => handleMarkChange(student.id, key2, e.target.value)}
+      className="w-full text-center font-extrabold bg-transparent text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-500 rounded px-1"
+      placeholder="-"
+    />
+  </td>
+  <td className="p-3 border-r border-slate-200 text-center font-bold text-slate-700 bg-slate-50">
+    {studentMarks['term_score'] ?? '-'}
+  </td>
+  <td className="p-3 text-center font-bold text-emerald-700 bg-slate-50">
+    {studentMarks['rank'] ?? '-'}
+  </td>
+</tr>
                 );
               })
             ) : (
@@ -1765,11 +1853,12 @@ const calculateSeqAverage = (seqKey) => {
                 </td>
               </tr>
             )}
-            {classStudents && classStudents.length > 0 && (
+      </tbody>
+         {classStudents && classStudents.length > 0 && (
   <tfoot className="bg-[#0b192c] text-white font-medium text-xs">
     {/* Subject Average Row */}
     <tr className="border-t border-emerald-900/40">
-      <td colSpan="3" className="p-2.5 text-right pr-4 font-bold text-gray-300">
+      <td colSpan="4" className="p-2.5 text-right pr-4 font-bold text-gray-300">
         Subject Average (/20):
       </td>
       <td className="p-2 text-center text-amber-400 font-bold border-r border-emerald-900/40">
@@ -1778,11 +1867,13 @@ const calculateSeqAverage = (seqKey) => {
       <td className="p-2 text-center text-amber-400 font-bold border-r border-emerald-900/40">
         {calculateSeqAverage(`${key2}_mark`)}
       </td>
+      <td className="p-2 text-center text-gray-400 border-r border-emerald-900/40">-</td>
+      <td className="p-2 text-center text-gray-400">-</td>
     </tr>
 
     {/* Percentage Passed Row */}
     <tr className="border-t border-emerald-900/40">
-      <td colSpan="3" className="p-2.5 text-right pr-4 font-bold text-gray-300">
+      <td colSpan="4" className="p-2.5 text-right pr-4 font-bold text-gray-300">
         Passed (% ≥ 10/20):
       </td>
       <td className="p-2 text-center text-emerald-400 font-bold border-r border-emerald-900/40">
@@ -1791,11 +1882,12 @@ const calculateSeqAverage = (seqKey) => {
       <td className="p-2 text-center text-emerald-400 font-bold border-r border-emerald-900/40">
         {calculatePassPercentage(`${key2}_mark`)}%
       </td>
+      <td className="p-2 text-center text-gray-400 border-r border-emerald-900/40">-</td>
+      <td className="p-2 text-center text-gray-400">-</td>
     </tr>
   </tfoot>
 )}
-          </tbody>
-        </table>
+</table>
       </div>
     );
   })()}
@@ -1811,60 +1903,91 @@ const calculateSeqAverage = (seqKey) => {
 
     return (
       <div className="block md:hidden space-y-4 mt-4">
-        {classStudents && classStudents.length > 0 ? (
-          classStudents.map((student, idx) => {
-            const studentMarks = marksRecords[student.id] || {};
-            return (
-              <div key={student.id || idx} className="bg-slate-900 border border-slate-700 rounded-lg p-4 shadow-lg">
-                <div className="flex justify-between items-center mb-3 pb-2 border-b border-slate-800">
-                  <div>
-                    <span className="text-xs font-bold text-slate-500 mr-2">#{idx + 1}</span>
-                    <span className="font-bold text-slate-100">{student.full_name || student.fullName || student.name}</span>
-                  </div>
-                  <span className="px-2 py-0.5 rounded border border-slate-700 bg-slate-800 font-mono text-xs text-slate-400">
-                    {student.unique_code || student.matricule || student.id || '-'}
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-slate-800/60 p-2 rounded border border-slate-700/50">
-                    <label className="block text-xs font-bold text-emerald-400 mb-1">{label1}</label>
-                    <input
-                      type="number"
-                      step="0.25"
-                      min="0"
-                      max="20"
-                      value={studentMarks[key1] ?? ''}
-                      onChange={(e) => handleMarkChange(student.id, key1, e.target.value)}
-                      className="w-full text-center font-extrabold bg-slate-900 border border-slate-700 rounded p-1.5 text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                      placeholder="-"
-                    />
-                  </div>
-                  <div className="bg-slate-800/60 p-2 rounded border border-slate-700/50">
-                    <label className="block text-xs font-bold text-emerald-400 mb-1">{label2}</label>
-                    <input
-                      type="number"
-                      step="0.25"
-                      min="0"
-                      max="20"
-                      value={studentMarks[key2] ?? ''}
-                      onChange={(e) => handleMarkChange(student.id, key2, e.target.value)}
-                      className="w-full text-center font-extrabold bg-slate-900 border border-slate-700 rounded p-1.5 text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                      placeholder="-"
-                    />
-                  </div>
-                </div>
-              </div>
-            );
-          })
-        ) : (
-          <div className="p-4 text-center text-slate-400 bg-slate-900 rounded-lg border border-slate-800">
-            No students found.
+  {classStudents && classStudents.length > 0 ? (
+    classStudents.map((student, idx) => {
+      const studentMarks = marksRecords[student.id] || {};
+      return (
+        <div key={student.id || idx} className="bg-slate-900 border border-slate-700 rounded-lg p-3 shadow-lg">
+          {/* Card Header: Number, Name, Dynamic Trade/Series, Rank, Unique Code */}
+          <div className="flex flex-wrap items-center justify-between gap-1.5 mb-2 pb-2 border-b border-slate-800">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[11px] font-bold text-slate-500">#{idx + 1}</span>
+              <span className="font-bold text-xs text-slate-100">{student.full_name || student.fullName || student.name}</span>
+              
+              {/* Dynamic Trade / Series Badge */}
+              <span className="px-1.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-800/60 text-[10px] font-semibold text-emerald-300">
+                <span className="text-emerald-500 font-bold">Trade/Series: </span>
+                {student.trade_series || student.series || student.trade || student.speciality || student.specialty || student.option || '-'}
+              </span>
+
+              {/* Rank Badge */}
+              <span className="px-1.5 py-0.5 rounded bg-amber-950/80 border border-amber-800/60 text-[10px] font-bold text-amber-400">
+                {studentMarks['rank'] ? `Rank: ${studentMarks['rank']}` : 'Rank: -'}
+              </span>
+            </div>
+
+            {/* Unique Code Badge */}
+            <span className="px-1.5 py-0.5 rounded border border-slate-700 bg-slate-800 font-mono text-[10px] text-slate-300">
+              {student.unique_code || student.matricule || student.id || '-'}
+            </span>
           </div>
-        )}
-      </div>
+
+          {/* Sequence Mark Inputs (2-Column Grid) */}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="bg-slate-800/60 p-2 rounded border border-slate-700/50">
+              <label className="block text-[11px] font-bold text-emerald-400 mb-1">{label1}</label>
+              <input
+                type="number"
+                step="0.25"
+                min="0"
+                max="20"
+                value={studentMarks[key1] ?? ''}
+                onChange={(e) => handleMarkChange(student.id, key1, e.target.value)}
+                className="w-full text-center font-extrabold text-xs bg-slate-900 border border-slate-700 rounded p-1 text-white focus:outline-none focus:border-emerald-500"
+                placeholder="-"
+              />
+            </div>
+
+            <div className="bg-slate-800/60 p-2 rounded border border-slate-700/50">
+              <label className="block text-[11px] font-bold text-emerald-400 mb-1">{label2}</label>
+              <input
+                type="number"
+                step="0.25"
+                min="0"
+                max="20"
+                value={studentMarks[key2] ?? ''}
+                onChange={(e) => handleMarkChange(student.id, key2, e.target.value)}
+                className="w-full text-center font-extrabold text-xs bg-slate-900 border border-slate-700 rounded p-1 text-white focus:outline-none focus:border-emerald-500"
+                placeholder="-"
+              />
+            </div>
+          </div>
+        </div>
+      );
+    })
+  ) : (
+    <div className="p-4 text-center text-xs text-slate-400 italic bg-slate-900 rounded-lg border border-slate-800">
+      No students enrolled in {selectedClassForAction || 'this class'}.
+    </div>
+  )}
+</div>
     );
   })()}
-
+{successBanner && (
+  <div className="mb-4 p-4 bg-[#064e3b] border-2 border-[#10b981] rounded-xl shadow-2xl text-emerald-100 flex items-start space-x-3">
+    <div className="text-2xl">✅</div>
+    <div className="flex-1">
+      <h4 className="font-bold text-base text-white mb-1">Submission Successful</h4>
+      <p className="text-sm leading-relaxed text-emerald-200">{successBanner}</p>
+    </div>
+    <button 
+      onClick={() => setSuccessBanner(null)} 
+      className="text-emerald-300 hover:text-white font-bold text-lg px-2"
+    >
+      &times;
+    </button>
+  </div>
+)}
               {/* Save Action Button */}
               <div className="mt-6 pt-4 border-t border-gray-800 flex justify-end">
                 <button
