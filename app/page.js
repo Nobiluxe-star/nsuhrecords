@@ -214,22 +214,29 @@ export default function LandingPage() {
       return;
     }
 
-    // 2. OTHER SCHOOL STAFF (Bursar, Supervisor, Discipline Master, Principal, etc.)
+    // 2. OTHER SCHOOL STAFF (Administrators, Bursar, Supervisor, Discipline Master, Principal, etc.)
     if (selectedRole !== 'Administrator') {
-      let staffQuery = supabase.from('school_personnel').select('*');
+    const cleanId = inputIdentifier.trim();
 
-      if (isEmail) {
-        staffQuery = staffQuery.eq('email', inputIdentifier.toLowerCase());
-      } else {
-        staffQuery = staffQuery.eq('unique_id', inputIdentifier);
-      }
+  const [pRes, aRes] = await Promise.all([
+    supabase
+      .from('school_personnel')
+      .select('*')
+      .or(`unique_id.eq.${cleanId},email.eq.${cleanId.toLowerCase()}`)
+      .maybeSingle(),
+    supabase
+      .from('assigned_schools')
+      .select('*')
+      .or(`unique_id.eq.${cleanId},email.eq.${cleanId.toLowerCase()}`)
+      .maybeSingle()
+  ]);
 
-      const { data: personnel, error: personnelErr } = await staffQuery.maybeSingle();
+  const personnel = pRes.data || aRes.data;
 
-      if (personnelErr || !personnel) {
-        alert('Invalid Email or Unique Code.');
-        return;
-      }
+  if (!personnel) {
+    alert('Invalid Email or Unique Code.');
+    return;
+  }
 
       const targetEmail = personnel.email
         ? personnel.email.trim().toLowerCase()

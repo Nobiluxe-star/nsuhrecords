@@ -35,6 +35,7 @@ function StaffSignupContent() {
   }, [idParam, tokenParam, schoolIdParam]);
 
   // Extract Active School Name from localStorage and resolve school_id from Supabase
+  // Extract Active School Name from localStorage and resolve school_id from Supabase
   useEffect(() => {
     async function resolveSchoolFromStorage() {
       try {
@@ -47,10 +48,10 @@ function StaffSignupContent() {
           setActiveSchoolName(storedSchool);
 
           // Fetch matching school UUID from assigned_schools table
-         const { data: school, error } = await supabase
+          const { data: school, error } = await supabase
             .from("assigned_schools")
             .select("school_id, name")
-          .ilike("name", storedSchool.trim())
+            .ilike("name", storedSchool.trim())
             .maybeSingle();
 
           if (error) {
@@ -58,7 +59,9 @@ function StaffSignupContent() {
           }
 
           const resolvedId = school?.school_id || school?.id;
-          if (resolvedId) {
+
+          // FIX: Only overwrite schoolId if NO school_id parameter was provided in the invite URL link
+          if (resolvedId && !schoolIdParam) {
             setSchoolId(resolvedId);
           }
         }
@@ -68,7 +71,7 @@ function StaffSignupContent() {
     }
 
     resolveSchoolFromStorage();
-  }, [supabase]);
+  }, [supabase, schoolIdParam]);
 
   // Generate strong password with guaranteed uppercase, lowercase, number, and special character
   const generateSuggestedPassword = () => {

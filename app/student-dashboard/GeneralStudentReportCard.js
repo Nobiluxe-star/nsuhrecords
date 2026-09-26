@@ -1,10 +1,11 @@
 'use client';
 
 import { supabase } from '../../lib/supabase';
+import { getCurrentAcademicYear } from '../../lib/academicYear';
 export const dynamic = 'force-dynamic';
 import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { GENERAL_LOWER_CLASSES, GENERAL_SERIES_CATALOG } from '../admin-dashboard/page';
+import { GENERAL_LOWER_CLASSES } from '../admin-dashboard/page';
 
 function getOrdinalSuffix(i) {
   if (!i || isNaN(i)) return '—';
@@ -36,14 +37,14 @@ function calculateGrade(score, isSixthForm) {
     if (s >= 9)  return 'D';      // 45% - 54% (9-10.9)
     if (s >= 7)  return 'E';      // 35% - 44% (7-8.9)
     if (s >= 6)  return 'O';      // 30% - 34% Subsidiary Pass
-    return 'F';                  // Below 30% (< 6)
+    return 'F';                   // Below 30% (< 6)
   } else {
     if (s >= 15) return 'A';      // 75% - 100%
     if (s >= 13.1) return 'B';    // 65.5% - 74.9%
     if (s >= 11) return 'C';      // 55.0% - 65.4%
     if (s >= 9)  return 'D';      // 45.0% - 54.9%
     if (s >= 5)  return 'E';      // 25.0% - 44.9%
-    return 'U';                  // Below 25% (< 5)
+    return 'U';                   // Below 25% (< 5)
   }
 }
 
@@ -57,6 +58,7 @@ function GeneralEducationReportContent() {
   const [subjectRanksMap, setSubjectRanksMap] = useState({});
   const [schoolName, setSchoolName] = useState('');
   const [schoolRegion, setSchoolRegion] = useState('');
+  const [schoolAddress, setSchoolAddress] = useState('');
   const [academicYear, setAcademicYear] = useState('');
   const [schoolMotto, setSchoolMotto] = useState('');
   const [studentData, setStudentData] = useState(null);
@@ -80,6 +82,7 @@ function GeneralEducationReportContent() {
       const studentRowId = searchParams.get('row_id');
       const uniqueCodeParam = searchParams.get('unique_code') || searchParams.get('id') || searchParams.get('code') || searchParams.get('student_id');
       const urlSchoolName = searchParams.get('school_name');
+      const currentYear = getCurrentAcademicYear();
 
       if (!schoolId && !urlSchoolName) {
         router.push('/');
@@ -102,35 +105,37 @@ function GeneralEducationReportContent() {
 
       if (schoolData) {
         setSchoolName(schoolData.name || schoolData.institution_name || schoolData.school_name || urlSchoolName || '');
-        setSchoolRegion(schoolData.address_location || schoolData.address || schoolData.location || schoolData.region || '');
-        setAcademicYear(schoolData.academic_year || '');
+        setSchoolRegion(schoolData.region || schoolData.regional_delegation || '');
+        setSchoolAddress(schoolData.address_location || schoolData.address || schoolData.location || '');
+        setAcademicYear(schoolData.academic_year || currentYear);
         setSchoolMotto(schoolData.motto || schoolData.school_motto || '');
         setAppDeveloper(schoolData.app_developer_credit || '');
         setSchoolLogo(schoolData.logo_url || schoolData.logo || '');
         setSchoolPhone(schoolData.contact_line || schoolData.phone || '');
         setSchoolEmail(schoolData.official_email || schoolData.email || '');
-      } else if (urlSchoolName) {
-        setSchoolName(urlSchoolName);
+      } else {
+        if (urlSchoolName) setSchoolName(urlSchoolName);
+        setAcademicYear(currentYear);
       }
 
       // 2. Fetch Student Profile
       let profile = null;
 
       if (studentRowId) {
-        const { data } = await supabase
-          .from('students')
-          .select('*')
-          .eq('id', studentRowId)
-          .maybeSingle();
+        let q = supabase.from('students').select('*').eq('id', studentRowId);
+        if (schoolId) q = q.eq('school_id', schoolId);
+        const { data } = await q.maybeSingle();
         profile = data;
       }
 
       if (!profile && uniqueCodeParam) {
-        const { data } = await supabase
+        let q = supabase
           .from('students')
           .select('*')
-          .or(`unique_code.eq."${uniqueCodeParam}",code.eq."${uniqueCodeParam}",student_id.eq."${uniqueCodeParam}"`)
-          .maybeSingle();
+          .or(`unique_code.eq."${uniqueCodeParam}",code.eq."${uniqueCodeParam}",student_id.eq."${uniqueCodeParam}"`);
+        
+        if (schoolId) q = q.eq('school_id', schoolId);
+        const { data } = await q.maybeSingle();
         profile = data;
       }
 
@@ -139,6 +144,7 @@ function GeneralEducationReportContent() {
         return;
       }
 
+      const effectiveSchoolId = profile.school_id || schoolId;
       const activeClass = (profile.classLevel || profile.class_level || profile.class_name || profile.class || '').trim();
       const activeStudentId = profile.id;
       const activeUniqueCode = profile.unique_code || profile.code || profile.student_id || uniqueCodeParam || '';
@@ -156,12 +162,13 @@ function GeneralEducationReportContent() {
 
       const termString = `Term ${activeTerm}`;
 
-      // 3. Robust Class Enrolment Query (handles various database column names)
+      // 3. School-Scoped Class Enrolment Query
       let classStudents = [];
       if (activeClass) {
-        const { data: cStudents } = await supabase
-          .from('students')
-          .select('*');
+        let classQuery = supabase.from('students').select('*');
+        if (effectiveSchoolId) classQuery = classQuery.eq('school_id', effectiveSchoolId);
+
+        const { data: cStudents } = await classQuery;
 
         if (Array.isArray(cStudents)) {
           classStudents = cStudents.filter(s => {
@@ -172,12 +179,17 @@ function GeneralEducationReportContent() {
         }
       }
 
-      // 4. Fetch Class Coefficients & Teachers
+      // 4. Fetch Class Coefficients & Teachers (Scoped)
       let loadedSubjects = [];
-      const [subRes, teachersRes] = await Promise.all([
-        supabase.from('class_coefficients').select('*'),
-        supabase.from('teachers').select('*')
-      ]);
+      let coeffQuery = supabase.from('class_coefficients').select('*');
+      let teacherQuery = supabase.from('teachers').select('*');
+
+      if (effectiveSchoolId) {
+        coeffQuery = coeffQuery.eq('school_id', effectiveSchoolId);
+        teacherQuery = teacherQuery.eq('school_id', effectiveSchoolId);
+      }
+
+      const [subRes, teachersRes] = await Promise.all([coeffQuery, teacherQuery]);
 
       const allCoefficientsRows = subRes.data || [];
       const teachersData = teachersRes.data || [];
@@ -229,20 +241,18 @@ function GeneralEducationReportContent() {
 
       setSubjects(loadedSubjects);
 
-      // 5. Fetch Class Marks to Calculate Subject Ranks, Class Rank & Class Average
-      const { data: allClassMarks } = await supabase
-        .from('marks')
-        .select('*');
+      // 5. Fetch Class Marks Scoped to School
+      let marksQuery = supabase.from('marks').select('*');
+      if (effectiveSchoolId) marksQuery = marksQuery.eq('school_id', effectiveSchoolId);
 
+      const { data: allClassMarks } = await marksQuery;
       const rawMarks = allClassMarks || [];
       
-      // Filter marks for the active term
       const classMarksList = rawMarks.filter(m => {
         const mTerm = String(m.term || '').trim().toLowerCase();
         return mTerm === termString.toLowerCase() || mTerm === String(activeTerm);
       });
 
-      // Current Student Marks Lookup
       const scoreLookup = {};
       const rankLookup = {};
 
@@ -259,7 +269,6 @@ function GeneralEducationReportContent() {
         }
       });
 
-      // Compute Subject Ranks dynamically if not set
       loadedSubjects.forEach((sub) => {
         const subKey = sub.subject_name.toLowerCase().trim();
         if (!rankLookup[subKey]) {
@@ -280,7 +289,7 @@ function GeneralEducationReportContent() {
       setMarksMap(scoreLookup);
       setSubjectRanksMap(rankLookup);
 
-      // Compute Overall Class Rank & Class Average across students in this class
+      // Compute Class Rank & Class Average across students
       let computedRank = null;
       let computedClassAvg = null;
 
@@ -321,11 +330,9 @@ function GeneralEducationReportContent() {
         });
 
         if (studentAverages.length > 0) {
-          // Class Average Calculation
           const totalAvgSum = studentAverages.reduce((sum, item) => sum + item.avg, 0);
           computedClassAvg = (totalAvgSum / studentAverages.length).toFixed(2);
 
-          // Class Rank Calculation
           studentAverages.sort((a, b) => b.avg - a.avg);
           const myIndex = studentAverages.findIndex(item => 
             (activeStudentId && String(item.id) === String(activeStudentId)) ||
@@ -342,17 +349,26 @@ function GeneralEducationReportContent() {
       setClassAverage(computedClassAvg);
 
       // 6. Fetch Fees, Discipline, & Remarks
+      let feesQ = supabase.from('school_fees').select('*').or(`student_id.eq."${activeStudentId}",unique_code.eq."${activeUniqueCode}"`);
+      let discQ = supabase.from('student_term_summaries').select('*').or(`student_id.eq."${activeStudentId}",unique_code.eq."${activeUniqueCode}"`).or(`term.eq."${termString}",term.eq."${activeTerm}"`);
+      let remQ = supabase.from('principal_notices').select('*').or(`student_id.eq."${activeStudentId}",unique_code.eq."${activeUniqueCode}"`).or(`term.eq."${termString}",term.eq."${activeTerm}"`);
+
+      if (effectiveSchoolId) {
+        feesQ = feesQ.eq('school_id', effectiveSchoolId);
+        discQ = discQ.eq('school_id', effectiveSchoolId);
+        remQ = remQ.eq('school_id', effectiveSchoolId);
+      }
+
       const [feesRes, disciplineRes, remarksRes] = await Promise.all([
-        supabase.from('school_fees').select('*').or(`student_id.eq."${activeStudentId}",unique_code.eq."${activeUniqueCode}"`).maybeSingle(),
-        supabase.from('student_term_summaries').select('*').or(`student_id.eq."${activeStudentId}",unique_code.eq."${activeUniqueCode}"`).or(`term.eq."${termString}",term.eq."${activeTerm}"`).maybeSingle(),
-        supabase.from('principal_notices').select('*').or(`student_id.eq."${activeStudentId}",unique_code.eq."${activeUniqueCode}"`).or(`term.eq."${termString}",term.eq."${activeTerm}"`).maybeSingle()
+        feesQ.maybeSingle(),
+        discQ.maybeSingle(),
+        remQ.maybeSingle()
       ]);
 
       setFeesRecord(feesRes.data || null);
       setDisciplineRecord(disciplineRes.data || null);
       setAdminRemarks(remarksRes.data || null);
 
-      // Override calculated values ONLY if database pre-calculated values exist
       if (disciplineRes.data) {
         if (disciplineRes.data.class_rank || disciplineRes.data.rank) {
           setStudentRank(disciplineRes.data.class_rank || disciplineRes.data.rank);
@@ -375,12 +391,10 @@ function GeneralEducationReportContent() {
     }
   };
 
-  // Determine Class Level Classification (Lower vs Sixth Form)
   const activeClassName = (studentData?.display_class || '').toLowerCase().trim();
   const isLowerClass = GENERAL_LOWER_CLASSES.some(c => c.toLowerCase().trim() === activeClassName || activeClassName.includes(c.toLowerCase().trim()));
   const isSixthForm = !isLowerClass || activeClassName.includes('sixth') || activeClassName.includes('lower 6') || activeClassName.includes('upper 6') || activeClassName.includes('l6') || activeClassName.includes('u6');
 
-  // Performance Calculations
   let totalPoints = 0;
   let totalCoef = 0;
   let hasAnyMarks = false;
@@ -400,7 +414,6 @@ function GeneralEducationReportContent() {
   const termAverage = totalCoef > 0 && hasAnyMarks ? (totalPoints / totalCoef).toFixed(2) : null;
   const termStatus = termAverage !== null ? (Number(termAverage) >= 10 ? 'Passed' : 'Failed') : null;
 
-  // Fees Display Check
   const paidAmount = Number(feesRecord?.amount_paid || feesRecord?.fees_paid || 0);
   const balanceAmount = Number(feesRecord?.balance || feesRecord?.fee_balance || 0);
   
@@ -409,7 +422,6 @@ function GeneralEducationReportContent() {
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 p-2 sm:p-6 print:p-0 print:bg-white">
-      {/* Dynamic Print CSS for Single A4 Page Guarantee */}
       <style jsx global>{`
         @media print {
           @page {
@@ -439,7 +451,6 @@ function GeneralEducationReportContent() {
       `}</style>
 
       <div className="max-w-4xl mx-auto space-y-4 print:space-y-2 print-container">
-        {/* Navigation / Action Bar */}
         <div className="flex justify-between items-center no-print">
           <button onClick={() => router.push('/')} className="text-xs font-semibold text-blue-600 hover:underline">&larr; Back to Portal Login</button>
           <div className="flex space-x-2">
@@ -448,10 +459,8 @@ function GeneralEducationReportContent() {
           </div>
         </div>
 
-        {/* Main Document Card */}
         <div className="bg-white border border-slate-300 rounded-3xl p-4 sm:p-8 shadow-xl space-y-4 print:space-y-3 print:rounded-none">
-          
-          {/* Header Section */}
+          {/* Header Layout */}
           <div className="border border-slate-300 bg-blue-50/20 rounded-2xl p-3 shadow-sm flex flex-row items-center gap-4">
             <div className="w-20 h-20 sm:w-24 sm:h-24 border border-slate-300 rounded-xl bg-white flex items-center justify-center shrink-0 overflow-hidden p-1">
               {schoolLogo ? <img src={schoolLogo} alt="School Logo" className="w-full h-full object-contain" /> : <span className="text-[9px] font-bold text-slate-400 text-center uppercase">LOGO</span>}
@@ -459,11 +468,18 @@ function GeneralEducationReportContent() {
             <div className="flex-1 border border-slate-300 rounded-xl bg-white divide-y divide-slate-200 text-center">
               <div className="p-1.5">
                 <h1 className="text-base sm:text-xl font-black text-blue-800 uppercase tracking-tight">{schoolName || 'COLLEGE NAME'}</h1>
-                <p className="text-[10px] sm:text-xs font-semibold text-blue-600">{academicYear ? `Academic Year: ${academicYear}` : 'Academic Year: 2025/2026'}</p>
+                <p className="text-[10px] sm:text-xs font-semibold text-blue-600">Academic Year: {academicYear || getCurrentAcademicYear()}</p>
               </div>
-              <div className="p-1"><p className="text-[11px] sm:text-xs font-bold text-blue-700">{schoolRegion || 'REGIONAL DELEGATION OF SECONDARY EDUCATION'}</p></div>
-              <div className="p-1 flex justify-center gap-x-4 text-[10px] sm:text-xs font-bold text-blue-600">
+              <div className="p-1">
+                <p className="text-[11px] sm:text-xs font-bold text-blue-700 uppercase">
+                  REGIONAL DELEGATION OF SECONDARY EDUCATION{schoolRegion ? ` FOR THE ${schoolRegion}` : ''}
+                </p>
+              </div>
+              <div className="p-1 flex justify-center items-center gap-x-3 sm:gap-x-4 text-[10px] sm:text-xs font-bold text-blue-600">
+                <span>Address: {schoolAddress || '—'}</span>
+                <span>•</span>
                 <span>Tel: {schoolPhone || '—'}</span>
+                <span>•</span>
                 <span>Email: {schoolEmail || '—'}</span>
               </div>
             </div>
@@ -475,14 +491,12 @@ function GeneralEducationReportContent() {
             </div>
           )}
 
-          {/* Centered Heading */}
           <div className="p-2 bg-blue-100/50 border border-blue-200 rounded-xl text-center">
             <h2 className="text-sm sm:text-base font-serif font-black text-blue-950 tracking-wider uppercase">
               ACADEMIC PERFORMANCE RECORD — {getOrdinalTermWord(activeTerm).toUpperCase()}
             </h2>
           </div>
 
-          {/* Student Profile Info */}
           <div className="flex flex-row gap-4 items-center bg-slate-50 p-3 rounded-xl border border-slate-200">
             <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-slate-200 border border-slate-300 flex items-center justify-center shrink-0 overflow-hidden">
               {studentData?.photo_url ? (
@@ -506,7 +520,6 @@ function GeneralEducationReportContent() {
             </div>
           </div>
 
-          {/* Term Selector (Hidden on Print) */}
           <div className="flex justify-between items-center border-b border-slate-200 no-print">
             <div className="flex">
               {[1, 2, 3].map((term) => (
@@ -515,7 +528,6 @@ function GeneralEducationReportContent() {
             </div>
           </div>
 
-          {/* Marks & Coefficients Table */}
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border border-slate-300 rounded-lg overflow-hidden print-compact-table">
               <thead className="bg-slate-900 text-white uppercase text-[9px] tracking-wider">
@@ -571,7 +583,6 @@ function GeneralEducationReportContent() {
             </table>
           </div>
 
-          {/* Performance Summary Banner */}
           <div className="grid grid-cols-5 gap-2 bg-blue-900 text-white p-3 rounded-xl text-center">
             <div><span className="text-[9px] text-blue-200 uppercase block font-semibold">Total Points</span><strong className="text-sm sm:text-base">{hasAnyMarks ? `${totalPoints.toFixed(1)} / ${totalCoef * 20}` : '—'}</strong></div>
             <div><span className="text-[9px] text-blue-200 uppercase block font-semibold">Term Average</span><strong className="text-base sm:text-lg font-black text-amber-300">{termAverage ? `${termAverage} / 20` : '—'}</strong></div>
@@ -580,7 +591,6 @@ function GeneralEducationReportContent() {
             <div><span className="text-[9px] text-blue-200 uppercase block font-semibold">Status</span><strong className={`text-sm sm:text-base font-extrabold ${termStatus === 'Passed' ? 'text-emerald-400' : termStatus === 'Failed' ? 'text-red-400' : 'text-slate-300'}`}>{termStatus || '—'}</strong></div>
           </div>
 
-          {/* Remarks & Discipline Section */}
           <div className="grid grid-cols-2 gap-3 text-xs">
             <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
               <span className="font-extrabold text-slate-900 uppercase block text-[10px]">Discipline & Conduct</span>
@@ -596,7 +606,6 @@ function GeneralEducationReportContent() {
             </div>
           </div>
 
-          {/* Dual Principal & Vice-Principal Signature Block */}
           <div className="pt-4 border-t border-slate-300 grid grid-cols-2 gap-8 text-center text-xs">
             <div className="space-y-8">
               <p className="font-bold text-slate-800 uppercase text-[10px]">Vice-Principal / Senior Master</p>

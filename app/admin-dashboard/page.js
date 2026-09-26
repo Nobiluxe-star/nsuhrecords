@@ -9,6 +9,7 @@ import GeneralMarkSheet from './components/mark-sheets/GeneralMarkSheet';
 import TechnicalCommercialMarkSheet from './components/mark-sheets/TechnicalCommercialMarkSheet';
 import TechnicalIndustrialMarkSheet from './components/mark-sheets/TechnicalIndustrialMarkSheet';
 import SubjectCoefficientsManager from './components/SubjectCoefficientsManager';
+import TeacherAssignment from './components/TeacherAssignment';
 
 // Cameroon Ministry of Secondary Education Official Classes, Technical & Commercial Trades, Subjects & Series Catalog
 export const GENERAL_LOWER_CLASSES = [
@@ -54,20 +55,20 @@ export const TECHNICAL_COMMERCIAL_CATALOG = [
   'First Year Commercial (Y1Com)',
   'Second Year Commercial (Y2Com)',
   'Third Year Commercial (Y3Com)',
-  'Fourth Year Commercial / CAP / CAPIET (Y4Com)',
-  'Fifth Year Commercial / Seconde (Y5Com)',
-  'Lower Sixth Commercial / Première (ProbCom)',
-  'Upper Sixth Commercial / Terminale (BacCom)',
+  'Fourth Year Commercia (CAPCom)',
+  'Fifth Year Commercial  (Y5Com)',
+  'Lower Sixth Commercial (ProCom)',
+  'Upper Sixth Commercial (BacCom)',
 ];
 
 export const TECHNICAL_INDUSTRIAL_CATALOG = [
   'First Year Industrial (Y1Ind)',
   'Second Year Industrial (Y2Ind)',
   'Third Year Industrial (Y3Ind)',
-  'Fourth Year Industrial / CAP / CAPIET (Y4Ind)',
-  'Fifth Year Industrial / Seconde (Y5Ind)',
-  'Lower Sixth Industrial / Première (ProbInd)',
-  'Upper Sixth Industrial / Terminale (BacInd)',
+  'Fourth Year Industrial (CAPInd)',
+  'Fifth Year Industrial  (Y5Ind)',
+  'Lower Sixth Industrial (ProInd)',
+  'Upper Sixth Industrial  (BacInd)',
 ];
 
 // Series mapping for Upper/Lower Sixth General
@@ -102,7 +103,7 @@ export const COMMERCIAL_TRADE_SERIES = [
   'G3 - Commercial Action / Marketing',
   'FIG - Taxation and Management Information Systems',
   'ACA - Administrative Action and Communication',
-  'HE - Home Economics',
+  'ESF - Home Economics',
   'IH - Bespoke Tailoring',
   'HOT - Hotel Management',
   'TO - Tourism',
@@ -195,19 +196,7 @@ const generateTeacherId = (schoolName, section, fullName, phoneNumber) => {
 
   return `${schoolCode}-${secCode}${initials}${phoneSuffix}${yearSuffix}${randomLetter}`;
 };
-const START_TIME_OPTIONS = [
-  "07:30 AM", "08:15 AM", "09:00 AM", "09:45 AM", "10:30 AM", "1:15 AM",
-  "12:00 PM", "12:30 PM", "12:45 PM", "01:00 PM", "01:15 PM", "01:30 PM",
-  "01:45 PM", "02:00 PM", "02:15 PM", "02:30 PM", "02:45 PM", "03:00 PM",
-  "03:15 PM", "03:30 PM", "03:45 PM", "04:00 PM", "04:15 PM"
-];
 
-const END_TIME_OPTIONS = [
-  "08:15 AM", "09:00 AM", "09:45 AM", "10:30 AM", "11:15 AM", "12:00 PM",
-  "12:30 PM", "12:45 PM", "01:00 PM", "01:15 PM", "01:30 PM", "01:45 PM",
-  "02:00 PM", "02:15 PM", "02:30 PM", "02:45 PM", "03:00 PM", "03:15 PM",
-  "03:30 PM", "03:45 PM", "04:00 PM", "04:15 PM", "04:30 PM"
-];
 export const getAcademicYear = () => {
     const now = new Date();
     const currentYear = now.getFullYear();
@@ -222,20 +211,27 @@ export const getAcademicYear = () => {
 // Helper to retrieve classes dynamically based on active section
 const getSectionClasses = (section) => {
   if (!section) return [...(GENERAL_CLASSES_CATALOG || []), ...(TECHNICAL_COMMERCIAL_CATALOG || []), ...(TECHNICAL_INDUSTRIAL_CATALOG || [])];
-  
+
   const sec = String(section).trim().toLowerCase();
-  
-  if (sec.includes('commercial')) {
+
+  if (sec.includes('commercial') || sec.includes('stt')) {
     return TECHNICAL_COMMERCIAL_CATALOG || [];
   }
-  if (sec.includes('industrial')) {
+  if (sec.includes('industrial') || sec.includes('ind')) {
     return TECHNICAL_INDUSTRIAL_CATALOG || [];
   }
   if (sec.includes('general')) {
     return GENERAL_CLASSES_CATALOG || [];
   }
-  
-  return [...(GENERAL_CLASSES_CATALOG || []), ...(TECHNICAL_COMMERCIAL_CATALOG || []), ...(TECHNICAL_INDUSTRIAL_CATALOG || [])];
+  if (sec.includes('both')) {
+    return [
+      ...(GENERAL_CLASSES_CATALOG || []),
+      ...(TECHNICAL_COMMERCIAL_CATALOG || []),
+      ...(TECHNICAL_INDUSTRIAL_CATALOG || [])
+    ];
+  }
+
+  return GENERAL_CLASSES_CATALOG || [];
 };
 // Master Subjects Database List
 export const ALL_SUBJECTS_LIST = [
@@ -270,8 +266,9 @@ export const ALL_SUBJECTS_LIST = [
   { name: "School Orientation", category: "General Core Subjects" },
   { name: "Sports & Physical Education", category: "General Core Subjects" },
 
-  // Commercial Subjects
+// Commercial Subjects
   { name: "Application of Management Software", category: "Commercial Subjects" },
+  { name: "Business Communication", category: "Commercial Subjects" },
   { name: "Business Management", category: "Commercial Subjects" },
   { name: "Business Mathematics", category: "Commercial Subjects" },
   { name: "Commerce", category: "Commercial Subjects" },
@@ -282,14 +279,21 @@ export const ALL_SUBJECTS_LIST = [
   { name: "Entrepreneurship", category: "Commercial Subjects" },
   { name: "Family Life Education and Gerontology", category: "Commercial Subjects" },
   { name: "Food Nutrition & Health", category: "Commercial Subjects" },
+  { name: "Information Processing", category: "Commercial Subjects" },
   { name: "International Financial Accounting", category: "Commercial Subjects" },
+  { name: "Introduction to Marketing", category: "Commercial Subjects" },
+  { name: "Introductory Accounting", category: "Commercial Subjects" },
+  { name: "Legislation", category: "Commercial Subjects" },
   { name: "Management Accounting", category: "Commercial Subjects" },
+  { name: "Office Practice", category: "Commercial Subjects" },
   { name: "OHADA Financial Accounting", category: "Commercial Subjects" },
   { name: "Principles of Accounts", category: "Commercial Subjects" },
   { name: "Product Mastery", category: "Commercial Subjects" },
   { name: "Professional Communication Techniques", category: "Commercial Subjects" },
   { name: "Resource Management on Home Studies", category: "Commercial Subjects" },
   { name: "Sales Method", category: "Commercial Subjects" },
+  { name: "Science / Hygiene", category: "Commercial Subjects" },
+  { name: "Shorthand (Stenography symbols)", category: "Commercial Subjects" },
 
   // Industrial Subjects
   { name: "Applied Mechanics", category: "Industrial Subjects" },
@@ -352,19 +356,23 @@ const getFilteredSubjects = (section) => {
 };
 export default function AdminDashboardPage() {
   const [activeTab, setActiveTab] = useState('overview');
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [deleteBanner, setDeleteBanner] = useState(null);
   const [navigationHistory, setNavigationHistory] = useState(['overview']);
   const [showWelcomeOverlay, setShowWelcomeOverlay] = useState(true);
   const [hasMounted, setHasMounted] = useState(false);
   const [masterClass, setMasterClass] = useState('');
   const [editingPersonnel, setEditingPersonnel] = useState(null);
   const [isEditPersonnelModalOpen, setIsEditPersonnelModalOpen] = useState(false);
-  const [pendingUncheckSubject, setPendingUncheckSubject] = useState(null);
   const [isEditingSchedule, setIsEditingSchedule] = useState(false);
   const [teacherToEdit, setTeacherToEdit] = useState(null);
   const [selectedSection, setSelectedSection] = useState('');
   const [selectedTeacherForLogs, setSelectedTeacherForLogs] = useState(null);
   const [fetchedLessonLogs, setFetchedLessonLogs] = useState([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  
+  
 
   useEffect(() => {
     if (!selectedTeacherForLogs) return;
@@ -637,6 +645,7 @@ const handleSaveSchoolDetails = async () => {
   };
 const handleEditTeacherSchedule = (teacher) => {
   setTeacherToEdit(teacher);
+  setIsEditingSchedule(true);
   if (teacher?.name || teacher?.full_name) setTeacherName(teacher.name || teacher.full_name);
   if (teacher?.phone || teacher?.phone_number || teacher?.contact) setTeacherPhone(teacher.phone || teacher.phone_number || teacher.contact);
   if (teacher?.email) setTeacherEmail(teacher.email);
@@ -807,6 +816,48 @@ const [teacherPhotoPreview, setTeacherPhotoPreview] = useState(null);
   // Real Phone Time State
   const [currentTime, setCurrentTime] = useState(null);
   const [schedulerData, setSchedulerData] = useState({});
+const startTeacherCamera = async () => {
+  setIsCameraActive(true);
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    if (videoRef.current) {
+      videoRef.current.srcObject = stream;
+    }
+  } catch (err) {
+    alert('Unable to access camera. Please check permissions.');
+    setIsCameraActive(false);
+  }
+};
+
+const captureTeacherPhoto = () => {
+  const video = videoRef.current;
+  if (!video) return;
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const dataUrl = canvas.toDataURL('image/png');
+
+  
+  setTeacherPhotoPreview(dataUrl);
+
+  const stream = video.srcObject;
+  if (stream) {
+    stream.getTracks().forEach(track => track.stop());
+  }
+  setIsCameraActive(false);
+};
+
+const handleTeacherFileUpload = (e) => {
+  const file = e.target.files[0];
+  if (file) {
+    setTeacherPhoto(file); 
+    const reader = new FileReader();
+    reader.onloadend = () => setTeacherPhotoPreview(reader.result); // Updates line 820 state
+    reader.readAsDataURL(file);
+  }
+};
 
 const handleSchedulerRowChange = (subject, rIdx, field, value) => {
   // Update schedulerData override state
@@ -1186,6 +1237,8 @@ if (!active.has_onboarded) {
         }
 
        if (teachersRes.data) {
+        console.log("FETCHED TEACHERS FROM SUPABASE:", teachersRes.data);
+        
           // Map teachers targeting teacher_id first, falling back to id if missing
           const formattedTeachers = teachersRes.data.map((t) => ({
             ...t,
@@ -1194,10 +1247,21 @@ if (!active.has_onboarded) {
             phone: t.contact || t.phone || '',
             email: t.email || '',
             signupLink: t.signup_link || t.signupLink || '',
-            schedules: t.schedules || {}
+            schedules: t.schedules || {},
+            classLevel: t.classLevel || t.class_level || ''
           }));
-          setTeachersList(formattedTeachers);
-          localStorage.setItem(teacherCacheKey, JSON.stringify(formattedTeachers));
+         // Filter out duplicate teachers by teacher_id / id
+const uniqueTeachers = Array.from(
+  new Map(formattedTeachers.map((t) => [t.teacher_id || t.id, t])).values()
+);
+
+setTeachersList(uniqueTeachers);
+
+try {
+  localStorage.setItem(teacherCacheKey, JSON.stringify(uniqueTeachers));
+} catch (e) {
+  console.warn('localStorage full, skipped caching teachers:', e);
+}
         }
       } catch (err) {
         console.warn('Network offline or slow; using locally cached data.', err);
@@ -1957,7 +2021,7 @@ const cachedStudents = JSON.parse(localStorage.getItem(studentCacheKey) || '[]')
   }
 
   const token = Math.random().toString(36).substring(2, 10);
-  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://nsuhrecords.vercel.app/';
 
   // Explicitly passes role= parameter and formatted query params
   const signupLink = activeEditRecord?.signup_link || `${baseUrl}/staff-signup?role=${encodeURIComponent(regRole)}&token=${token}&id=${uniqueStaffId}`;
@@ -1993,20 +2057,24 @@ if (error) {
 }
 
     if (data && data.length > 0) {
-      const savedPerson = {
-        ...data[0],
-        id: data[0].unique_id || data[0].id,
-        signupLink: data[0].signup_link
-      };
-      setPersonnelList((prev) => [savedPerson, ...prev]);
-      setActivePersonnelResult(savedPerson);
-    }
+  const savedPerson = {
+    ...data[0],
+    id: data[0].unique_id || data[0].id,
+    signupLink: data[0].signup_link
+  };
+  setPersonnelList((prev) => [savedPerson, ...prev]);
 
-    setFullName('');
-    setPhone('');
-    setStaffEmail('');
-    setStaffResidence('');
-    alert(`${newStaffRecord.title} registered successfully with unique ID ${uniqueStaffId}!`);
+  setActivePersonnelResult({
+    ...savedPerson,
+    fullName: fullName,
+    uniqueStaffId: uniqueStaffId,
+    signupLink: `${savedPerson.signupLink}&school_id=${activeSchoolId}`
+  });
+}
+setFullName('');
+setPhone('');
+setStaffEmail('');
+setStaffResidence('');
   };
 const handleUpdatePersonnel = async (e) => {
     e.preventDefault();
@@ -2135,12 +2203,12 @@ const handleUpdatePersonnel = async (e) => {
   const setSubjectSchedules = setSubjectClassSchedules;
 
   // Add another class session row for a particular subject
-  const addClassRowToSubject = (subject) => {
+ const addClassRowToSubject = (subject) => {
     setSubjectSchedules(prev => ({
       ...prev,
       [subject]: [
         ...(prev[subject] || []),
-        { className: ALL_AVAILABLE_CLASSES[0], day: 'Monday', startTime: '07:30 AM', endTime: '09:00 AM' }
+{ className: teacherSection === 'Technical Commercial(STT)' ? 'First Year Commercial (Y1Com)' : teacherSection === 'Technical Industrial(IND)' ? 'First Year Industrial (Y1Ind)' : 'Form 1A (F1A)', day: 'Monday', startTime: '07:30 AM', endTime: '09:00 AM' }
       ]
     }));
   };
@@ -2159,12 +2227,13 @@ const handleUpdatePersonnel = async (e) => {
     // 1. Update subjectSchedules
     setSubjectSchedules((prev) => {
       const list = [...(prev[subject] || [])];
-      const existingRow = list[index] || { className: '', day: '', startTime: '', endTime: '' };
-      list[index] = {
-        ...existingRow,
-        [field]: value
-      };
-      return { ...prev, [subject]: list };
+      const defaultClass = teacherSection === 'Technical Commercial(STT)' || teacherSection === 'Technical Commercial' ? 'First Year Commercial (Y1Com)' : teacherSection === 'Technical Industrial(IND)' || teacherSection === 'Technical Industrial' ? 'First Year Industrial (Y1Ind)' : 'Form 1A (F1A)';
+const existingRow = list[index] || { className: defaultClass, day: '', startTime: '', endTime: '' };
+list[index] = {
+  ...existingRow,
+  [field]: value
+};
+return { ...prev, [subject]: list };
     });
 
     // 2. Update schedulerData to keep UI in sync
@@ -2194,8 +2263,10 @@ const handleUpdatePersonnel = async (e) => {
   };
   // Teacher Assignment Submission with Validation Rules & Conflict Checks
   const handleTeacherAssignment = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
+    if (isSubmittingTeacher) return;
     setIsSubmittingTeacher(true);
+    
 
     if (!teacherName || !teacherPhone || !teacherEmail || selectedTeacherSubjects.length === 0) {
       alert('Please provide teacher name, mandatory email, phone number, and select at least one subject with class schedules.');
@@ -2242,23 +2313,24 @@ const rows = Array.from({ length: maxLen }, (_, rIdx) => {
   return {
     ...base,
     ...custom,
+    className: custom.className || base.className || "",
     day: custom.day || base.day || "Monday",
     startTime: custom.startTime || base.startTime || "07:30 AM",
     endTime: custom.endTime || base.endTime || "09:00 AM",
   };
 });
 
-      for (const row of rows) {
-        if (!row) continue;
-        const normalizedClass = row?.className || row?.class || row?.form || "";
-        if (normalizedClass && row?.day && row?.startTime && row?.endTime) {
-          allScheduleSlots.push({
-            ...row,
-            subject: sub,
-            className: normalizedClass,
-          });
-        }
-      }
+for (const row of rows) {
+  if (!row) continue;
+  const normalizedClass = row?.className || row?.class || row?.form || "";
+  if (normalizedClass && row?.day && row?.startTime && row?.endTime) {
+    allScheduleSlots.push({
+      ...row,
+      subject: sub,
+      className: normalizedClass,
+    });
+  }
+}
     }
 
     console.log("SLOT_0:", JSON.stringify(allScheduleSlots[0]), "SLOT_1:", JSON.stringify(allScheduleSlots[1]));
@@ -2351,9 +2423,8 @@ const generateTeacherId = (schoolNameInput, section, fullName, phoneNumber) => {
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
 
   // Reuse existing signup_link if editing, otherwise construct a properly formatted link
-  const generatedLink = teacherToEdit?.signup_link || teacherToEdit?.signupLink || `${baseUrl}/staff-signup?role=teacher&token=${signupToken}&id=${teacherId}`;
  // 1. Safe Multi-Tenant School ID Resolution
-    let activeSchoolId = activeSchool?.school_id || activeSchool?.id || currentSchoolId;
+let activeSchoolId = activeSchool?.school_id || activeSchool?.id || currentSchoolId;
 let activeSchoolName = activeSchool?.name || activeSchool?.['school-name'] || schoolName;
 
 // If state isn't populated yet, do a exact fallback lookup
@@ -2377,7 +2448,7 @@ if (!activeSchoolId) {
   alert("Security Notice: Could not locate active School ID. Please re-select your school or log in again.");
   return;
 }
-
+const generatedLink = teacherToEdit?.signup_link || teacherToEdit?.signupLink || `${baseUrl}/staff-signup?role=teacher&token=${signupToken}&id=${teacherId}&school_id=${activeSchoolId}`;
    const newTeacherRecord = {
       signup_link: generatedLink,
       
@@ -2395,47 +2466,121 @@ if (!activeSchoolId) {
       role: 'teacher',
     };
 
-  // Payload object for create/update
-const payloadData = {
-  school_id: activeSchoolId,
-  teacher_id: teacherId,
-  name: teacherName,
-  contact: teacherPhone,
-  email: teacherEmail,
-  residence: teacherResidence || 'N/A',
-  section: teacherSection,
-  subjects: selectedTeacherSubjects,
-  schedules: subjectSchedules,
-  picture: teacherPhotoPreview || picturePreview || null,
-  signup_link: generatedLink,
-  role: 'teacher',
-  academic_year: activeSchool?.academic_year || getAcademicYear(),
-};
+ // 1. Normalize subjectSchedules so every internal slot has explicit className and classLevel
+    const normalizedSchedules = {};
+    if (subjectSchedules && typeof subjectSchedules === 'object') {
+      Object.entries(subjectSchedules).forEach(([subjectKey, slots]) => {
+        if (Array.isArray(slots)) {
+          normalizedSchedules[subjectKey] = slots.map((slot) => {
+            const resolvedClass = slot.className || slot.classLevel || slot.class_name || teacherSection || 'N/A';
+            return {
+              ...slot,
+              className: resolvedClass,
+              classLevel: resolvedClass,
+            };
+          });
+        } else {
+          normalizedSchedules[subjectKey] = slots;
+        }
+      });
+    }
 
-let error = null;
-const currentSchoolId = localStorage.getItem('active_school_id') || localStorage.getItem('activeSchoolId');
+    // 2. Extract exact unique class names, prioritizing className over legacy classLevel
+    const rawScheduleItems = Array.isArray(normalizedSchedules)
+      ? normalizedSchedules
+      : Object.values(normalizedSchedules || {});
 
-if (teacherToEdit) {
-  // Exclude key identifiers from payload so Supabase update doesn't hit UUID conflicts
-  const { id, ...updateFields } = payloadData;
+    const extractedClasses = Array.from(
+      new Set(
+        rawScheduleItems
+          .flatMap((item) => {
+            if (Array.isArray(item)) return item;
+            if (item && typeof item === 'object') return item.schedules || item.slots || [item];
+            return [];
+          })
+          .map((slot) => slot?.className || slot?.classLevel || slot?.class_name)
+          .filter(Boolean)
+      )
+    );
 
-  const res = await supabase
-    .from('teachers')
-    .update(updateFields)
-    .eq('teacher_id', teacherToEdit.teacher_id || teacherToEdit.id)
-    .eq('school_id', currentSchoolId);
-  error = res.error;
-} else {
-  // INSERT new teacher when not in edit mode
-  const res = await supabase
-    .from('teachers')
-    .insert([{ ...payloadData, school_id: currentSchoolId }]);
-  error = res.error;
-}
+    const finalClassLevelString = extractedClasses.length > 0 
+      ? extractedClasses.join(', ') 
+      : (teacherSection || 'N/A');
+
+    // 3. Payload object for create/update
+    const payloadData = {
+      school_id: activeSchoolId,
+      teacher_id: teacherId,
+      name: teacherName,
+      contact: teacherPhone,
+      email: teacherEmail,
+      residence: teacherResidence || 'N/A',
+      section: teacherSection,
+      classLevel: finalClassLevelString,
+      subjects: (selectedTeacherSubjects || []).map(s => typeof s === 'string' ? s : (s.name || s.subjectName || '')),
+      schedules: normalizedSchedules,
+      picture: teacherPhotoPreview || picturePreview || null,
+      signup_link: generatedLink,
+      role: 'teacher',
+      academic_year: activeSchool?.academic_year || getAcademicYear(),
+      qualification: teacherQualification,
+      photo_url: teacherPhotoPreview || null,
+    };
+
+    let error = null;
+    let savedRecord = null;
+    const currentSchoolId = localStorage.getItem('active_school_id') || localStorage.getItem('activeSchoolId');
+
+    if (teacherToEdit) {
+      // Exclude key identifiers from payload so Supabase update doesn't hit UUID conflicts
+      const { id, ...updateFields } = payloadData;
+
+      const res = await supabase
+        .from('teachers')
+        .update(updateFields)
+        .eq('teacher_id', teacherToEdit.teacher_id || teacherToEdit.id)
+        .eq('school_id', currentSchoolId)
+        .select('*');
+
+      error = res.error;
+      if (res.data && res.data.length > 0) savedRecord = res.data[0];
+    } else {
+      // INSERT new teacher when not in edit mode
+      const res = await supabase
+        .from('teachers')
+        .insert([{ ...payloadData, school_id: currentSchoolId }])
+        .select('*');
+
+      error = res.error;
+      if (res.data && res.data.length > 0) savedRecord = res.data[0];
+    }
 
     if (error) {
       alert('Error saving teacher to database: ' + error.message);
+      setIsSubmittingTeacher(false);
       return;
+    }
+
+    // Instantly reflect newly saved teacher in UI list without needing page reload
+    if (savedRecord) {
+      const formattedSavedTeacher = {
+        ...savedRecord,
+        id: savedRecord.teacher_id || savedRecord.id,
+        name: savedRecord.name,
+        phone: savedRecord.contact || savedRecord.phone || '',
+        email: savedRecord.email || '',
+        signupLink: savedRecord.signup_link || savedRecord.signupLink || '',
+        schedules: savedRecord.schedules || {},
+        classLevel: savedRecord.classLevel || savedRecord.class_level || finalClassLevelString,
+      };
+
+      setTeachersList((prev) => {
+        const exists = prev.some((t) => (t.teacher_id || t.id) === formattedSavedTeacher.id);
+        if (exists) {
+          return prev.map((t) => ((t.teacher_id || t.id) === formattedSavedTeacher.id ? formattedSavedTeacher : t));
+        }
+        return [formattedSavedTeacher, ...prev];
+      });
     }
 
     // Update UI state & popup modal
@@ -2464,7 +2609,7 @@ setTeacherPhotoPreview(null);
     setTeacherResidence('');
     setSelectedTeacherSubjects([]);
     setSubjectSchedules({});
-    alert('Teacher successfully assigned with unique ID, validation passed, and timetable generated!');
+    setIsSubmittingTeacher(false);
   };
 
   const currentYear = currentTime ? currentTime.getFullYear() : new Date().getFullYear();
@@ -3306,7 +3451,7 @@ setTeacherPhotoPreview(null);
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
                       required
-                      placeholder="e.g. Dr. Mbah Paul"
+                      placeholder="e.g. Dr. Tse Aloysius"
                       className="w-full bg-[#1f2937] border border-amber-500/50 rounded-lg px-4 py-2.5 text-sm text-white"
                     />
                   </div>
@@ -3801,289 +3946,23 @@ setTeacherPhotoPreview(null);
           </div>
         )}
 
-        {/* ASSIGN NEW TEACHER TAB (Updated: Dynamic classes per subject click, no period field) */}
-        {activeTab === 'teachers' && (
-          <div className={`p-8 rounded-xl max-w-4xl mx-auto shadow-2xl space-y-6 transition-colors duration-300 ${teacherToEdit ? 'bg-white text-gray-900 border border-gray-300' : 'bg-[#111827] text-white border border-gray-800'}`}>
-            <h2 className="text-lg font-bold text-white border-b border-gray-800 pb-3">Assign New Teacher & Configure Timetable</h2>
-            
-            <form onSubmit={handleTeacherAssignment} className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Teacher Full Name</label>
-                  <input 
-                    type="text" 
-                    value={teacherName} 
-                    onChange={(e) => setTeacherName(e.target.value)} 
-                    required 
-                    placeholder="e.g. Mr. Ngwa"
-                    className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Contact Phone Number (Mandatory)</label>
-                  <input 
-                    type="text" 
-                    value={teacherPhone} 
-                    onChange={(e) => setTeacherPhone(e.target.value)} 
-                    required 
-                    placeholder="682491189"
-                    className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-amber-400 mb-1">Email Address (Mandatory)</label>
-                  <input 
-                    type="email" 
-                    value={teacherEmail} 
-                    onChange={(e) => setTeacherEmail(e.target.value)} 
-                    required 
-                    placeholder="teacher@wisdomcollege.cm"
-                    className="w-full bg-[#1f2937] border border-amber-500/50 rounded-lg px-4 py-2.5 text-sm text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Place of Residence</label>
-                  <input 
-                    type="text" 
-                    value={teacherResidence} 
-                    onChange={(e) => setTeacherResidence(e.target.value)} 
-                    placeholder="Nkwen, Bamenda"
-                    className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white"
-                  />
-                </div>
-              </div>
-              {/* TEACHER PROFILE PHOTO / CAMERA SNAPSHOT */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
-              Teacher Profile Picture / Take Photo
-            </label>
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={handleTeacherPhotoChange}
-              className="w-full text-xs text-gray-400 file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-amber-500/20 file:text-amber-300 hover:file:bg-amber-500/30 cursor-pointer bg-[#1f2937] border border-gray-700 rounded-lg p-1"
-            />
-          </div>
-          <div className="flex items-center gap-3">
-            {teacherPhotoPreview ? (
-              <img
-                src={teacherPhotoPreview}
-                alt="Teacher Preview"
-                className="w-14 h-14 rounded-xl object-cover border-2 border-amber-500 shadow-md"
-              />
-            ) : (
-              <div className="w-14 h-14 rounded-xl bg-gray-800 border border-gray-700 flex items-center justify-center text-gray-500 text-[10px] text-center p-1 font-semibold">
-                No Photo
-              </div>
-            )}
-            <span className="text-xs text-gray-400">
-              {teacherPhotoPreview ? 'Photo ready to save' : 'Upload photo or tap on phone to snap picture'}
-            </span>
-          </div>
-        </div>
-
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Section</label>
-                <select 
-                  value={teacherSection} 
-                 onChange={(e) => {
-          setTeacherSection(e.target.value);
-          setSelectedSection(e.target.value);
-          setSelectedTeacherSubjects([]);
-          setSubjectSchedules({});
-        }}
-                  className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white"
-                >
-                  <option value="General Education">General Education</option>
-<option value="Technical Commercial">Technical Commercial</option>
-<option value="Technical Industrial">Technical Industrial</option>
-<option value="Both">Both (All Sections)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
-                  Select Subjects Taught (Click subjects to add forms and configure day, start time, and end time)
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 max-h-56 overflow-y-auto bg-[#1f2937]/50 p-3 rounded-lg border border-gray-700/50">
-          {getFilteredSubjects(teacherSection || selectedSection).map((subObj, idx) => {
-  const sub = typeof subObj === 'string' ? subObj : subObj.name;
-  return (
-    <label
-      key={idx}
-      className="flex items-center gap-2.5 text-xs text-gray-300 cursor-pointer p-2 hover:bg-gray-800/60 rounded"
-    >
-      <input
-        type="checkbox"
-        checked={selectedTeacherSubjects.includes(sub)}
-        onChange={(e) => handleSubjectToggle(sub, e.target.checked)}
-        className="w-4 h-4 rounded border-gray-700 text-amber-600 focus:ring-0 cursor-pointer accent-amber-500"
-      />
-      <span className="leading-tight select-none">{sub}</span>
-    </label>
-  );
-})}
-        </div>
-              </div>
-
-              {selectedTeacherSubjects.length > 0 && (
-                <div className="space-y-4 pt-2 border-t border-gray-800">
-                  <h3 className="text-sm font-bold text-amber-400">Configure Class Forms & Schedule (Day, Start Time, End Time) per Subject</h3>
-                  {selectedTeacherSubjects.map((subject, subIdx) => {
-                    const rows = subjectSchedules[subject] || [];
-                    return (
-                      <div key={subIdx} className="bg-[#1f2937]/40 border border-gray-700 p-4 rounded-xl space-y-3">
-                        <div className="font-bold text-sm text-white flex items-center justify-between">
-                          <span>📘 Subject: <span className="text-amber-400">{subject}</span></span>
-                          <button 
-                            type="button"
-                            onClick={() => addClassRowToSubject(subject)}
-                            className="bg-amber-600/30 hover:bg-amber-600/50 border border-amber-500/50 text-amber-300 text-xs px-3 py-1 rounded"
-                          >
-                            + Add Another Form/Class
-                          </button>
-                        </div>
-                        
-                        <div className="space-y-3">
-                          {rows.map((row, rIdx) => (
-                            <div key={rIdx} className="bg-[#111827] p-3 rounded-lg border border-gray-800 flex flex-col md:flex-row gap-3 items-center">
-                              <div className="flex-1 w-full">
-                                <label className="block text-[10px] uppercase text-gray-400 mb-1">Class / Form</label>
-                                <select 
-                                  value={row.className}
-                                  onChange={(e) => handleScheduleRowChange(subject, rIdx, 'className', e.target.value)}
-                                  className="w-full bg-[#1f2937] border border-gray-700 rounded p-2 text-xs text-amber-300"
-                                >
-                                  {getSectionClasses(selectedSection || '').map((cls, cId) => (
-  <option key={cId} value={cls}>{cls}</option>
-))}
-                                </select>
-                              </div>
-                              <div className="w-full md:w-36">
-                                <label className="block text-[10px] uppercase text-gray-400 mb-1">Day</label>
-                                <select 
-                                  value={row.day}
-                                  onChange={(e) => handleScheduleRowChange(subject, rIdx, 'day', e.target.value)}
-                                  className="w-full bg-[#1f2937] border border-gray-700 rounded p-2 text-xs text-white"
-                                >
-                                  {DAYS_OF_WEEK.map((d, dId) => (
-                                    <option key={dId} value={d}>{d}</option>
-                                  ))}
-                                </select>
-                              </div>
-                             {/* Start Time Select */}
-                  {/* Start & End Time Block with Datalist Suggestions */}
-                            <datalist id="start-time-suggestions">
-                              {START_TIME_OPTIONS.map((time, idx) => (
-                                <option key={idx} value={time} />
-                              ))}
-                            </datalist>
-
-                            <datalist id="end-time-suggestions">
-                              {END_TIME_OPTIONS.map((time, idx) => (
-                                <option key={idx} value={time} />
-                              ))}
-                            </datalist>
-
-                            {/* START TIME COMBOBOX (Typable + Dropdown Arrow) */}
-                            <div className="w-full md:w-28">
-                              <label className="block text-[10px] uppercase text-gray-400 mb-1">Start Time</label>
-                              <div className="relative flex items-center">
-                                <input
-                                  type="text"
-                                  placeholder="07:30 AM"
-                                  value={schedulerData[subject]?.[rIdx]?.startTime ?? row.startTime ?? '07:30 AM'}
-                                  onChange={(e) => handleSchedulerRowChange(subject, rIdx, 'startTime', e.target.value)}
-                                  className="w-full bg-[#1f2937] border border-gray-700 rounded p-2 text-xs text-white pr-6 focus:outline-none focus:border-amber-500"
-                                />
-                                <select
-                                  value=""
-                                  onChange={(e) => handleSchedulerRowChange(subject, rIdx, 'startTime', e.target.value)}
-                                  className="absolute right-1 w-5 bg-transparent text-gray-400 text-xs cursor-pointer focus:outline-none"
-                                >
-                                  <option value="" disabled hidden></option>
-                                  {START_TIME_OPTIONS.map((time, idx) => (
-                                    <option key={idx} value={time} className="bg-[#1f2937] text-white">
-                                      {time}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                            </div>
-
-                            {/* STICKY COLON SEPARATOR */}
-                            <div className="hidden md:flex items-center justify-center pt-5 text-gray-400 font-bold text-sm">
-                              :
-                            </div>
-
-                            {/* END TIME COMBOBOX (Typable + Dropdown Arrow) */}
-                            <div className="w-full md:w-28">
-                              <label className="block text-[10px] uppercase text-gray-400 mb-1">End Time</label>
-                              <div className="relative flex items-center">
-                                <input
-                                  type="text"
-                                  placeholder="09:00 AM"
-                                  value={schedulerData[subject]?.[rIdx]?.endTime ?? row.endTime ?? '09:00 AM'}
-                                  onChange={(e) => handleSchedulerRowChange(subject, rIdx, 'endTime', e.target.value)}
-                                  className="w-full bg-[#1f2937] border border-gray-700 rounded p-2 text-xs text-white pr-6 focus:outline-none focus:border-amber-500"
-                                />
-                                <select
-                                  value=""
-                                  onChange={(e) => handleSchedulerRowChange(subject, rIdx, 'endTime', e.target.value)}
-                                  className="absolute right-1 w-5 bg-transparent text-gray-400 text-xs cursor-pointer focus:outline-none"
-                                >
-                                  <option value="" disabled hidden></option>
-                                  {END_TIME_OPTIONS.map((time, idx) => (
-                                    <option key={idx} value={time} className="bg-[#1f2937] text-white">
-                                      {time}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                            </div>
-                              {rows.length > 1 && (
-                                <button 
-                                  type="button"
-                                  onClick={() => removeClassRowFromSubject(subject, rIdx)}
-                                  className="text-red-400 hover:text-red-300 text-xs pt-4 md:pt-0"
-                                >
-                                  ✕
-                                </button>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              <button type="submit" className="w-full bg-amber-600 hover:bg-amber-500 text-white font-semibold py-3 rounded-lg shadow-lg">
-                Save Teacher Assignment, Verify Conflicts & Generate Timetable
-              </button>
-            </form>
-
-            {activeTeacherResult && (
-              <div className="mt-6 p-4 bg-emerald-950/40 border border-emerald-600/50 rounded-xl space-y-3">
-                <h3 className="text-sm font-bold text-emerald-400">
-  {teacherToEdit ? 'Teachers details successfully edited and stored' : 'Teacher Assigned Successfully!'}
-</h3>
-                <p className="text-xs text-gray-300">Generated Teacher ID: <strong className="text-amber-300 font-mono">{activeTeacherResult.id}</strong></p>
-                <p className="text-xs text-gray-300">Share this dedicated signup and timetable portal link with <strong>{activeTeacherResult.name}</strong>:</p>
-                <div className="bg-[#1f2937] p-3 rounded border border-emerald-500/40 text-amber-300 font-mono text-xs select-all">
-                  {activeTeacherResult.signupLink}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
+    {activeTab === 'teachers' && (
+  <TeacherAssignment
+    activeTab={activeTab}
+    teachersList={teachersList}
+    setTeachersList={setTeachersList}
+    activeSchool={activeSchool}
+    ALL_SUBJECTS_LIST={ALL_SUBJECTS_LIST}
+    ALL_AVAILABLE_CLASSES={GENERAL_CLASSES_CATALOG}
+    getAcademicYear={getCurrentAcademicYear}
+    isEditing={isEditingSchedule}
+    teacherToEdit={teacherToEdit}
+    onClose={() => {
+      setIsEditingSchedule(false);
+      setTeacherToEdit(null);
+    }}
+  />
+)}
         {/* ALL TEACHER LIST TAB (Updated: Summary of names, subjects taught, and ID that can be clicked to copy) */}
         {activeTab === 'teacher-list' && (
           <div className="bg-[#111827] border border-gray-800 p-6 rounded-xl shadow-xl space-y-4">
@@ -4119,16 +3998,21 @@ setTeacherPhotoPreview(null);
                 No teachers assigned yet. Use the "Assign New Teacher" tab to add faculty members.
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-               {teachersList.map((teacher, index) => (
-  <div key={teacher.id || index} className="bg-[#1f2937]/50 border border-gray-800 p-5 rounded-xl space-y-4 flex flex-col justify-between">
+   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+  {deleteBanner && (
+    <div className="col-span-full mb-2 p-4 rounded-lg text-sm font-medium text-center shadow-lg transition-all bg-emerald-900/60 border border-emerald-500 text-emerald-300">
+      {deleteBanner.message}
+    </div>
+  )}
+  {teachersList.map((teacher, index) => ( 
+<div key={`${teacher.id || teacher.teacher_id || 'teacher'}-${index}`} className="bg-[#1f2937]/50 border border-gray-800 p-5 rounded-xl space-y-4">
     <div>
       {/* Header: Teacher Name, Contact & Copyable ID */}
       <div className="flex justify-between items-start border-b border-gray-800 pb-3">
-        <div>
-          <h3 className="text-base font-bold text-white">{teacher.name}</h3>
-          <p className="text-xs text-gray-400 mt-1">Phone: {teacher.phone || 'N/A'} | Email: {teacher.email || 'N/A'}</p>
-        </div>
+       <div>
+  <h3 className="text-base font-bold text-white">{teacher.name}</h3>
+  <p className="text-xs text-gray-400 mt-1">Phone: {teacher.phone || 'N/A'} | Email: {teacher.email || 'N/A'}</p>
+</div>
         <button
           onClick={() => {
             navigator.clipboard.writeText(teacher.id);
@@ -4243,32 +4127,59 @@ setTeacherPhotoPreview(null);
           <span>📑</span> Click to See Timetable & Details
         </button>
 
-        <button
-          onClick={async () => {
-              const confirmDelete = window.confirm(`Are you sure you want to delete ${teacher.name}? This action cannot be undone.`);
-              if (confirmDelete) {
-                const targetId = teacher.teacher_id || teacher.id;
-                const currentSchoolId = localStorage.getItem('active_school_id') || localStorage.getItem('activeSchoolId');
+        {confirmDeleteId === (teacher.teacher_id || teacher.id) ? (
+  <div className="flex flex-col sm:flex-row items-center gap-2 bg-red-950/80 border border-red-700/80 p-2 rounded-lg">
+    <span className="text-xs font-semibold text-red-200">
+      Are you sure you want to delete {teacher.name}?
+    </span>
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        onClick={async () => {
+          const targetId = teacher.teacher_id || teacher.id;
+          const currentSchoolId = localStorage.getItem('active_school_id') || localStorage.getItem('activeSchoolId');
 
-                const { error } = await supabase
-               .from('teachers')
-               .delete()
-               .eq('teacher_id', targetId)
-               .eq('school_id', currentSchoolId);
-                if (error) {
-                  alert(`Error deleting teacher from database: ${error.message}`);
-                  return;
-                }
+          const { error } = await supabase
+            .from('teachers')
+            .delete()
+            .eq('teacher_id', targetId)
+            .eq('school_id', currentSchoolId);
 
-                setTeachersList((prev) => prev.filter((t) => (t.teacher_id || t.id) !== targetId));
-                alert(`${teacher.name} has been permanently deleted.`);
-              }
-            }}
-          className="bg-red-900/40 hover:bg-red-800/60 border border-red-700/60 text-red-300 font-bold text-xs py-2 px-3 rounded transition-colors flex items-center justify-center gap-1"
-          title="Delete Teacher"
-        >
-          <span>🗑️</span> Delete
-        </button>
+          if (error) {
+            setDeleteBanner({ type: 'error', message: `Error deleting teacher: ${error.message}` });
+            setConfirmDeleteId(null);
+            return;
+          }
+
+          setTeachersList((prev) => prev.filter((t) => (t.teacher_id || t.id) !== targetId));
+          setDeleteBanner({ type: 'success', message: `${teacher.name} has been permanently deleted.` });
+          setConfirmDeleteId(null);
+
+          setTimeout(() => setDeleteBanner(null), 4000);
+        }}
+        className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs py-1 px-2.5 rounded transition-all"
+      >
+        Yes, Delete
+      </button>
+      <button
+        type="button"
+        onClick={() => setConfirmDeleteId(null)}
+        className="bg-gray-700 hover:bg-gray-600 text-gray-200 font-bold text-xs py-1 px-2.5 rounded transition-all"
+      >
+        Cancel
+      </button>
+    </div>
+  </div>
+) : (
+  <button
+    type="button"
+    onClick={() => setConfirmDeleteId(teacher.teacher_id || teacher.id)}
+    className="bg-red-900/40 hover:bg-red-800/60 border border-red-700/60 text-red-300 font-bold text-xs py-2 px-3 rounded transition-all"
+    title="Delete Teacher"
+  >
+    <span>🗑️</span> Delete
+  </button>
+)}
       </div>
     </div>
   </div>
@@ -5197,45 +5108,6 @@ return (
           </div>
         </div>
       )}
-      {/* EDIT SCHEDULE MODAL */}
-{isEditingSchedule && teacherToEdit && (
-  <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-    <div className="bg-gray-900 border border-gray-700 rounded-xl max-w-lg w-full p-6 text-white shadow-xl">
-      <h3 className="text-lg font-bold text-amber-400 mb-2">
-        Edit Timetable: {teacherToEdit?.name || teacherToEdit?.full_name}
-      </h3>
-      <p className="text-xs text-gray-400 mb-4">
-        Teacher ID: <span className="font-mono text-gray-200">{teacherToEdit?.teacher_id || teacherToEdit?.id}</span>
-      </p>
-
-      {/* Editable Workload / Periods Container */}
-      <div className="space-y-4 max-h-96 overflow-y-auto pr-2">
-        <div className="p-3 bg-gray-800 rounded border border-gray-700 text-xs text-gray-300">
-          Modify active classes, assigned subjects, or period times for this staff member without changing their system ID.
-        </div>
-        {/* You can map through teacherToEdit?.timetable_data here to render editable inputs */}
-      </div>
-
-      <div className="mt-6 flex justify-end gap-3 no-print">
-        <button
-          onClick={() => setIsEditingSchedule(false)}
-          className="bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-semibold px-4 py-2 rounded transition"
-        >
-          Cancel
-        </button>
-        <button
-          onClick={() => {
-            // Save updated timetable to Supabase
-            setIsEditingSchedule(false);
-          }}
-          className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-4 py-2 rounded transition"
-        >
-          Save Changes
-        </button>
-      </div>
-    </div>
-  </div>
-)}
      
       {showWelcomeOverlay && (
   <div className="fixed inset-0 z-50 bg-black bg-opacity-80 flex items-center justify-center p-4">

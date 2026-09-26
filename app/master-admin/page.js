@@ -168,7 +168,7 @@ export default function MasterDeveloperPortal() {
     const generatedSchoolUuid = crypto.randomUUID();
     const portalToken = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
     
-    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const origin = 'https://nsuhrecords.vercel.app';
     const encodedSchoolName = encodeURIComponent(newSchoolName.trim());
     const portalLink = `${origin}/newadminregister?school_id=${generatedSchoolUuid}&school_name=${encodedSchoolName}&token=${portalToken}`;
     const newSchoolSupabasePayload = {
@@ -508,57 +508,67 @@ export default function MasterDeveloperPortal() {
                       <tr><td colSpan="7" className="p-8 text-center text-gray-500">No schools found in database. Use the "Create School Sign-Up Link" tab to add one.</td></tr>
                     ) : (
                       activeSchools.map((sch) => (
-                        <tr 
-                          key={sch.id} 
-                          onClick={() => setSelectedSchoolId(sch.id)}
-                          className="hover:bg-amber-500/10 cursor-pointer transition-colors group"
-                        >
-                          <td className="p-3.5 font-mono text-amber-400 font-bold">{sch.id}</td>
-                          <td className="p-3.5 font-semibold text-white group-hover:text-amber-300 underline decoration-dotted">{sch.name}</td>
-                          <td className="p-3.5 text-gray-300">{sch.region}</td>
-                          <td className="p-3.5">
-                            {sch.portalLink ? (
-                              <div className="flex items-center gap-2">
-                                <span className="font-mono text-[10px] text-gray-400 truncate max-w-xs">{sch.portalLink}</span>
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); copyToClipboard(sch.portalLink); }}
-                                  className="bg-gray-800 hover:bg-gray-700 text-amber-400 px-2.5 py-1 rounded text-[10px] font-semibold border border-gray-700 shrink-0 cursor-pointer"
-                                >
-                                  Copy Link
-                                </button>
-                              </div>
-                            ) : (
-                              <span className="text-gray-500 italic">No link generated</span>
-                            )}
-                          </td>
-                          <td className="p-3.5">
-                            <span className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${
-                              sch.status === 'Active' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-red-950 text-red-400 border border-red-800'
-                            }`}>
-                              {sch.status}
-                            </span>
-                          </td>
-                          <td className="p-3.5 text-center">
-                            <button
-                              onClick={(e) => { e.stopPropagation(); toggleSchoolRestriction(sch.id); }}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold shadow transition-colors cursor-pointer ${
-                                sch.status === 'Active' 
-                                  ? 'bg-amber-950/60 hover:bg-amber-900 text-amber-300 border border-amber-800' 
-                                  : 'bg-emerald-950/60 hover:bg-emerald-900 text-emerald-300 border border-emerald-800'
-                              }`}
-                            >
-                              {sch.status === 'Active' ? 'Restrict School' : 'Lift Restriction'}
-                            </button>
-                          </td>
-                          <td className="p-3.5 text-center">
-                            <button
-                              onClick={(e) => { e.stopPropagation(); handleSoftDeleteSchool(sch.id); }}
-                              className="px-3 py-1.5 bg-red-950/40 hover:bg-red-900 text-red-300 border border-red-800 rounded-lg text-xs font-semibold cursor-pointer"
-                            >
-                              Delete
-                            </button>
-                          </td>
-                        </tr>
+                       <tr
+                    key={sch.id}
+                    onClick={() => setSelectedSchoolId(sch.id)}
+                    className="hover:bg-amber-500/10 cursor-pointer transition-colors group"
+                  >
+                    <td className="p-3.5 font-mono text-amber-400 font-bold">{sch.id}</td>
+                    <td className="p-3.5 font-semibold text-white group-hover:text-amber-300 underline decoration-dotted">{sch.name}</td>
+                    <td className="p-3.5 text-gray-300">{sch.region}</td>
+                    <td className="p-3.5">
+                      {sch.portalLink ? (
+                        <div className="flex items-center gap-2 bg-emerald-950/60 border border-emerald-500/40 p-1.5 rounded-md">
+                          <a
+                            href={sch.portalLink.replace(/^(https?:\/\/localhost:\d+|^\/)/, 'https://nsuhrecords.vercel.app')}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="font-mono text-[11px] text-emerald-300 bg-emerald-900/80 hover:bg-emerald-800 hover:underline px-2 py-0.5 rounded truncate max-w-xs transition"
+                            title="Click to open link"
+                          >
+                            {sch.portalLink.replace(/^(https?:\/\/localhost:\d+|^\/)/, 'https://nsuhrecords.vercel.app')}
+                          </a>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              copyToClipboard(sch.portalLink.replace(/^(https?:\/\/localhost:\d+|^\/)/, 'https://nsuhrecords.vercel.app'));
+                            }}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-2.5 py-1 rounded text-[10px] transition shrink-0"
+                          >
+                            Copy Link
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-gray-500 italic">No link generated</span>
+                      )}
+                    </td>
+                    <td className="p-3.5 text-center">
+                      <span className={`px-2 py-1 rounded text-xs font-bold ${sch.status === 'Active' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-red-950 text-red-400 border border-red-800'}`}>
+                        {sch.status || 'Active'}
+                      </span>
+                    </td>
+                    <td className="p-3.5 text-center">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); toggleSchoolRestriction(sch.id); }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold shadow transition-colors cursor-pointer ${
+                          sch.status === 'Active'
+                            ? 'bg-amber-950/60 hover:bg-amber-900 text-amber-300 border border-amber-800'
+                            : 'bg-emerald-950/60 hover:bg-emerald-900 text-emerald-300 border border-emerald-800'
+                        }`}
+                      >
+                        {sch.status === 'Active' ? 'Restrict School' : 'Lift Restriction'}
+                      </button>
+                    </td>
+                    <td className="p-3.5 text-center">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleSoftDeleteSchool(sch.id); }}
+                        className="px-3 py-1.5 bg-red-950/40 hover:bg-red-900 text-red-300 border border-red-800 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
                       ))
                     )}
                   </tbody>
