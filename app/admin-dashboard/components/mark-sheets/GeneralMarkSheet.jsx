@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../../../../lib/supabase';
 import { getCurrentAcademicYear } from '../../../../lib/academicYear';
+
+
 import { 
   GENERAL_CLASSES_CATALOG, 
   GENERAL_SERIES_CATALOG 

@@ -10,6 +10,15 @@ import TechnicalCommercialMarkSheet from './components/mark-sheets/TechnicalComm
 import TechnicalIndustrialMarkSheet from './components/mark-sheets/TechnicalIndustrialMarkSheet';
 import SubjectCoefficientsManager from './components/SubjectCoefficientsManager';
 import TeacherAssignment from './components/TeacherAssignment';
+import SchoolSettings from './components/SchoolSettings';
+
+import BulkGeneralReportCard from '../student-dashboard/components/BulkGeneralReportCard';
+import BulkTechnicalCommercialReportCard from '../student-dashboard/components/BulkTechnicalCommercialReportCard';
+import BulkTechnicalIndustrialReportCard from '../student-dashboard/components/BulkTechnicalIndustrialReportCard';
+
+import { useAcademicConfigs } from './context/AcademicConfigsContext';
+import { getTeacherLockStatus, toggleTeacherLockStatus } from '../../lib/markLockService';
+
 
 // Cameroon Ministry of Secondary Education Official Classes, Technical & Commercial Trades, Subjects & Series Catalog
 export const GENERAL_LOWER_CLASSES = [
@@ -58,7 +67,7 @@ export const TECHNICAL_COMMERCIAL_CATALOG = [
   'Fourth Year Commercia (CAPCom)',
   'Fifth Year Commercial  (Y5Com)',
   'Lower Sixth Commercial (ProCom)',
-  'Upper Sixth Commercial (BacCom)',
+  'Upper Sixth Commercial (BaCom)',
 ];
 
 export const TECHNICAL_INDUSTRIAL_CATALOG = [
@@ -135,8 +144,7 @@ export const ALL_AVAILABLE_CLASSES = [
 export const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 // Student ID Generator: WC-GMA15739G or WC-TPA16814B
-const generateStudentId = (schoolName, section, fullName, classLevel, age, gender, academicYear) => {
-  // Dynamic school code: Takes first letter of up to 2 words
+const generateStudentId = (schoolName, section, fullName, classLevel, age, gender) => {
   const schoolCode = String(schoolName || 'SCH')
     .trim()
     .split(/\s+/)
@@ -145,10 +153,8 @@ const generateStudentId = (schoolName, section, fullName, classLevel, age, gende
     .join('')
     .toUpperCase();
 
-  // Section code: T for Technical, G for General
   const secCode = String(section || 'General Education').toUpperCase().startsWith('T') ? 'T' : 'G';
 
-  // Student name initials
   const initials = String(fullName || 'ST')
     .trim()
     .split(/\s+/)
@@ -156,26 +162,22 @@ const generateStudentId = (schoolName, section, fullName, classLevel, age, gende
     .join('')
     .toUpperCase();
 
-  // Class code: Extracts F3 directly from "Form 3 (F3)" or parses initials safely
   const rawClass = String(classLevel || 'F1');
   const bracketMatch = rawClass.match(/\(([^)]+)\)/);
-  const classCode = bracketMatch 
-    ? bracketMatch[1].toUpperCase() 
+  const classCode = bracketMatch
+    ? bracketMatch[1].toUpperCase()
     : rawClass.split(/\s+/).map(word => word[0]).join('').toUpperCase();
 
-  // Age string
   const studentAge = String(age || '15');
 
-  // Gender check: G for Female/Girl, B for Male/Boy
   const cleanGender = String(gender || '').toLowerCase();
   const genderCode = (cleanGender.includes('female') || cleanGender.includes('girl') || cleanGender.startsWith('g')) ? 'G' : 'B';
 
-  // Academic year code
-  const yearCode = String(academicYear || '2026').slice(-2);
+  // Random 2-digit suffix placed right after gender (10 - 99)
+  const randomSuffix = String(Math.floor(10 + Math.random() * 90));
 
-  return `${schoolCode}-${secCode}${initials}${classCode}${studentAge}${genderCode}${yearCode}`;
+  return `${schoolCode}-${secCode}${initials}${classCode}${studentAge}${genderCode}${randomSuffix}`;
 };
-
 // Teacher ID Generator: WC-TJO45626K or WC-GJO45626K
 const generateTeacherId = (schoolName, section, fullName, phoneNumber) => {
   const schoolCode = (schoolName || 'SCH')
@@ -242,6 +244,7 @@ export const ALL_SUBJECTS_LIST = [
   { name: "Chemistry", category: "General Core Subjects" },
   { name: "Citizenship Education / Moral Education", category: "General Core Subjects" },
   { name: "Computer Science / ICT", category: "General Core Subjects" },
+  { name: "Economics", category: "General Core Subjects" },
   { name: "Economic Geography", category: "General Core Subjects" },
   { name: "English Language", category: "General Core Subjects" },
   { name: "Literature", category: "General Core Subjects" },
@@ -275,7 +278,6 @@ export const ALL_SUBJECTS_LIST = [
   { name: "Computer-Aided Accounting", category: "Commercial Subjects" },
   { name: "Corporate Accounting", category: "Commercial Subjects" },
   { name: "Digital Marketing", category: "Commercial Subjects" },
-  { name: "Economics", category: "Commercial Subjects" },
   { name: "Entrepreneurship", category: "Commercial Subjects" },
   { name: "Family Life Education and Gerontology", category: "Commercial Subjects" },
   { name: "Food Nutrition & Health", category: "Commercial Subjects" },
@@ -370,52 +372,225 @@ export default function AdminDashboardPage() {
   const [selectedTeacherForLogs, setSelectedTeacherForLogs] = useState(null);
   const [fetchedLessonLogs, setFetchedLessonLogs] = useState([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  
-  
 
+// --- MEMBER REGISTRATION INITIAL DRAFT RECOVERY ---
+  const getInitialDraft = () => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('draft_member_registration');
+      if (saved) {
+        try { return JSON.parse(saved); } catch (e) { console.warn(e); }
+      }
+    }
+    return {};
+  };
+
+
+const [isMarkEntryAuthorized, setIsMarkEntryAuthorized] = useState(true);
+  const [isTogglingLock, setIsTogglingLock] = useState(false);
+
+  const handleToggleLock = async () => {
+    const activeSchoolId = activeSchool?.id || activeSchool?.school_id || (typeof window !== 'undefined' ? localStorage.getItem('active_school_id') : null);
+    const selectedTeacherId = selectedTeacherModal?.id || selectedTeacherForLogs?.id;
+
+    if (!selectedTeacherId || !activeSchoolId) return;
+
+    setIsTogglingLock(true);
+    const newLockState = isMarkEntryAuthorized; // If currently authorized, new lock state is true
+
+    const success = await toggleTeacherLockStatus(selectedTeacherId, activeSchoolId, newLockState);
+    if (success) {
+      setIsMarkEntryAuthorized(!newLockState);
+    }
+    setIsTogglingLock(false);
+  };
+  // Cumulative progressive calculation from actual taught logs
+  const actualTaughtLogs = fetchedLessonLogs?.filter(
+    (l) => l.lesson_content && l.lesson_content !== 'EMPTY' && l.lesson_content.trim() !== ''
+  ) || [];
+
+  const completedLogsCount = actualTaughtLogs.length;
+
+  const totalMinutesTaught = actualTaughtLogs.reduce((acc, log) => {
+    // 1. Check all log properties
+    const minutesFromLog = 
+      Number(log.period_duration_minutes) || 
+      Number(log.duration_minutes) || 
+      Number(log.duration) || 
+      (Number(log.duration_hours) ? Number(log.duration_hours) * 60 : 0) || 
+      (Number(log.hours_taught) ? Number(log.hours_taught) * 60 : 0);
+
+    // 2. Check all assignment properties
+    const minutesFromAssignment = 
+      Number(selectedTeacherForLogs?.period_duration) || 
+      Number(selectedTeacherForLogs?.duration_minutes) || 
+      (Number(selectedTeacherForLogs?.assigned_hours) ? Number(selectedTeacherForLogs.assigned_hours) * 60 : 0) || 
+      (Number(selectedTeacherForLogs?.weekly_hours) ? Number(selectedTeacherForLogs.weekly_hours) * 60 : 0) || 
+      (Number(selectedTeacherForLogs?.periods_per_week) ? Number(selectedTeacherForLogs.periods_per_week) * 60 : 0);
+
+    // 3. Fallback to standard MINSEC period (50 mins) if no database duration exists
+    const resolvedMinutes = minutesFromLog || minutesFromAssignment || 50;
+
+    return acc + resolvedMinutes;
+  }, 0);
+
+  const totalHoursTaught = (totalMinutesTaught / 60).toFixed(1);
+
+  // Supervisor Remarks State
+  const [editingRemarkId, setEditingRemarkId] = useState(null);
+  const [tempRemarkText, setTempRemarkText] = useState("");
+  const [savingRemark, setSavingRemark] = useState(false);
+  
+  // Save Supervisor Remark directly to Supabase
+  const handleSaveSupervisorRemark = async (logId) => {
+    if (!tempRemarkText.trim()) return;
+    setSavingRemark(true);
+    
+    const currentSchoolId = selectedTeacherForLogs?.school_id || (typeof schoolId !== 'undefined' ? schoolId : null) || (typeof userSchoolId !== 'undefined' ? userSchoolId : null) || activeSchool?.school_id || activeSchool?.id;
+    try {
+      const { error } = await supabase
+        .from('lesson_logs')
+        .update({ supervisor_remark: tempRemarkText.trim() })
+        .eq('id', logId)
+        .eq('school_id', currentSchoolId);
+
+      if (error) throw error;
+
+      // Update local state immediately so UI reflects the change
+      setFetchedLessonLogs((prev) =>
+        prev.map((item) =>
+          item.id === logId ? { ...item, supervisor_remark: tempRemarkText.trim() } : item
+        )
+
+      );
+      setEditingRemarkId(null);
+      setTempRemarkText("");
+    } catch (err) {
+      alert("Failed to save remark: " + err.message);
+    } finally {
+      setSavingRemark(false);
+    }
+  };
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  // Bulk Multi-Track Report Card States
+  const [bulkModalState, setBulkModalState] = useState({
+    isOpen: false,
+    trackType: '', // 'general' | 'commercial' | 'industrial'
+    activeClass: '',
+    activeTrade: 'ALL',
+    activeTerm: 'Term 1'
+  });
+
+  const handleOpenBulkReportCards = (trackType, targetClass, targetTrade = 'ALL', targetTerm = 'Term 1') => {
+    setBulkModalState({
+      isOpen: true,
+      trackType,
+      activeClass: targetClass,
+      activeTrade: targetTrade,
+      activeTerm: targetTerm
+    });
+  };
+
+  const handleCloseBulkModal = () => {
+    setBulkModalState((prev) => ({ ...prev, isOpen: false }));
+  };
+  const [schoolRegion, setSchoolRegion] = useState('');
+  const [academicYearStartDate, setAcademicYearStartDate] = useState('');
+  const [academicYearEndDate, setAcademicYearEndDate] = useState('');
+  const calculateAcademicWeek = (startDateStr, logDateStr = new Date()) => {
+  if (!startDateStr) return 1;
+
+  const start = new Date(startDateStr);
+  const logDate = new Date(logDateStr);
+
+  // Normalize times to midnight for clean day differences
+  start.setHours(0, 0, 0, 0);
+  logDate.setHours(0, 0, 0, 0);
+
+  const diffInMs = logDate - start;
+  if (diffInMs < 0) return 1; // Default to Week 1 if date is before start date
+
+  const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
+  return Math.floor(diffInDays / 7) + 1;
+};
+  // Single Source of Truth subscriptions from Context
+  const { 
+    masterSections, 
+    getClassLevelsBySection, 
+    getSeriesOrTrades 
+  } = useAcademicConfigs();
+
+  // Compute dynamic registration lists with fallbacks for form state names
+  const activeSection = selectedSection || '';
+  const activeClass = masterClass || '';
+
+  const registrationClasses = getClassLevelsBySection(activeSection);
+  const registrationTrades = getSeriesOrTrades(activeSection, activeClass);
   useEffect(() => {
     if (!selectedTeacherForLogs) return;
 
-    const loadTeacherLogs = async () => {
-      setIsLoadingLogs(true);
-      const teacherId = selectedTeacherForLogs.teacher_id || selectedTeacherForLogs.id;
-      const subjectName = selectedTeacherForLogs.subject;
-      const cacheKey = `nsuh_logs_${teacherId}_${subjectName}`;
+  const loadTeacherLogs = async () => {
+    setIsLoadingLogs(true);
+    
+    const rawTeacherName = selectedTeacherForLogs?.teacher_name || selectedTeacherForLogs?.name || selectedTeacherForLogs?.teacher || '';
+    const teacherName = typeof rawTeacherName === 'string' ? rawTeacherName.trim() : String(rawTeacherName?.name || rawTeacherName || '').trim();
+    const teacherId = selectedTeacherForLogs?.teacher_id || selectedTeacherForLogs?.id || null;
+    const subjectName = String(selectedTeacherForLogs?.subject || selectedTeacherForLogs?.subject_name || '').trim();
+    const targetClass = String(selectedTeacherForLogs?.classLevel || selectedTeacherForLogs?.class_level || '').trim();
+    const cacheKey = `nsuh_logs_${teacherId || teacherName}_${subjectName}`;
 
-      try {
-        if (navigator.onLine) {
-          const { data, error } = await supabase
-            .from('lesson_logs')
-            .select('*')
-            .eq('teacher_id', teacherId)
-            .eq('subject_name', subjectName)
-            .order('created_at', { ascending: true });
+    try {
+      if (navigator.onLine) {
+        let query = supabase
+          .from('lesson_logs')
+          .select('*')
+          .ilike('subject', subjectName);
 
-          if (!error && data) {
-            setFetchedLessonLogs(data);
-            localStorage.setItem(cacheKey, JSON.stringify(data));
-            setIsLoadingLogs(false);
-            return;
+        if (teacherId && teacherName) {
+          query = query.or(`teacher_id.eq.${teacherId},teacher_name.ilike.%${teacherName}%`);
+        } else if (teacherName) {
+          query = query.ilike('teacher_name', `%${teacherName}%`);
+        } else if (teacherId) {
+          query = query.eq('teacher_id', teacherId);
+        }
+
+        const { data, error } = await query.order('created_at', { ascending: true });
+
+        if (error) {
+          console.error('Error fetching lesson logs:', error);
+        }
+
+        if (data && data.length > 0) {
+          let finalLogs = data;
+          if (targetClass) {
+            const filtered = data.filter(log => {
+              const logClass = (log.classLevel || log.class_level || '').trim().toLowerCase();
+              return logClass === targetClass.toLowerCase() || logClass.includes(targetClass.toLowerCase());
+            });
+            if (filtered.length > 0) finalLogs = filtered;
           }
-        }
-      } catch (err) {
-        console.warn("Online fetch failed, loading offline logs:", err);
-      }
 
-      // Offline Fallback
-      const localData = localStorage.getItem(cacheKey);
-      if (localData) {
-        try {
-          setFetchedLessonLogs(JSON.parse(localData));
-        } catch (e) {
-          setFetchedLessonLogs([]);
+          setFetchedLessonLogs(finalLogs);
+          localStorage.setItem(cacheKey, JSON.stringify(finalLogs));
+          setIsLoadingLogs(false);
+          return;
         }
-      } else {
+      }
+    } catch (err) {
+      console.warn('Online fetch failed, checking offline cache:', err);
+    }
+
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      try {
+        setFetchedLessonLogs(JSON.parse(cached));
+      } catch (e) {
         setFetchedLessonLogs([]);
       }
-      setIsLoadingLogs(false);
-    };
+    } else {
+      setFetchedLessonLogs([]);
+    }
+    setIsLoadingLogs(false);
+  };
 
     loadTeacherLogs();
   }, [selectedTeacherForLogs]);
@@ -484,37 +659,38 @@ const [schoolMotto, setSchoolMotto] = useState('');
   
 
   // Generates a pre-formatted Excel template inheriting active class context
-  const handleDownloadBulkTemplate = () => {
-    if (typeof window === 'undefined' || !window.XLSX) {
-      alert('Excel library loading. Please try again in a moment.');
-      return;
+  const handleDownloadBulkTemplate = async () => {
+    try {
+      const XLSX = await import('xlsx');
+
+      const sampleData = [
+        {
+          fullName: "Taku Cecilia",
+          gender: "Female",
+          dob: "2009-05-14",
+          residence: "Mankon",
+          guardian_name: "Parent",
+          guardian_phone: "682491189"
+        },
+        {
+          fullName: "Fuh Gerald",
+          gender: "Male",
+          dob: "2008-08-20",
+          residence: "Ntambeng",
+          guardian_name: "Parent",
+          guardian_phone: "682491189"
+        }
+      ];
+
+      const worksheet = XLSX.utils.json_to_sheet(sampleData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Student Registration");
+
+      const cleanClassName = (classLevel || 'Class').replace(/[^a-zA-Z0-9]/g, '_');
+      XLSX.writeFile(workbook, `${cleanClassName}_Bulk_Registration_Template.xlsx`);
+    } catch (error) {
+      alert("Failed to download template. Please try again.");
     }
-    
-    const sampleData = [
-      {
-        "full_name": "Taku Cecilia",
-        "gender": "Female",
-        "dob": "2009-05-14",
-        "residence": "Mankon",
-        "guardian_name": "Parent",
-        "guardian_phone": "682491189"
-      },
-      {
-        "full_name": "Fuh Gerald",
-        "gender": "Male",
-        "dob": "2008-08-20",
-        "residence": "Bafut",
-        "guardian_name": "Parent",
-        "guardian_phone": "682491189"
-      }
-    ];
-
-    const worksheet = window.XLSX.utils.json_to_sheet(sampleData);
-    const workbook = window.XLSX.utils.book_new();
-    window.XLSX.utils.book_append_sheet(workbook, worksheet, "Student Registration");
-
-    const cleanClassName = (classLevel || 'Class').replace(/[^a-zA-Z0-9]/g, '_');
-    window.XLSX.writeFile(workbook, `${cleanClassName}_Bulk_Registration_Template.xlsx`);
   };
 
   // Read uploaded Excel file and parse rows into state
@@ -525,9 +701,10 @@ const [schoolMotto, setSchoolMotto] = useState('');
     }
 
     setIsProcessingBulk(true);
+
     try {
+      const XLSX = await import('xlsx');
       const data = await bulkFile.arrayBuffer();
-      // cellDates: true converts Excel serial values into standard date strings
       const workbook = XLSX.read(data, { type: 'array', cellDates: true });
       const firstSheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[firstSheetName];
@@ -539,8 +716,9 @@ const [schoolMotto, setSchoolMotto] = useState('');
         return;
       }
 
-      setBulkParsedData(jsonRows);
-      alert(`Successfully parsed ${jsonRows.length} student records. Ready for preview!`);
+      const normalizedData = jsonRows.map(row => normalizeStudentRow(row));
+      setBulkParsedData(normalizedData);
+      alert(`Successfully parsed ${normalizedData.length} student records. Ready for preview!`);
     } catch (err) {
       alert("Error parsing file: " + err.message);
     } finally {
@@ -548,17 +726,75 @@ const [schoolMotto, setSchoolMotto] = useState('');
     }
   };
 
-  // Helper to normalize data and calculate age dynamically
+
+  // Check if a student already exists in the system
+const isDuplicateStudent = (newStudent, existingStudentsList = []) => {
+  if (!newStudent || !Array.isArray(existingStudentsList) || existingStudentsList.length === 0) return false;
+
+  const newName = String(newStudent.fullName || newStudent.full_name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const newDob = String(newStudent.dob || newStudent.date_of_birth || '').trim();
+  const newPhone = String(newStudent.guardian_phone || newStudent.phone || newStudent.guardianPhone || '').replace(/\D/g, '');
+
+  if (!newName) return false;
+
+  return existingStudentsList.some(student => {
+    if (!student) return false;
+
+    const existingName = String(student.full_name || student.fullName || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const existingDob = String(student.dob || student.date_of_birth || '').trim();
+    const existingPhone = String(student.guardian_phone || student.phone || student.guardianPhone || '').replace(/\D/g, '');
+
+    const sameName = newName === existingName;
+    const sameDob = newDob && existingDob && newDob === existingDob;
+    const samePhone = newPhone && existingPhone && newPhone === existingPhone;
+
+    // Match if same Name AND (same DOB OR same Phone OR no DOB/Phone present to compare)
+    return sameName && (sameDob || samePhone || (!newDob && !newPhone) || (!existingDob && !existingPhone));
+  });
+};
+
+ // Helper to normalize data and calculate age dynamically
   const normalizeStudentRow = (row) => {
-    const rawDob = row.dob || row["Date of Birth"] || row["DOB"] || "";
-    let birthDateStr = rawDob;
-    if (rawDob instanceof Date) {
+    // 1. Extract Full Name safely
+const studentName = row["Full Name"] || row["FULL NAME"] || row["Full Name "] || row.fullName || row.full_name || "";
+    // 2. Extract and format Date of Birth
+    const rawDob = row.dob || row.date_of_birth || row["Date of Birth"] || row["DOB"] || "";
+    let birthDateStr = "";
+
+    if (rawDob instanceof Date && !isNaN(rawDob.getTime())) {
       birthDateStr = rawDob.toISOString().split('T')[0];
+    } else if (typeof rawDob === 'string' && rawDob.trim() !== '') {
+      const cleanDob = rawDob.trim();
+      const parts = cleanDob.split(/[\/\-\.]/);
+      
+      if (parts.length === 3) {
+        if (parts[0].length === 4) {
+          // YYYY-MM-DD
+          birthDateStr = `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+        } else if (parts[2].length === 4) {
+          // DD/MM/YYYY
+          birthDateStr = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+        } else if (parts[2].length === 2) {
+          // DD/MM/YY (e.g. 14/05/10 -> 2010-05-14)
+          const fullYear = parseInt(parts[2], 10) > 30 ? `19${parts[2]}` : `20${parts[2]}`;
+          birthDateStr = `${fullYear}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+        }
+      } else {
+        birthDateStr = cleanDob;
+      }
+    } else if (typeof rawDob === 'number') {
+      // Excel serial date integer conversion
+      const excelEpoch = new Date(1899, 11, 30);
+      const parsedDate = new Date(excelEpoch.getTime() + rawDob * 86400000);
+      if (!isNaN(parsedDate.getTime())) {
+        birthDateStr = parsedDate.toISOString().split('T')[0];
+      }
     }
 
+    // 3. Calculate Age
     let calculatedAge = row.age || "";
     if (birthDateStr) {
-      const birthYear = new Date(birthDateStr).getFullYear();
+      const birthYear = parseInt(birthDateStr.split('-')[0], 10);
       const currentYear = new Date().getFullYear();
       if (!isNaN(birthYear)) {
         calculatedAge = String(currentYear - birthYear);
@@ -566,24 +802,20 @@ const [schoolMotto, setSchoolMotto] = useState('');
     }
 
     const guardianPhone = String(row.guardian_phone || row["Guardian Phone"] || row.phone || "");
-
-    return {
-      full_name: row.full_name || row["Full Name"] || "",
-      gender: row.gender || row["Gender"] || "",
-      dob: birthDateStr,
-      age: calculatedAge,
-      residence: row.residence || row["Residence"] || "",
-      guardian_name: row.guardian_name || row["Guardian Name"] || "Parent",
-      guardian_phone: guardianPhone,
-      phone: guardianPhone,
-      section: section || "",
-      class_level: classLevel || "",
-      trade_series: (typeof tradeSeries !== 'undefined' ? tradeSeries : (typeof masterClass !== 'undefined' ? masterClass : "")) || ""
-    };
+return {
+  fullName: studentName,
+  gender: row.gender || row["Gender"] || "",
+  dob: birthDateStr,
+  age: calculatedAge,
+  residence: row.residence || row["Residence"] || "",
+  guardian_name: row.guardian_name || row["Guardian Name"] || "Parent",
+  guardian_phone: guardianPhone,
+  academic_year: getCurrentAcademicYear(),
+};
   };
 
   // Process rows and update uploadProgress percentage dynamically
-  const handleExecuteBulkImport = async () => {
+const handleExecuteBulkImport = async () => {
     if (!bulkParsedData || bulkParsedData.length === 0) {
       alert("No student data available to import.");
       return;
@@ -592,55 +824,139 @@ const [schoolMotto, setSchoolMotto] = useState('');
     setIsProcessingBulk(true);
     setUploadProgress(0);
 
+    const targetSchoolId = activeSchool?.school_id || activeSchool?.id;
+    const schoolName = activeSchool?.school_name || activeSchool?.name || "School";
+    const targetClass = classLevel || "Form 1A (F1A)";
+    const targetSection = section || "General Education";
+    const currentAcademicYear = getCurrentAcademicYear();
+
     const total = bulkParsedData.length;
     let successCount = 0;
+    let skippedNames = [];
 
     for (let i = 0; i < total; i++) {
-      const studentPayload = normalizeStudentRow(bulkParsedData[i]);
-      
-      const { error } = await supabase.from('students').insert([studentPayload]);
-      
-      if (!error) {
-        successCount++;
+      const rawStudent = bulkParsedData[i];
+      const normalized = normalizeStudentRow(rawStudent);
+
+      // Skip if student already exists in local state
+      if (isDuplicateStudent(normalized, studentsList)) {
+        console.warn(`Skipping duplicate student: ${normalized.fullName}`);
+        skippedNames.push(normalized.fullName);
+        setUploadProgress(Math.round(((i + 1) / total) * 100));
+        continue;
       }
 
-      // Update progress percentage
-      const progressPercent = Math.round(((i + 1) / total) * 100);
-      setUploadProgress(progressPercent);
+      // Generate unique student ID with random 2-digit suffix
+      const generatedCode = generateStudentId(
+        schoolName,
+        targetSection,
+        normalized.fullName,
+        targetClass,
+        normalized.age,
+        normalized.gender
+      );
+
+      const studentPayload = {
+        ...normalized,
+        unique_code: generatedCode,
+        school_id: targetSchoolId,
+        academic_year: currentAcademicYear,
+        section: targetSection,
+        classLevel: targetClass,
+        trades_series: (typeof tradeSeries !== 'undefined' && tradeSeries) ? tradeSeries : ((typeof masterClass !== 'undefined' && masterClass) ? masterClass : "N/A")
+      };
+
+      const { data, error } = await supabase.from('students').insert([studentPayload]).select();
+
+      if (error) {
+        console.error("Supabase insert error for row", i, error?.message || error?.details || JSON.stringify(error));
+      } else {
+        successCount++;
+        if (data && data.length > 0 && typeof setStudentsList === 'function') {
+          setStudentsList(prev => [data[0], ...prev]);
+        }
+      }
+
+      setUploadProgress(Math.round(((i + 1) / total) * 100));
     }
 
-    alert(`Bulk Import Complete! ${successCount} of ${total} students successfully registered.`);
+    // Display exact warning message if duplicates are skipped
+    let feedbackMsg = "";
+    if (skippedNames.length > 0) {
+      const formattedNames = skippedNames.join(", ");
+      feedbackMsg = `It seems like "${formattedNames}" ${skippedNames.length === 1 ? 'has' : 'have'} already been registered. Skipped existing student(s) and uploaded new names (${successCount} registered successfully).`;
+    } else {
+      feedbackMsg = `Bulk Import Complete! ${successCount} of ${total} students registered successfully.`;
+    }
+
+    if (typeof setSuccessMessage === 'function') {
+      setSuccessMessage(feedbackMsg);
+    } else if (typeof setMessage === 'function') {
+      setMessage(feedbackMsg);
+    } else {
+      alert(feedbackMsg);
+    }
+
+    if (typeof fetchStudents === 'function') await fetchStudents();
     setIsProcessingBulk(false);
   };
-const handleSaveSchoolDetails = async () => {
-    const currentSchoolId = activeSchool?.id || activeSchool?.school_id || session?.user?.user_metadata?.school_id;
-    
-    if (!currentSchoolId) {
-      alert("School ID missing. Please refresh or select a school.");
-      return;
-    }
 
-    const payload = {
-      school_id: currentSchoolId,
-      name: activeSchool?.name || '',
-      logo_url: typeof schoolLogo !== 'undefined' ? schoolLogo : '',
-      motto: schoolMotto,
-      contact_line: schoolContact,
-      official_email: schoolEmail,
-      address_location: typeof schoolLocation !== 'undefined' ? schoolLocation : '',
-      rules_and_regulations: schoolRules,
-      rules_file_url: rulesFileUrl,
-      updated_at: new Date().toISOString()
-    };
 
-    const { error } = await supabase
-      .from('school_details')
-      .upsert(payload, { onConflict: 'school_id' });
+const handleSaveSchoolDetails = async (e) => {
+    if (e) e.preventDefault();
 
-    if (error) {
-      alert('Error saving school details: ' + error.message);
-    } else {
-      alert('School parameters updated successfully!');
+    try {
+      const targetSchoolId = activeSchool?.school_id || activeSchool?.id;
+
+      if (!targetSchoolId) {
+        if (typeof setDeleteBanner === 'function') {
+          setDeleteBanner({ type: 'error', message: 'Error: Active school ID not found.' });
+        }
+        return;
+      }
+
+      const payload = {
+        school_id: targetSchoolId,
+        name: activeSchool?.name || '',logo_url: typeof schoolLogo !== 'undefined' ? schoolLogo : (activeSchool?.logo_url || null),
+        motto: typeof schoolMotto !== 'undefined' ? schoolMotto : (activeSchool?.motto || ''),
+        region: typeof schoolRegion !== 'undefined' ? schoolRegion : (activeSchool?.region || ''),
+        contact_line: typeof schoolContact !== 'undefined' ? schoolContact : (activeSchool?.contact_line || ''),
+        official_email: typeof schoolEmail !== 'undefined' ? schoolEmail : (activeSchool?.official_email || ''),
+        rules_and_regulations: typeof schoolRules !== 'undefined' ? schoolRules : (activeSchool?.rules_and_regulations || ''),
+        rules_file_url: typeof rulesFileUrl !== 'undefined' ? rulesFileUrl : (activeSchool?.rules_file_url || ''),
+        academic_year_start_date: typeof academicYearStartDate !== 'undefined' ? academicYearStartDate : null,
+        academic_year_end_date: typeof academicYearEndDate !== 'undefined' ? academicYearEndDate : null,
+        updated_at: new Date().toISOString()
+      };
+
+      // Perform upsert
+      let { error } = await supabase
+        .from('school_details')
+        .upsert(payload, { onConflict: 'school_id' });
+
+      // Retry once automatically if network flickered
+      if (error && error.message?.includes('Failed to fetch')) {
+        await new Promise((res) => setTimeout(res, 500));
+        const retryResult = await supabase
+          .from('school_details')
+          .upsert(payload, { onConflict: 'school_id' });
+        error = retryResult.error;
+      }
+
+      if (error) {
+        if (typeof setDeleteBanner === 'function') {
+          setDeleteBanner({ type: 'error', message: `Save error: ${error.message}` });
+        }
+      } else {
+        if (typeof setDeleteBanner === 'function') {
+          setDeleteBanner({ type: 'success', message: 'School parameters updated successfully!' });
+          setTimeout(() => setDeleteBanner(null), 4000);
+        }
+      }
+    } catch (err) {
+      if (typeof setDeleteBanner === 'function') {
+        setDeleteBanner({ type: 'error', message: `Network timeout. Please click save again.` });
+      }
     }
   };
 const handleEditTeacherSchedule = (teacher) => {
@@ -656,7 +972,6 @@ const handleEditTeacherSchedule = (teacher) => {
     setSelectedTeacherSubjects(teacher.subjects);
   }
   if (teacher?.schedules) {
-    setSubjectSchedules(teacher.schedules);
     setSchedulerData(teacher.schedules);
   }
   // Close preview modal & switch tab
@@ -708,18 +1023,28 @@ const directSchoolName = (rawName && rawName.toLowerCase() !== 'assigned school'
       // Fetch school details before returning
       const { data: detailsData } = await supabase
         .from('school_details')
-        .select('logo_url, motto, contact_line, official_email, address_location, rules_and_regulations, rules_file_url')
+        .select('logo_url, motto, region, contact_line, official_email, address_location, rules_and_regulations, rules_file_url, academic_year_start_date, academic_year_end_date')
         .eq('school_id', targetId)
         .maybeSingle();
 
       if (detailsData) {
         if (detailsData.logo_url) setSchoolLogo(detailsData.logo_url);
         if (detailsData.motto) setSchoolMotto(detailsData.motto);
+        if (detailsData.region) setSchoolRegion(detailsData.region);
         if (detailsData.contact_line) setSchoolContact(detailsData.contact_line);
         if (detailsData.official_email) setSchoolEmail(detailsData.official_email);
         if (detailsData.address_location && typeof setSchoolLocation !== 'undefined') setSchoolLocation(detailsData.address_location);
         if (detailsData.rules_and_regulations && typeof setSchoolRules !== 'undefined') setSchoolRules(detailsData.rules_and_regulations);
         if (detailsData.rules_file_url && typeof setRulesFileUrl !== 'undefined') setRulesFileUrl(detailsData.rules_file_url);
+        if (detailsData.academic_year_start_date) setAcademicYearStartDate(detailsData.academic_year_start_date);
+        if (detailsData.academic_year_end_date) setAcademicYearEndDate(detailsData.academic_year_end_date);
+      // Sync latest from network back into localStorage
+        if (targetId) {
+        localStorage.setItem(`school_dates_${targetId}`, JSON.stringify({
+        academicYearStartDate: detailsData.academic_year_start_date || '',
+        academicYearEndDate: detailsData.academic_year_end_date || ''
+  }));
+}
       }
 
       return;
@@ -806,85 +1131,26 @@ const verifySchoolIdentity = async (schoolId, expectedSchoolName) => {
 };
 
  const [printSection, setPrintSection] = useState('All');
-const [printClass, setPrintClass] = useState('All');
-const [printTrade, setPrintTrade] = useState('All');
-const [searchQuery, setSearchQuery] = useState('');
+ const [printClass, setPrintClass] = useState('All');
+ const [printTrade, setPrintTrade] = useState('All');
+ const [searchQuery, setSearchQuery] = useState('');
  const [selectedStudent, setSelectedStudent] = useState(null);
- const [selectedTeacherModal, setSelectedTeacherModal] = useState(null);
- const [teacherPhoto, setTeacherPhoto] = useState(null);
+ const [selectedTeacherModal, setSelectedTeacherModal] = useState(null); useEffect(() => {
+ const activeSchoolId = activeSchool?.id || activeSchool?.school_id || (typeof window !== 'undefined' ? localStorage.getItem('active_school_id') : null);
+ const selectedTeacherId = selectedTeacherModal?.id || selectedTeacherForLogs?.id;
+
+    if (selectedTeacherId && activeSchoolId) {
+      getTeacherLockStatus(selectedTeacherId, activeSchoolId).then((isLocked) => {
+        setIsMarkEntryAuthorized(!isLocked);
+      });
+    }
+  }, [selectedTeacherModal, selectedTeacherForLogs, activeSchool]);
+
 const [teacherPhotoPreview, setTeacherPhotoPreview] = useState(null);
   // Real Phone Time State
   const [currentTime, setCurrentTime] = useState(null);
   const [schedulerData, setSchedulerData] = useState({});
-const startTeacherCamera = async () => {
-  setIsCameraActive(true);
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-    if (videoRef.current) {
-      videoRef.current.srcObject = stream;
-    }
-  } catch (err) {
-    alert('Unable to access camera. Please check permissions.');
-    setIsCameraActive(false);
-  }
-};
 
-const captureTeacherPhoto = () => {
-  const video = videoRef.current;
-  if (!video) return;
-  const canvas = document.createElement('canvas');
-  canvas.width = video.videoWidth || 640;
-  canvas.height = video.videoHeight || 480;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  const dataUrl = canvas.toDataURL('image/png');
-
-  
-  setTeacherPhotoPreview(dataUrl);
-
-  const stream = video.srcObject;
-  if (stream) {
-    stream.getTracks().forEach(track => track.stop());
-  }
-  setIsCameraActive(false);
-};
-
-const handleTeacherFileUpload = (e) => {
-  const file = e.target.files[0];
-  if (file) {
-    setTeacherPhoto(file); 
-    const reader = new FileReader();
-    reader.onloadend = () => setTeacherPhotoPreview(reader.result); // Updates line 820 state
-    reader.readAsDataURL(file);
-  }
-};
-
-const handleSchedulerRowChange = (subject, rIdx, field, value) => {
-  // Update schedulerData override state
-  setSchedulerData((prevData) => {
-    const currentSubjectRows = prevData?.[subject] ? [...prevData[subject]] : [];
-    const targetRow = currentSubjectRows[rIdx] ? { ...currentSubjectRows[rIdx] } : {};
-    targetRow[field] = value;
-    currentSubjectRows[rIdx] = targetRow;
-    return {
-      ...prevData,
-      [subject]: currentSubjectRows,
-    };
-  });
-
-  // Also update subjectsSchedules so save handlers read the new time values
-  if (typeof setSubjectSchedules === 'function') {
-    setSubjectSchedules((prev) => {
-      const list = [...((prev && prev[subject]) || [])];
-      const existingRow = list[rIdx] || { className: '', day: '', startTime: '', endTime: '' };
-      list[rIdx] = {
-        ...existingRow,
-        [field]: value
-      };
-      return { ...prev, [subject]: list };
-    });
-  }
-};
   const [editingStudent, setEditingStudent] = useState(null);
 const [editFormData, setEditFormData] = useState({});
 const [studentToDelete, setStudentToDelete] = useState(null);
@@ -927,6 +1193,7 @@ if (!editFormData?.residence || !editFormData.residence.trim()) {
   // 1. Save changes to Supabase database
   const { error } = await supabase
     .from('students')
+    .eq('school_id', currentSchoolId)
     .update(payloadToSave)
     .eq('id', editFormData.id);
 
@@ -1088,13 +1355,25 @@ if (!active.has_onboarded) {
       fetchStudentsFromSupabase();
     }
   }, [activeSchool?.school_id]);
+  // --- Registration Form State with LocalStorage Draft Auto-Recovery ---
+  const getRegistrationDraft = () => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('draft_member_registration');
+      if (saved) {
+        try { return JSON.parse(saved); } catch (e) { console.warn(e); }
+      }
+    }
+    return {};
+  };
+
+  const draft = getRegistrationDraft();
   // Registration Form State
-  const [regRole, setRegRole] = useState('student');
+  const [regRole, setRegRole] = useState(draft.regRole || 'student');
   
   // Common Member / Student Form Credentials
-  const [fullName, setFullName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [residence, setResidence] = useState('');
+  const [fullName, setFullName] = useState(draft.fullName || '');
+  const [phone, setPhone] = useState(draft.phone || '');
+  const [residence, setResidence] = useState(draft.residence || '');
   const [picturePreview, setPicturePreview] = useState(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const videoRef = useRef(null);
@@ -1112,18 +1391,35 @@ if (!active.has_onboarded) {
   };
 
   // Student Specific State Fields
-  const [section, setSection] = useState('General Education'); 
-  const [classLevel, setClassLevel] = useState(GENERAL_CLASSES_CATALOG[0]); 
+  const [section, setSection] = useState(draft.section || 'General Education'); 
+  const [classLevel, setClassLevel] = useState(draft.classLevel || GENERAL_CLASSES_CATALOG[0]);
   const [gender, setGender] = useState('Male');
   const [age, setAge] = useState('');
   const [dob, setDob] = useState('');
   const [guardianName, setGuardianName] = useState('');
   const [guardianPhone, setGuardianPhone] = useState('');
+
+  // --- Auto-save registration draft on every input change ---
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const currentDraft = {
+        regRole,
+        fullName,
+        phone,
+        residence,
+        dob,
+        guardianName,
+        guardianPhone,
+        section,
+        classLevel
+      };
+      localStorage.setItem('draft_member_registration', JSON.stringify(currentDraft));
+    }
+  }, [regRole, fullName, phone, residence, dob, guardianName, guardianPhone, section, classLevel]);
   const [medicalHistory, setMedicalHistory] = useState('');
   const [selectedTechnicalSubject, setSelectedTechnicalSubject] = useState(
   ALL_SUBJECTS_LIST.find((s) => s.category === "Industrial Subjects")?.name || ''
 );
-
   // Other School Personnel Staff Registration Fields (Bursar, Supervisor, Discipline Master, Principal)
   const [staffEmail, setStaffEmail] = useState('');
   const [staffResidence, setStaffResidence] = useState('');
@@ -1222,14 +1518,15 @@ if (!active.has_onboarded) {
 
       // 2. LIVE FETCH FROM SUPABASE 'teachers' AND 'students' TABLES
       try {
-        const [studentsRes, teachersRes] = await Promise.all([
-          supabase.from('students').select('*').eq('school_id', schoolIdToUse),
-          supabase.from('teachers').select('*').eq('school_id', schoolIdToUse)
-          
-        ]);
-
-        if (studentsRes.error) console.error('Students fetch error:', studentsRes.error);
-        if (teachersRes.error) console.error('Teachers fetch error:', teachersRes.error);
+        
+const [studentsRes, teachersRes, personnelRes] = await Promise.all([
+  supabase.from('students').select('*').eq('school_id', schoolIdToUse),
+  supabase.from('teachers').select('*').eq('school_id', schoolIdToUse),
+  supabase.from('school_personnel').select('*').eq('school_id', schoolIdToUse)
+]);
+        // Log as warnings instead of errors so Next.js overlay does not block UI
+      if (studentsRes.error) console.warn('Students fetch notice:', studentsRes.error);
+      if (teachersRes.error) console.warn('Teachers fetch notice:', teachersRes.error);
 
         if (studentsRes.data) {
           setStudentsList(studentsRes.data);
@@ -1533,48 +1830,40 @@ const handleExportPDF = async (exportType = 'all') => {
     // 3. Official Header Metadata
     let currentY = 13;
 
-    if (tenantSchoolName) {
-      // Primary Active School Name (Forest Green, Bold)
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(15);
-      doc.setTextColor(4, 80, 42); 
-      doc.text(String(tenantSchoolName).toUpperCase(), 105, currentY, { align: 'center' });
-      currentY += 5;
+    // 1. Evaluate Academic Year Safely
+    const academicYearVal = typeof getCurrentAcademicYear === 'function' 
+      ? getCurrentAcademicYear() 
+      : (typeof currentAcademicYear !== 'undefined' ? currentAcademicYear : "2026/2027");
 
-      // Decorative Divider Line
-      doc.setDrawColor(4, 80, 42);
-      doc.setLineWidth(0.5);
-      doc.line(20, currentY, 190, currentY);
-      currentY += 6;
+    // 2. Main Institution Header
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.setTextColor(4, 80, 42); // Forest Green
+    doc.text(String(tenantSchoolName || 'DEVELOPPER TEST INSTITUTE').toUpperCase(), 105, currentY, { align: 'center' });
+    currentY += 5;
 
-      // Document Title Subheader
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(10);
-      doc.setTextColor(51, 65, 85); 
-      doc.text("OFFICIAL STUDENT ROSTER", 105, currentY, { align: 'center' });
-      currentY += 5;
-    } else {
-      // Fallback Header if no tenant name is present
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(15);
-      doc.setTextColor(4, 80, 42);
-      doc.text("OFFICIAL STUDENT ROSTER", 105, currentY, { align: 'center' });
-      currentY += 6;
-    }
+    // Decorative Accent Line
+    doc.setDrawColor(4, 80, 42);
+    doc.setLineWidth(0.6);
+    doc.line(20, currentY, 190, currentY);
+    currentY += 6;
 
-    // Dynamic Academic Year & Filter Context
+    // Document Subtitle
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(30, 41, 59); // Slate Gray
+    const documentTitle = exportType === 'classList' ? 'OFFICIAL STUDENT CLASS ROSTER' : 'STUDENT DIRECTORY REGISTRATION LIST';
+    doc.text(documentTitle, 105, currentY, { align: 'center' });
+    currentY += 5;
+
+    // Academic Year & Metadata Bar
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(8.5);
+    doc.setFontSize(9);
     doc.setTextColor(71, 85, 105);
 
-    if (activeAcademicYear) {
-      doc.text(`Academic Year: $getCurrentAcademicYear()`, 105, currentY, { align: 'center' });
-      currentY += 5;
-    }
-
-    let subtitle = `Section: ${printSection}  |  Class: ${printClass}`;
-    if (printTrade !== 'All') subtitle += `  |  Trade/Series: ${printTrade}`;
-    doc.text(subtitle, 105, currentY, { align: 'center' });
+    const subMetaData = `ACADEMIC YEAR: ${academicYearVal}   |   SECTION: ${printSection || 'All'}   |   CLASS: ${printClass || 'All'}${printTrade && printTrade !== 'All' && printTrade !== 'All Trades / Series' ? `   |   SERIES/TRADE: ${printTrade}` : ''}`;
+    doc.text(subMetaData, 105, currentY, { align: 'center' });
+    currentY += 6;
 
     // 3. Render Table
     if (exportType === 'classList') {
@@ -1629,7 +1918,21 @@ const handleExportPDF = async (exportType = 'all') => {
       ? `${titleParts.join('_').replace(/[^a-zA-Z0-9_-]/g, '_')}_${exportType === 'classList' ? 'Roster' : 'Full_List'}.pdf`
       : `Student_Directory_${exportType}.pdf`;
 
-    doc.save(fileName);
+    // Anchor Download for Desktop & Mobile Browsers
+    const pdfBlob = doc.output('blob');
+    const blobUrl = URL.createObjectURL(pdfBlob);
+
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.href = blobUrl;
+    downloadAnchor.download = fileName;
+    downloadAnchor.style.display = 'none';
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+
+    setTimeout(() => {
+      document.body.removeChild(downloadAnchor);
+      URL.revokeObjectURL(blobUrl);
+    }, 1000);
   };
 
   const handlePrint = () => {
@@ -2151,19 +2454,11 @@ const handleUpdatePersonnel = async (e) => {
 
     alert(`${personName} deleted successfully!`);
 };
+  
   const getAvailableSubjects = () => {
-    const general = ALL_SUBJECTS_LIST
-      .filter((s) => s.category === "General Core Subjects")
-      .map((s) => s.name);
-
-    const commercial = ALL_SUBJECTS_LIST
-      .filter((s) => s.category === "Commercial Subjects")
-      .map((s) => s.name);
-
-    const industrial = ALL_SUBJECTS_LIST
-      .filter((s) => s.category === "Industrial Subjects")
-      .map((s) => s.name);
-
+  const general = [...customSubjects, ...ALL_SUBJECTS_LIST.filter(s => s.category === "General Core Subjects").map(s => s.name)];
+  const commercial = [...customSubjects, ...ALL_SUBJECTS_LIST.filter(s => s.category === "Commercial Subjects").map(s => s.name)];
+  const industrial = [...customSubjects, ...ALL_SUBJECTS_LIST.filter(s => s.category === "Industrial Subjects").map(s => s.name)];
     switch (teacherSection) {
       case 'General':
         return general;
@@ -2176,441 +2471,7 @@ const handleUpdatePersonnel = async (e) => {
         return [...general, ...commercial, ...industrial];
     }
   };
-  // Handle Toggle Subject & Initialize default schedule rows
-  const handleSubjectToggle = (sub, checked) => {
-    let updatedSubjects;
-    if (checked) {
-      updatedSubjects = [...selectedTeacherSubjects, sub];
-      setSubjectSchedules(prev => ({
-        ...prev,
-        [sub]: [
-          { className: ALL_AVAILABLE_CLASSES[0], day: 'Monday', startTime: '07:30 AM', endTime: '09:00 AM' }
-        ]
-      }));
-    } else {
-      updatedSubjects = selectedTeacherSubjects.filter(s => s !== sub);
-      setSubjectSchedules(prev => {
-        const copy = { ...prev };
-        delete copy[sub];
-        return copy;
-      });
-    }
-    setSelectedTeacherSubjects(updatedSubjects);
-  };
-
-  // Helper alias to avoid scope confusion
-  const subjectSchedules = subjectClassSchedules;
-  const setSubjectSchedules = setSubjectClassSchedules;
-
-  // Add another class session row for a particular subject
- const addClassRowToSubject = (subject) => {
-    setSubjectSchedules(prev => ({
-      ...prev,
-      [subject]: [
-        ...(prev[subject] || []),
-{ className: teacherSection === 'Technical Commercial(STT)' ? 'First Year Commercial (Y1Com)' : teacherSection === 'Technical Industrial(IND)' ? 'First Year Industrial (Y1Ind)' : 'Form 1A (F1A)', day: 'Monday', startTime: '07:30 AM', endTime: '09:00 AM' }
-      ]
-    }));
-  };
-
-  // Remove a class session row for a subject
-  const removeClassRowFromSubject = (subject, index) => {
-    setSubjectSchedules(prev => {
-      const list = [...(prev[subject] || [])];
-      list.splice(index, 1);
-      return { ...prev, [subject]: list };
-    });
-  };
-
-  // Update specific class schedule row values for a teacher's subject
-  const handleScheduleRowChange = (subject, index, field, value) => {
-    // 1. Update subjectSchedules
-    setSubjectSchedules((prev) => {
-      const list = [...(prev[subject] || [])];
-      const defaultClass = teacherSection === 'Technical Commercial(STT)' || teacherSection === 'Technical Commercial' ? 'First Year Commercial (Y1Com)' : teacherSection === 'Technical Industrial(IND)' || teacherSection === 'Technical Industrial' ? 'First Year Industrial (Y1Ind)' : 'Form 1A (F1A)';
-const existingRow = list[index] || { className: defaultClass, day: '', startTime: '', endTime: '' };
-list[index] = {
-  ...existingRow,
-  [field]: value
-};
-return { ...prev, [subject]: list };
-    });
-
-    // 2. Update schedulerData to keep UI in sync
-    if (typeof setSchedulerData === 'function') {
-      setSchedulerData((prev) => {
-        const subList = [...(prev[subject] || [])];
-        const existingRow = subList[index] || {};
-        subList[index] = {
-          ...existingRow,
-          [field]: value
-        };
-        return { ...prev, [subject]: subList };
-      });
-    }
-  };
-// Handle Teacher Photo Selection / Camera Snapshot
-  const handleTeacherPhotoChange = (e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setTeacherPhoto(file);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setTeacherPhotoPreview(reader.result);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-  // Teacher Assignment Submission with Validation Rules & Conflict Checks
-  const handleTeacherAssignment = async (e) => {
-    if (e) e.preventDefault();
-    if (isSubmittingTeacher) return;
-    setIsSubmittingTeacher(true);
-    
-
-    if (!teacherName || !teacherPhone || !teacherEmail || selectedTeacherSubjects.length === 0) {
-      alert('Please provide teacher name, mandatory email, phone number, and select at least one subject with class schedules.');
-      setIsSubmittingTeacher(false);
-      return;
-    }
-
-
-    if (!validateCameroonPhone(teacherPhone)) {
-      alert('Invalid Teacher Phone Number! Must be 9 digits starting with 6.');
-      return;
-    }
-
-    // Validation: Prevent duplicate overlapping class time slots
-    // Time string parser helper (e.g. "09:00 AM" -> 540 minutes)
-const parseTimeToMinutes = (timeStr) => {
-    if (!timeStr) return 0;
-    
-    // Clean string and handle spaces properly
-    const cleanStr = String(timeStr).replace(/\u00a0/g, ' ').trim().toUpperCase();
-    const parts = cleanStr.split(/\s+/);
-    const timePart = parts[0];
-    const modifier = parts[1] || '';
-
-    let [hours, minutes] = timePart.split(':').map(Number);
-
-    // Standard 12-hour clock conversion rules
-    if (modifier === 'PM' && hours !== 12) hours += 12;
-    if (modifier === 'AM' && hours === 12) hours = 0;
-
-    return hours * 60 + minutes;
-  };
-
-// Flatten and normalize all schedule slots safely from BOTH state sources
-    const allScheduleSlots = [];
-    for (const sub of selectedTeacherSubjects) {
-      const baseRows = subjectSchedules[sub] || [];
-const customRows = schedulerData[sub] || [];
-
-const maxLen = Math.max(baseRows.length, customRows.length, 1);
-const rows = Array.from({ length: maxLen }, (_, rIdx) => {
-  const base = baseRows[rIdx] || {};
-  const custom = customRows[rIdx] || {};
-  return {
-    ...base,
-    ...custom,
-    className: custom.className || base.className || "",
-    day: custom.day || base.day || "Monday",
-    startTime: custom.startTime || base.startTime || "07:30 AM",
-    endTime: custom.endTime || base.endTime || "09:00 AM",
-  };
-});
-
-for (const row of rows) {
-  if (!row) continue;
-  const normalizedClass = row?.className || row?.class || row?.form || "";
-  if (normalizedClass && row?.day && row?.startTime && row?.endTime) {
-    allScheduleSlots.push({
-      ...row,
-      subject: sub,
-      className: normalizedClass,
-    });
-  }
-}
-    }
-
-    console.log("SLOT_0:", JSON.stringify(allScheduleSlots[0]), "SLOT_1:", JSON.stringify(allScheduleSlots[1]));
-    let hasConflict = false;
-
-    // Strict overlap validation
-    for (let i = 0; i < allScheduleSlots.length; i++) {
-      for (let j = i + 1; j < allScheduleSlots.length; j++) {
-        const slotA = allScheduleSlots[i];
-        const slotB = allScheduleSlots[j];
-
-        // Only compare if it is the EXACT SAME class on the EXACT SAME day
-        if (slotA.day === slotB.day && slotA.className === slotB.className) {
-          const startA = parseTimeToMinutes(slotA.startTime);
-          const endA = parseTimeToMinutes(slotA.endTime);
-          const startB = parseTimeToMinutes(slotB.startTime);
-          const endB = parseTimeToMinutes(slotB.endTime);
-
-          // Overlap condition: Period A starts strictly before Period B ends AND Period B starts strictly before Period A ends
-          if (startA < endB && startB < endA) {
-            console.warn("Conflict detected between slots:", { slotA, slotB });
-            hasConflict = true;
-            break;
-          }
-        }
-      }
-      if (hasConflict) break;
-    }
-
-    if (hasConflict) {
-      alert('Conflict Error: A class cannot receive two subjects at the exact same day and time slot!');
-      setIsSubmittingTeacher(false);
-      return;
-    }
-// Dynamic Academic Year Calculator (September 1st cutoff)
   
-   // Dynamic Teacher ID Generator
-const generateTeacherId = (schoolNameInput, section, fullName, phoneNumber) => {
-    // Clean string helper to remove special characters
-    const cleanStr = (str) => (str || '').replace(/[^a-zA-Z0-9\s]/g, '').trim();
-
-    // 1. School Initials (e.g., "Virgin Island" -> "VI", "SCHOOL 001" -> "S0")
-    const validSchoolName = cleanStr(schoolNameInput) || 'School';
-    const schoolWords = validSchoolName.split(/\s+/).filter(Boolean);
-    let schoolCode = '';
-    if (schoolWords.length >= 2) {
-      schoolCode = (schoolWords[0][0] + schoolWords[1][0]).toUpperCase();
-    } else {
-      schoolCode = schoolWords[0].substring(0, 2).toUpperCase();
-    }
-
-    // 2. Section: T for Technical, G for GeneralG
-    const secCode = (section || 'General').toUpperCase().startsWith('T') ? 'T' : 'G';
-
-    // 3. Teacher Initials (e.g., "John Matthew" -> "JM", "Norbert Nsuh" -> "NN")
-    const validFullName = cleanStr(fullName) || 'Teacher';
-    const nameWords = validFullName.split(/\s+/).filter(Boolean);
-    let initials = '';
-    if (nameWords.length >= 2) {
-      initials = (nameWords[0][0] + nameWords[1][0]).toUpperCase();
-    } else {
-      initials = nameWords[0].substring(0, 2).toUpperCase();
-    }
-
-    // 4. Last 3 digits of phone number
-    const cleanPhone = (phoneNumber || '0000').replace(/\D/g, '');
-    const phoneSuffix = cleanPhone.length >= 3 ? cleanPhone.slice(-3) : '000';
-
-    // 5. Academic Year (26)
-    const yearSuffix = '26';
-
-    // 6. Random Uppercase Letter (A-Z)
-    const randomLetter = String.fromCharCode(65 + Math.floor(Math.random() * 26));
-
-    // Result Format: VI-GJM45826L
-    return `${schoolCode}-${secCode}${initials}${phoneSuffix}${yearSuffix}${randomLetter}`;
-  };
-
-  const currentSchoolTitle = activeSchool?.name || schoolName || 'Virgin Island';
-
-  // Reuse existing teacher_id if editing, otherwise generate a new one
-  const teacherId = teacherToEdit?.teacher_id || teacherToEdit?.id || generateTeacherId(
-    currentSchoolTitle,
-    teacherSection,
-    teacherName,
-    teacherPhone
-  );
-
-  const signupToken = 'teach_' + Math.random().toString(36).substring(2, 9);
-  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
-
-  // Reuse existing signup_link if editing, otherwise construct a properly formatted link
- // 1. Safe Multi-Tenant School ID Resolution
-let activeSchoolId = activeSchool?.school_id || activeSchool?.id || currentSchoolId;
-let activeSchoolName = activeSchool?.name || activeSchool?.['school-name'] || schoolName;
-
-// If state isn't populated yet, do a exact fallback lookup
-if (!activeSchoolId) {
-  const targetTitle = currentSchoolTitle || activeSchoolName;
-  if (targetTitle) {
-    const { data: matchedSchool } = await supabase
-      .from('assigned_schools')
-      .select('school_id, id, name')
-      .ilike('name', `%${targetTitle}%`)
-      .maybeSingle();
-
-    if (matchedSchool) {
-      activeSchoolId = matchedSchool.school_id || matchedSchool.id;
-      activeSchoolName = matchedSchool.name;
-    }
-  }
-}
-
-if (!activeSchoolId) {
-  alert("Security Notice: Could not locate active School ID. Please re-select your school or log in again.");
-  return;
-}
-const generatedLink = teacherToEdit?.signup_link || teacherToEdit?.signupLink || `${baseUrl}/staff-signup?role=teacher&token=${signupToken}&id=${teacherId}&school_id=${activeSchoolId}`;
-   const newTeacherRecord = {
-      signup_link: generatedLink,
-      
-      // UI / Component Props Keys
-      id: teacherId,
-      name: teacherName,
-      phone: teacherPhone,
-      email: teacherEmail,
-      residence: teacherResidence || 'N/A',
-      section: teacherSection,
-      subjects: selectedTeacherSubjects,
-      schedules: subjectSchedules,
-      picture: teacherPhotoPreview || picturePreview || null,
-      signupLink: generatedLink,
-      role: 'teacher',
-    };
-
- // 1. Normalize subjectSchedules so every internal slot has explicit className and classLevel
-    const normalizedSchedules = {};
-    if (subjectSchedules && typeof subjectSchedules === 'object') {
-      Object.entries(subjectSchedules).forEach(([subjectKey, slots]) => {
-        if (Array.isArray(slots)) {
-          normalizedSchedules[subjectKey] = slots.map((slot) => {
-            const resolvedClass = slot.className || slot.classLevel || slot.class_name || teacherSection || 'N/A';
-            return {
-              ...slot,
-              className: resolvedClass,
-              classLevel: resolvedClass,
-            };
-          });
-        } else {
-          normalizedSchedules[subjectKey] = slots;
-        }
-      });
-    }
-
-    // 2. Extract exact unique class names, prioritizing className over legacy classLevel
-    const rawScheduleItems = Array.isArray(normalizedSchedules)
-      ? normalizedSchedules
-      : Object.values(normalizedSchedules || {});
-
-    const extractedClasses = Array.from(
-      new Set(
-        rawScheduleItems
-          .flatMap((item) => {
-            if (Array.isArray(item)) return item;
-            if (item && typeof item === 'object') return item.schedules || item.slots || [item];
-            return [];
-          })
-          .map((slot) => slot?.className || slot?.classLevel || slot?.class_name)
-          .filter(Boolean)
-      )
-    );
-
-    const finalClassLevelString = extractedClasses.length > 0 
-      ? extractedClasses.join(', ') 
-      : (teacherSection || 'N/A');
-
-    // 3. Payload object for create/update
-    const payloadData = {
-      school_id: activeSchoolId,
-      teacher_id: teacherId,
-      name: teacherName,
-      contact: teacherPhone,
-      email: teacherEmail,
-      residence: teacherResidence || 'N/A',
-      section: teacherSection,
-      classLevel: finalClassLevelString,
-      subjects: (selectedTeacherSubjects || []).map(s => typeof s === 'string' ? s : (s.name || s.subjectName || '')),
-      schedules: normalizedSchedules,
-      picture: teacherPhotoPreview || picturePreview || null,
-      signup_link: generatedLink,
-      role: 'teacher',
-      academic_year: activeSchool?.academic_year || getAcademicYear(),
-      qualification: teacherQualification,
-      photo_url: teacherPhotoPreview || null,
-    };
-
-    let error = null;
-    let savedRecord = null;
-    const currentSchoolId = localStorage.getItem('active_school_id') || localStorage.getItem('activeSchoolId');
-
-    if (teacherToEdit) {
-      // Exclude key identifiers from payload so Supabase update doesn't hit UUID conflicts
-      const { id, ...updateFields } = payloadData;
-
-      const res = await supabase
-        .from('teachers')
-        .update(updateFields)
-        .eq('teacher_id', teacherToEdit.teacher_id || teacherToEdit.id)
-        .eq('school_id', currentSchoolId)
-        .select('*');
-
-      error = res.error;
-      if (res.data && res.data.length > 0) savedRecord = res.data[0];
-    } else {
-      // INSERT new teacher when not in edit mode
-      const res = await supabase
-        .from('teachers')
-        .insert([{ ...payloadData, school_id: currentSchoolId }])
-        .select('*');
-
-      error = res.error;
-      if (res.data && res.data.length > 0) savedRecord = res.data[0];
-    }
-
-    if (error) {
-      alert('Error saving teacher to database: ' + error.message);
-      setIsSubmittingTeacher(false);
-      return;
-    }
-
-    // Instantly reflect newly saved teacher in UI list without needing page reload
-    if (savedRecord) {
-      const formattedSavedTeacher = {
-        ...savedRecord,
-        id: savedRecord.teacher_id || savedRecord.id,
-        name: savedRecord.name,
-        phone: savedRecord.contact || savedRecord.phone || '',
-        email: savedRecord.email || '',
-        signupLink: savedRecord.signup_link || savedRecord.signupLink || '',
-        schedules: savedRecord.schedules || {},
-        classLevel: savedRecord.classLevel || savedRecord.class_level || finalClassLevelString,
-      };
-
-      setTeachersList((prev) => {
-        const exists = prev.some((t) => (t.teacher_id || t.id) === formattedSavedTeacher.id);
-        if (exists) {
-          return prev.map((t) => ((t.teacher_id || t.id) === formattedSavedTeacher.id ? formattedSavedTeacher : t));
-        }
-        return [formattedSavedTeacher, ...prev];
-      });
-    }
-
-    // Update UI state & popup modal
-    // Update UI state cleanly without creating duplicates
-if (teacherToEdit) {
-  const targetId = teacherToEdit.teacher_id || teacherToEdit.id;
-  setTeachersList(prev => 
-    prev.map(t => (t.teacher_id === targetId || t.id === targetId) ? newTeacherRecord : t)
-  );
-  setTeacherToEdit(null); // Reset edit state after saving
-} else {
-  // Add new teacher to the top of the list
-  setTeachersList(prev => [newTeacherRecord, ...prev]);
-}
-
-setActiveTeacherResult(newTeacherRecord);
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('pending_teacher_draft');
-    }
-    setPicturePreview(null);
-setTeacherPhoto(null);
-setTeacherPhotoPreview(null);
-    setTeacherName('');
-    setTeacherPhone('');
-    setTeacherEmail('');
-    setTeacherResidence('');
-    setSelectedTeacherSubjects([]);
-    setSubjectSchedules({});
-    setIsSubmittingTeacher(false);
-  };
 
   const currentYear = currentTime ? currentTime.getFullYear() : new Date().getFullYear();
 
@@ -2643,9 +2504,9 @@ setTeacherPhotoPreview(null);
 </h1>
 <p className="text-xs text-gray-400">Academic Year: {getCurrentAcademicYear()} | Administrator Portal | Contact: {schoolContact}</p>          </div>
         </div>
-       {/* High-Resolution School Logo Container */}
+    {/* High-Resolution School Logo Container */}
 <div className="hidden md:flex items-center justify-center p-1">
-  {schoolLogo && schoolLogo.startsWith('http') ? (
+  {schoolLogo && (schoolLogo.startsWith('http') || schoolLogo.startsWith('data:image')) ? (
     <img
       src={schoolLogo}
       alt="School Logo"
@@ -2679,7 +2540,9 @@ setTeacherPhotoPreview(null);
   { id: 'personnel', label: 'Other School Personnel' },
   { id: 'coefficients', label: 'Class & Coefficient Settings' },
   { id: 'master-marks', label: 'Master Mark Sheet' },
-  { id: 'details', label: 'School Details' }
+  { id: 'details', label: 'School Details' },
+  { id: 'settings', label: 'General Settings' },
+   
 ].map((tab) => (
           <button
             key={tab.id}
@@ -2933,17 +2796,38 @@ setTeacherPhotoPreview(null);
                   >
                     <option value="">-- Select Class Level --</option>
                     
-                    {section === 'General Education' && typeof GENERAL_CLASSES_CATALOG !== 'undefined' && Array.isArray(GENERAL_CLASSES_CATALOG) && GENERAL_CLASSES_CATALOG.map((cls) => (
-                      <option key={cls} value={cls}>{cls}</option>
-                    ))}
+       {/* General Education Classes */}
+          {(section === 'General Education' || !section) &&
+            (registrationClasses || []).map((cls, idx) => {
+              const className = typeof cls === 'string' ? cls : cls.name;
+              return (
+                <option key={idx} value={className}>
+                  {className}
+                </option>
+              );
+            })}
 
-                    {section === 'Technical Commercial (STT)' && typeof TECHNICAL_COMMERCIAL_CATALOG !== 'undefined' && Array.isArray(TECHNICAL_COMMERCIAL_CATALOG) && TECHNICAL_COMMERCIAL_CATALOG.map((cls) => (
-                      <option key={cls} value={cls}>{cls}</option>
-                    ))}
+          {/* Technical Commercial Classes */}
+          {section === 'Technical Commercial (STT)' &&
+            (typeof TECHNICAL_COMMERCIAL_CATALOG !== 'undefined' ? TECHNICAL_COMMERCIAL_CATALOG : []).map((cls, idx) => {
+              const className = typeof cls === 'string' ? cls : cls.name;
+              return (
+                <option key={idx} value={className}>
+                  {className}
+                </option>
+              );
+            })}
 
-                    {section === 'Technical Industrial (IND)' && typeof TECHNICAL_INDUSTRIAL_CATALOG !== 'undefined' && Array.isArray(TECHNICAL_INDUSTRIAL_CATALOG) && TECHNICAL_INDUSTRIAL_CATALOG.map((cls) => (
-                      <option key={cls} value={cls}>{cls}</option>
-                    ))}
+          {/* Technical Industrial Classes */}
+          {section === 'Technical Industrial (IND)' &&
+            (typeof TECHNICAL_INDUSTRIAL_CATALOG !== 'undefined' ? TECHNICAL_INDUSTRIAL_CATALOG : []).map((cls, idx) => {
+              const className = typeof cls === 'string' ? cls : cls.name;
+              return (
+                <option key={idx} value={className}>
+                  {className}
+                </option>
+              );
+            })}
                   </select>
                 </div>
 
@@ -3042,6 +2926,7 @@ setTeacherPhotoPreview(null);
         <li>Click <strong>Download Class Template (.xlsx)</strong> to get your pre-formatted sheet.</li>
         <li>Fill in student names, date of birth, gender, residence, and guardian details. <em>Leave Student IDs empty—they generate automatically!</em></li>
         <li>Choose your completed Excel file and click <strong>Parse Excel File</strong> to verify records.</li>
+        <li>For General Sixth Form, Commercial, and Industrial classes, you do not need to include a column for trades/series in the spreadsheet; once you select it in the dropdown above, all students in the batch will be registered with that exact trade/series.</li>
       </ol>
     </div>
 
@@ -3128,7 +3013,7 @@ setTeacherPhotoPreview(null);
             <tbody className="divide-y divide-gray-800">
                {bulkParsedData.map((row, idx) => (
               <tr key={idx} className="hover:bg-gray-800/40">
-              <td className="p-2 text-xs sm:text-base font-medium text-[#FDFBF7]">{row.full_name || row["Full Name"] || '-'}</td>
+              <td className="p-2 text-xs sm:text-base font-medium text-[#FDFBF7]">{row.fullName || row["Full Name"] || '-'}</td>
               <td className="p-2">{row.gender || row["Gender"] || '-'}</td>
               <td className="p-2">{row.dob || row["Date of Birth"] || row["DOB"] || '-'}</td>
               <td className="p-2">{row.residence || row["Residence"] || '-'}</td>
@@ -3177,7 +3062,7 @@ setTeacherPhotoPreview(null);
 }}
     className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none"
   >
-    <option value="General Education">General Education</option>
+<option value="General Education">General Education</option>
 <option value="Technical Commercial (STT)">Technical Commercial (STT)</option>
 <option value="Technical Industrial (IND)">Technical Industrial (IND)</option>
   </select>
@@ -3197,16 +3082,21 @@ setTeacherPhotoPreview(null);
 }}
     className="w-full bg-[#1f2937] border border-amber-500/50 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none"
   >
-  {((section?.includes('General') || section === 'General Education')
-  ? GENERAL_CLASSES_CATALOG
+{((section?.includes('General') || section === 'General Education')
+  ? [...((typeof customClasses !== 'undefined' && customClasses?.general) || []), ...(GENERAL_CLASSES_CATALOG || [])]
   : section?.includes('Commercial')
-  ? TECHNICAL_COMMERCIAL_CATALOG
+  ? [...((typeof customClasses !== 'undefined' && customClasses?.commercial) || []), ...(TECHNICAL_COMMERCIAL_CATALOG || [])]
   : section?.includes('Industrial')
-  ? TECHNICAL_INDUSTRIAL_CATALOG
+  ? [...((typeof customClasses !== 'undefined' && customClasses?.industrial) || []), ...(TECHNICAL_INDUSTRIAL_CATALOG || [])]
   : []
-).map((cls, idx) => (
-  <option key={idx} value={cls}>{cls}</option>
-))}
+).map((cls, idx) => {
+  const className = typeof cls === 'string' ? cls : cls.name;
+  return (
+    <option key={idx} value={className}>
+      {className}
+    </option>
+  );
+})}
   </select>
 </div>
 
@@ -3245,11 +3135,14 @@ setTeacherPhotoPreview(null);
             className="w-full bg-[#1f2937] border border-amber-500/50 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none"
           >
             <option value="">-- Select Trade / Series --</option>
-            {(section?.includes('Commercial') ? COMMERCIAL_TRADE_SERIES : INDUSTRIAL_TRADE_SERIES).map((trade, idx) => (
-              <option key={idx} value={trade}>
-                {trade}
-              </option>
-            ))}
+           {(section?.includes('Commercial')
+  ? (COMMERCIAL_TRADE_SERIES || [])
+  : (INDUSTRIAL_TRADE_SERIES || [])
+).map((trade, idx) => (
+  <option key={idx} value={trade}>
+    {trade}
+  </option>
+))}
           </select>
         </div>
       )}
@@ -3589,11 +3482,11 @@ setTeacherPhotoPreview(null);
               }}
               className="bg-gray-800 text-white text-xs px-2 py-1.5 rounded border border-gray-700 focus:outline-none"
             >
-              <option value="All">All Sections</option>
-              <option value="General Education">General Education</option>
-              <option value="Technical Commercial">Technical Commercial (STT)</option>
-              <option value="Technical Industrial">Technical Industrial (IND)</option>
-            </select>
+             <option value="All">All Sections</option>
+            <option value="General Education">General Education</option>
+            <option value="Technical Commercial (STT)">Technical Commercial (STT)</option>
+            <option value="Technical Industrial (IND)">Technical Industrial (IND)</option>
+          </select>
 
           {/* Class Selector */}
           <select
@@ -3611,7 +3504,7 @@ setTeacherPhotoPreview(null);
               ))}
 
             {/* Technical Commercial Catalog */}
-            {printSection === 'Technical Commercial' &&
+            {printSection === 'Technical Commercial (STT)' &&
               TECHNICAL_COMMERCIAL_CATALOG.map((cls) => (
                 <option key={cls} value={cls}>
                   {cls}
@@ -3619,7 +3512,7 @@ setTeacherPhotoPreview(null);
               ))}
 
             {/* Technical Industrial Catalog */}
-            {printSection === 'Technical Industrial' &&
+            {printSection === 'Technical Industrial (IND)' &&
               TECHNICAL_INDUSTRIAL_CATALOG.map((cls) => (
                 <option key={cls} value={cls}>
                   {cls}
@@ -3667,7 +3560,7 @@ setTeacherPhotoPreview(null);
               ))}
 
             {/* Technical Commercial Trade Series */}
-            {(printSection === 'Technical Commercial' || printSection === 'All') &&
+            {(printSection === 'Technical Commercial (STT)' || printSection === 'All') &&
               COMMERCIAL_TRADE_SERIES.map((t) => (
                 <option key={t} value={t}>
                   {t}
@@ -3676,7 +3569,7 @@ setTeacherPhotoPreview(null);
               ))}
 
             {/* Technical Industrial Trade Series */}
-            {(printSection === 'Technical Industrial' || printSection === 'All') &&
+            {(printSection === 'Technical Industrial (IND)' || printSection === 'All') &&
               INDUSTRIAL_TRADE_SERIES.map((t) => (
                 <option key={t} value={t}>
                   {t}
@@ -4287,6 +4180,13 @@ setTeacherPhotoPreview(null);
      {activeTab === 'coefficients' && (
   <SubjectCoefficientsManager activeSchool={activeSchool} />
 )} 
+
+{/* GENERAL SETTINGS TAB */}
+{activeTab === 'settings' && (
+  <SchoolSettings 
+    schoolId={activeSchool?.id || activeSchool} 
+  />
+)}
       
         {/* MASTER MARK SHEET TAB */}
 {activeTab === 'master-marks' && (
@@ -4312,6 +4212,48 @@ setTeacherPhotoPreview(null);
           <option value="Technical Industrial (IND)">Technical Industrial (IND)</option>
         </select>
       </div>
+      {/* Right Side: Preview & Print Action Button */}
+        <div className="md:col-span-3 flex items-end justify-end">
+      {/* DYNAMIC TRACK-SPECIFIC BULK PRINT BUTTON */}
+{(() => {
+  const sectionLower = (masterSection || '').toLowerCase();
+  
+  if (sectionLower.includes('commercial') || sectionLower.includes('stt')) {
+    return (
+      <button
+        type="button"
+        onClick={() => handleOpenBulkReportCards('commercial', 'First Year Commercial (Y1Com)', printTrade || 'ALL', 'Term 1')}
+        className="px-4 py-2.5 bg-[#1b4332] hover:bg-[#2d6a4f] text-amber-300 font-bold text-xs rounded-xl shadow-lg transition-all flex items-center gap-2 border border-[#d8f3dc]/30"
+      >
+        <span>🏢</span> Technical Commercial Preview & Bulk Printing
+      </button>
+    );
+  }
+
+  if (sectionLower.includes('industrial') || sectionLower.includes('ind')) {
+    return (
+      <button
+        type="button"
+        onClick={() => handleOpenBulkReportCards('industrial', 'First Year Industrial (Y1Ind)', printTrade || 'ALL', 'Term 1')}
+        className="px-4 py-2.5 bg-orange-900 hover:bg-orange-800 text-amber-300 font-bold text-xs rounded-xl shadow-lg transition-all flex items-center gap-2 border border-orange-700/50"
+      >
+        <span>⚙️</span> Technical Industrial Preview & Bulk Printing
+      </button>
+    );
+  }
+
+  // Default Fallback: General Education
+  return (
+    <button
+      type="button"
+      onClick={() => handleOpenBulkReportCards('general', classLevel || 'Form 1', 'ALL', 'Term 1')}
+      className="px-4 py-2.5 bg-blue-700 hover:bg-blue-600 text-white font-bold text-xs rounded-xl shadow-lg transition-all flex items-center gap-2 border border-blue-500/30"
+    >
+      <span>📄</span> General Education Preview & Bulk Printing
+    </button>
+  );
+})()}
+        </div>
     </div>
 
     {/* Render Section Specific Mark Sheet Component */}
@@ -4322,6 +4264,39 @@ setTeacherPhotoPreview(null);
     ) : (
       <GeneralMarkSheet activeSchool={activeSchool} />
     )}
+
+{/* BULK REPORT CARD MODALS */}
+{bulkModalState.isOpen && bulkModalState.trackType === 'general' && (
+  <BulkGeneralReportCard
+    isOpen={bulkModalState.isOpen}
+    onClose={handleCloseBulkModal}
+    activeClass={bulkModalState.activeClass || 'Form 1'}
+    activeTerm={bulkModalState.activeTerm || 'Term 1'}
+    schoolInfo={activeSchool || {}}
+  />
+)}
+
+{bulkModalState.isOpen && bulkModalState.trackType === 'commercial' && (
+  <BulkTechnicalCommercialReportCard
+    isOpen={bulkModalState.isOpen}
+    onClose={handleCloseBulkModal}
+    activeClass={bulkModalState.activeClass || 'First Year Commercial (Y1Com)'}
+    activeTrade={bulkModalState.activeTrade || 'ALL'}
+    activeTerm={bulkModalState.activeTerm || 'Term 1'}
+    schoolInfo={activeSchool || {}}
+  />
+)}
+
+{bulkModalState.isOpen && bulkModalState.trackType === 'industrial' && (
+  <BulkTechnicalIndustrialReportCard
+    isOpen={bulkModalState.isOpen}
+    onClose={handleCloseBulkModal}
+    activeClass={bulkModalState.activeClass || 'First Year Industrial (Y1Ind)'}
+    activeTrade={bulkModalState.activeTrade || 'ALL'}
+    activeTerm={bulkModalState.activeTerm || 'Term 1'}
+    schoolInfo={activeSchool || {}}
+  />
+)}
   </div>
 )}
         {activeTab === 'details' && (
@@ -4338,17 +4313,34 @@ setTeacherPhotoPreview(null);
                   className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-gray-400 cursor-not-allowed"
                 />
               </div>
-              <div>
-  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
-    School Motto
-  </label>
-  <input
-    type="text"
-    value={schoolMotto || ''}
-    onChange={(e) => setSchoolMotto(e.target.value)}
-    placeholder="e.g. Discipline, Hard Work, Success"
-    className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none"
-  />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+  {/* SCHOOL MOTTO */}
+  <div>
+    <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
+      School Motto
+    </label>
+    <input
+      type="text"
+      value={schoolMotto || ''}
+      onChange={(e) => setSchoolMotto(e.target.value)}
+      placeholder="e.g. Discipline, Hard Work, Success"
+      className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none"
+    />
+  </div>
+
+  {/* SCHOOL REGION */}
+  <div>
+    <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
+      School Region (MINSEC Delegation)
+    </label>
+    <input
+      type="text"
+      value={schoolRegion || ''}
+      onChange={(e) => setSchoolRegion(e.target.value)}
+      placeholder="e.g. NORTH WEST REGION"
+      className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none"
+    />
+  </div>
 </div>
               <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
@@ -4411,7 +4403,31 @@ setTeacherPhotoPreview(null);
     className="w-full bg-[#111827] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-gray-400 cursor-not-allowed"
   />
 </div>
-
+{/* ACADEMIC YEAR DATES (EDITABLE) */}
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
+  <div>
+    <label className="block text-xs font-semibold uppercase tracking-wider text-amber-400 mb-1">
+      Academic Year Start Date
+    </label>
+    <input
+      type="date"
+      value={academicYearStartDate}
+      onChange={(e) => setAcademicYearStartDate(e.target.value)}
+      className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500"
+    />
+  </div>
+  <div>
+    <label className="block text-xs font-semibold uppercase tracking-wider text-amber-400 mb-1">
+      Academic Year End Date
+    </label>
+    <input
+      type="date"
+      value={academicYearEndDate}
+      onChange={(e) => setAcademicYearEndDate(e.target.value)}
+      className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500"
+    />
+  </div>
+</div>
       <div>
   <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
     Address / Location
@@ -4453,12 +4469,35 @@ setTeacherPhotoPreview(null);
               )}
             </div>
           </div>
-              <button 
-              onClick={handleSaveSchoolDetails}
-              className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 rounded-lg shadow-lg transition-all"
-              >
-                Save Changes
-              </button>
+          {/* CUSTOM SUCCESS / ERROR BANNER */}
+        {deleteBanner && (
+          <div className={`mb-4 p-4 rounded-xl flex items-center justify-between text-sm font-medium animate-fade-in ${
+            (deleteBanner.type === 'error' || deleteBanner.isError)
+              ? 'bg-rose-500/10 border border-rose-500/30 text-rose-400' 
+              : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'
+          }`}>
+            <div className="flex items-center gap-2">
+              <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+              </svg>
+              <span>{typeof deleteBanner === 'string' ? deleteBanner : deleteBanner.message}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDeleteBanner(null)} 
+              className="opacity-70 hover:opacity-100 text-xs uppercase tracking-wider font-semibold ml-4"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+              <button
+             type="button"
+             onClick={(e) => handleSaveSchoolDetails(e)}
+             className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl shadow-lg transition-all cursor-pointer"
+             >
+             Save Changes
+            </button>
             </div>
           </div>
         )}
@@ -4985,7 +5024,22 @@ setTeacherPhotoPreview(null);
           <div className="text-center text-amber-400 font-extrabold">
   {activeSchool?.name || activeSchool?.school_name || (typeof window !== 'undefined' ? (localStorage.getItem('active_school_name') || localStorage.getItem('school_name')) : '') || '-'}
 </div>
-          <div className="text-right text-emerald-400">ACADEMIC YEAR: {getCurrentAcademicYear()}</div>
+
+<div className="text-right flex items-center justify-end gap-2">
+  <span className="text-xs text-emerald-400 hidden sm:inline">ACADEMIC YEAR: {getCurrentAcademicYear()}</span>
+  <button
+    type="button"
+    onClick={handleToggleLock}
+    disabled={isTogglingLock}
+    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-md border ${
+      isMarkEntryAuthorized
+        ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300 hover:bg-emerald-600 hover:text-white'
+        : 'bg-rose-600/20 border-rose-500 text-rose-300 hover:bg-rose-600 hover:text-white'
+    }`}
+  >
+    <span>{isMarkEntryAuthorized ? '🔓 Marks: AUTHORIZED' : '🔒 Marks: FROZEN'}</span>
+  </button>
+</div>
         </div>
             {/* Assigned Classes & Subjects */}
             <div className="mb-4">
@@ -5130,7 +5184,7 @@ return (
         </p>
         <ul className="list-disc list-inside space-y-2 text-gray-300">
           <li>Easily register and manage new students.</li>
-          <li>Assign teachers and automatically generate downloadable time tables upon assignment.</li>
+          <li>Assign teachers and generate downloadable time tables upon assignment.</li>
           <li>Empower teachers to record student marks easily with their phones.</li>
           <li>Manage institutional financial records seamlessly.</li>
           <li>Help parents track real-time live performance of their children at school.</li>
@@ -5161,6 +5215,7 @@ return (
 {/* Dedicated Progression Sheet Modal */}
       {/* Dedicated Progression Sheet Modal - View Only Mode */}
       {selectedTeacherForLogs && (
+        
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
           <div className="bg-[#FDFBF7] border-2 border-[#2D5A27] rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col text-gray-900 overflow-hidden">
             
@@ -5186,27 +5241,47 @@ return (
 
             {/* Modal Actions & Active Class Bar */}
             <div className="bg-[#EFECE6] border-b border-[#2D5A27]/30 px-5 py-3 flex items-center justify-between gap-3 flex-wrap">
-              <div className="flex items-center gap-2 text-xs text-[#2D5A27] font-bold">
-                <span className="text-gray-700">Active Class Sheet:</span>
-                <span className="bg-[#2D5A27] text-white px-3 py-1 rounded-md text-xs font-bold tracking-wide shadow-sm">
-                  {selectedTeacherForLogs?.teacher?.section || selectedTeacherForLogs?.section || 'General Education'}
-                </span>
-              </div>
+              <div className="bg-[#EFECE6] border-b border-[#2D5A27]/30 px-5 py-3 flex items-center justify-between flex-wrap gap-2 text-xs">
+  <div className="flex items-center gap-3">
+    <div className="flex items-center gap-2 text-[#2D5A27] font-bold">
+      <span className="text-gray-700">Active Class Sheet:</span>
+      <span className="bg-[#2D5A27] text-white px-3 py-1 rounded-md font-bold tracking-wide">
+        {selectedTeacherForLogs?.section || 'General'}
+      </span>
+    </div>
+    
+    {/* World-Class ClassLogs Metrics */}
+    
+  </div>
+</div>
               <div className="flex items-center gap-4">
                 <span className="text-xs text-[#2D5A27] font-bold">Academic Year: {getCurrentAcademicYear() || '2026/2027'}</span>
-               <button
-  onClick={() => {
-    const teacherId = selectedTeacherForLogs.teacher_id || selectedTeacherForLogs.id;
-    const subject = encodeURIComponent(selectedTeacherForLogs.subject);
-    const shareableUrl = `${window.location.origin}/progression-sheet?teacherId=${teacherId}&subject=${subject}`;
-    
-    navigator.clipboard.writeText(shareableUrl);
-    alert("Copied shareable link to clipboard! Anyone with this link can view the progression sheet.");
-  }}
-  className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 shadow-sm transition-colors"
->
-  <span>🔗</span> Copy Supervisor Link
-</button>
+              {/* Dynamic Metrics Badge */}
+                  <div className="flex items-center gap-2 bg-[#EFECE6] border border-[#2D5A27]/30 text-[#2D5A27] text-xs font-bold px-3 py-1.5 rounded-lg shadow-xs">
+                    <span>LOGGED ENTRIES:</span>
+                    <span className="bg-[#2D5A27] text-white px-2 py-0.5 rounded text-[11px] font-extrabold">
+                      {completedLogsCount}
+                    </span>
+                    <span className="text-gray-400">|</span>
+                    <span>HOURS TAUGHT:</span>
+                    <span className="bg-[#2D5A27] text-white px-2 py-0.5 rounded text-[11px] font-extrabold">
+                      {totalHoursTaught} hrs
+                    </span>
+                  </div>
+
+                  {/* Copy Supervisor Link Button */}
+                  <button
+                    onClick={() => {
+                      const teacherId = selectedTeacherForLogs.teacher_id || selectedTeacherForLogs.id;
+                      const subject = encodeURIComponent(selectedTeacherForLogs.subject);
+                      const shareableUrl = `${window.location.origin}/progression-sheet?teacherId=${teacherId}&subject=${subject}`;
+                      navigator.clipboard.writeText(shareableUrl);
+                      alert("Copied shareable link to clipboard! Anyone with this link can view the progression sheet.");
+                    }}
+                    className="bg-[#2D5A27] hover:bg-[#1e3e1a] text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs transition-colors"
+                  >
+                    <span>🔗</span> Copy Supervisor Link
+                  </button>
               </div>
             </div>
 
@@ -5215,58 +5290,187 @@ return (
               
               <div className="border-2 border-[#2D5A27] rounded-lg overflow-hidden bg-[#FDFBF7] shadow-sm">
                 <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-[#2D5A27] text-white text-xs font-bold uppercase tracking-wider">
-                      <th className="p-3 border border-[#2D5A27] w-[12%] text-center">Week</th>
-                      <th className="p-3 border border-[#2D5A27] w-[18%] text-center">Date & Time</th>
-                      <th className="p-3 border border-[#2D5A27] w-[50%]">Lesson Taught</th>
-                      <th className="p-3 border border-[#2D5A27] w-[20%]">Status / Remarks</th>
-                    </tr>
-                  </thead>
-                 <tbody className="divide-y divide-[#2D5A27]/30 text-xs">
+            <thead>
+              <tr className="bg-[#2D5A27] text-white text-xs font-bold uppercase tracking-wider">
+                <th className="p-3 border border-[#2D5A27] w-[10%] text-center">Week</th>
+                <th className="p-3 border border-[#2D5A27] w-[15%] text-center">Date & Time</th>
+                <th className="p-3 border border-[#2D5A27] w-[50%] text-center">Lesson Taught</th>
+                <th className="p-3 border border-[#2D5A27] w-[25%] text-center">Supervisor Remarks</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#2D5A27]/30 text-xs">
               {isLoadingLogs ? (
                 <tr>
                   <td colSpan="4" className="text-center py-6 text-gray-600 font-medium bg-[#FDFBF7]">
                     Loading teacher logs...
                   </td>
                 </tr>
-              ) : fetchedLessonLogs.length > 0 ? (
-                fetchedLessonLogs.map((log, index) => {
-                  const logDate = log.date_logged || log.created_at;
-                  const formattedDate = logDate 
-                    ? new Date(logDate).toLocaleDateString('en-GB', { weekday: 'short', month: 'short', day: '2-digit' })
-                    : '-';
-                  const formattedTime = logDate 
-                    ? new Date(logDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                    : '';
+              ) : fetchedLessonLogs && fetchedLessonLogs.length > 0 ? (
+                (() => {
+                  const groupedMap = new Map();
+                  fetchedLessonLogs.forEach((log) => {
+                    const weekNum =
+                      log.week_number ||
+                      calculateAcademicWeek(
+                        academicYearStartDate,
+                        log.date_logged || log.created_at
+                      );
+                    if (!groupedMap.has(weekNum)) {
+                      groupedMap.set(weekNum, []);
+                    }
+                    groupedMap.get(weekNum).push(log);
+                  });
 
-                  return (
-                    <tr key={log.id || index} className="bg-[#FDFBF7] hover:bg-[#EFECE6]/50">
-                      <td className="p-3 border border-[#2D5A27]/40 text-center font-bold text-[#2D5A27] bg-[#EFECE6]">
-                        <div className="text-xs font-extrabold">W{log.week_number || (index + 1)}</div>
-                      </td>
-                      <td className="p-3 border border-[#2D5A27]/40 text-center text-[11px] font-medium text-gray-800 bg-[#FDFBF7]">
-                        <div>{formattedDate}</div>
-                        {formattedTime && <span className="text-[10px] text-[#2D5A27] font-bold">{formattedTime}</span>}
-                      </td>
-                      <td className="p-3 border border-[#2D5A27]/40 font-medium text-gray-900 bg-[#FDFBF7]">
-                        {log.lesson_title || log.topic_taught || 'No lesson details entered'}
-                      </td>
-                      <td className="p-3 border border-[#2D5A27]/40 text-gray-700 bg-[#FDFBF7]">
-                        {log.status || log.remarks || 'Completed'}
-                      </td>
-                    </tr>
+                  return Array.from(groupedMap.entries()).flatMap(
+                    ([weekNum, logs]) =>
+                      logs.map((log, index) => {
+                        const logDate = log.date_logged || log.created_at;
+                        const formattedDate = logDate
+                          ? new Date(logDate).toLocaleDateString('en-GB', {
+                              weekday: 'short',
+                              month: 'short',
+                              day: '2-digit',
+                            })
+                          : '-';
+                        const formattedTime = logDate
+                          ? new Date(logDate).toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })
+                          : '';
+
+                        return (
+                          <tr
+                            key={log.id || `${weekNum}-${index}`}
+                            className="bg-[#FDFBF7] hover:bg-[#EFECE6]/50"
+                          >
+                            {index === 0 && (
+                              <td
+                                rowSpan={logs.length}
+                                className="p-3 border border-[#2D5A27]/40 text-center font-bold text-[#2D5A27] bg-[#EFECE6] align-middle"
+                              >
+                                <div className="text-xs font-extrabold">
+                                  W{weekNum}
+                                </div>
+                              </td>
+                            )}
+                            {/* Lesson Taught Cell with Drawing/Image Attachment Support */}
+                          {/* Column 2: Date & Time */}
+                            <td className="p-3 border border-[#2D5A27]/40 text-center text-[11px] font-medium text-gray-800 bg-[#FDFBF7] align-top">
+                              <div>{formattedDate}</div>
+                              {formattedTime && (
+                                <span className="text-[10px] text-[#2D5A27] font-bold">
+                                  {formattedTime}
+                                </span>
+                              )}
+                            </td>
+
+                          {/* Column 3: Lesson Taught (Wide, Centered Header, Spacious Text) */}
+                            <td className="p-3 border border-[#2D5A27]/40 font-medium text-gray-900 bg-[#FDFBF7] align-top text-left">
+                              <div className="whitespace-pre-line text-xs leading-relaxed break-words">
+                                {log.lesson_content && log.lesson_content !== 'EMPTY'
+                                  ? log.lesson_content
+                                  : 'No lesson details entered'}
+                              </div>
+
+                              {/* Attachment Preview Chip */}
+                              {(log.attachment_url || log.image_url) && (
+                                <div className="mt-2.5 flex items-center gap-2">
+                                  <a
+                                    href={log.attachment_url || log.image_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1.5 bg-[#2D5A27]/10 hover:bg-[#2D5A27]/20 text-[#2D5A27] text-[10px] font-bold px-2.5 py-1 rounded border border-[#2D5A27]/30 transition-colors"
+                                  >
+                                    <span>🖼️</span> View Attached Diagram / Work
+                                  </a>
+                                </div>
+                              )}
+                            </td>
+
+                            {/* Column 4: Status & Supervisor Remarks */}
+                            {/* Column 4: Dedicated Supervisor Remarks Editor */}
+<td className="p-3 border border-[#2D5A27]/40 bg-[#FDFBF7] text-center align-top">
+  <div className="text-left">
+    {editingRemarkId === log.id ? (
+      /* Active Editing Box */
+      <div className="space-y-1.5">
+        <textarea
+          value={tempRemarkText}
+          onChange={(e) => setTempRemarkText(e.target.value)}
+          placeholder="Type supervisor remark..."
+          className="w-full text-[10px] p-2 border border-[#2D5A27] rounded bg-white focus:outline-none focus:ring-1 focus:ring-[#2D5A27]"
+          rows={2}
+        />
+        <div className="flex items-center gap-1.5 justify-end">
+          <button
+            onClick={() => { setEditingRemarkId(null); setTempRemarkText(""); }}
+            className="text-[9px] px-2 py-0.5 text-gray-600 bg-gray-200 hover:bg-gray-300 rounded font-bold"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => handleSaveSupervisorRemark(log.id)}
+            disabled={savingRemark}
+            className="text-[9px] px-2.5 py-0.5 text-white bg-[#2D5A27] hover:bg-[#1e3e1a] rounded font-bold shadow-xs"
+          >
+            {savingRemark ? 'Saving...' : 'Save Remark'}
+          </button>
+        </div>
+      </div>
+    ) : log.supervisor_remark || log.admin_remark || log.remarks ? (
+      /* Display Saved Supervisor Remark with Edit Option */
+      <div className="bg-[#2D5A27]/10 border-l-2 border-[#2D5A27] p-2 rounded-r text-[10px] text-gray-800">
+        <div className="flex items-center justify-between mb-0.5">
+          <span className="font-extrabold text-[#2D5A27] flex items-center gap-1 uppercase tracking-wider text-[9px]">
+            💬 Remark
+          </span>
+          <button
+            onClick={() => {
+              setEditingRemarkId(log.id);
+              setTempRemarkText(log.supervisor_remark || log.admin_remark || log.remarks || "");
+            }}
+            className="text-[9px] text-[#2D5A27] underline font-bold hover:text-black"
+          >
+            Edit
+          </button>
+        </div>
+        <p className="italic leading-tight font-medium text-gray-700">
+          "{log.supervisor_remark || log.admin_remark || log.remarks}"
+        </p>
+      </div>
+    ) : (
+      /* Clickable Button to Add Remark */
+      <button
+        onClick={() => {
+          setEditingRemarkId(log.id);
+          setTempRemarkText("");
+        }}
+        className="w-full bg-gray-100/80 hover:bg-[#2D5A27]/10 border border-dashed border-gray-300 hover:border-[#2D5A27] p-2 rounded text-center text-[10px] text-gray-600 hover:text-[#2D5A27] font-medium italic transition-colors flex items-center justify-center gap-1"
+      >
+        <span>✏️</span> Add Supervisor Remark
+      </button>
+    )}
+  </div>
+</td>
+                          </tr>
+                        );
+                      })
                   );
-                })
+                })()
               ) : (
                 <tr>
-                  <td colSpan="4" className="text-center py-6 text-gray-500 italic bg-[#FDFBF7]">
+                  <td
+                    colSpan="4"
+                    className="text-center py-6 text-gray-500 italic bg-[#FDFBF7]"
+                  >
                     No lesson logs recorded for this subject yet.
                   </td>
                 </tr>
               )}
             </tbody>
-                </table>
+          </table>
+
               </div>
             </div>
           </div>

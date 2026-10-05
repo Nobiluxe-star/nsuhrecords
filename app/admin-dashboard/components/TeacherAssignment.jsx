@@ -1,7 +1,10 @@
-  import { useState, useRef, useEffect } from 'react';
+'use client';
+
+import { useState, useRef, useEffect } from 'react';
 
 import { createClient } from '@supabase/supabase-js';
-
+import { getTeacherLockStatus, toggleTeacherLockStatus } from '../../../lib/markLockService';
+import { useAcademicConfigs } from '../context/AcademicConfigsContext';
 const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 
 import { 
@@ -20,8 +23,50 @@ export default function TeacherAssignment({
   ALL_SUBJECTS_LIST,
   ALL_AVAILABLE_CLASSES,
 }) {
-  
+   
+const { 
+    masterSubjects, 
+    masterClassesGen, 
+    masterClassesComm, 
+    masterClassesInd 
+  } = useAcademicConfigs();
 
+  const [isMarkEntryAuthorized, setIsMarkEntryAuthorized] = useState(true);
+  const [isTogglingLock, setIsTogglingLock] = useState(false);
+
+ useEffect(() => {
+    const activeSchoolId = activeSchool?.id || activeSchool?.school_id || (typeof window !== 'undefined' ? localStorage.getItem('active_school_id') : null);
+     const selectedTeacherId = teacherToEdit?.teacher_id || teacherToEdit?.id;
+    if (selectedTeacherId && activeSchoolId) {
+      getTeacherLockStatus(selectedTeacherId, activeSchoolId).then((isLocked) => {
+        setIsMarkEntryAuthorized(!isLocked);
+      });
+    }
+  }, [teacherToEdit, activeSchool]);
+
+  const handleToggleLock = async () => {
+    const activeSchoolId = activeSchool?.id || activeSchool?.school_id || (typeof window !== 'undefined' ? localStorage.getItem('active_school_id') : null);
+    const selectedTeacherId = teacherToEdit?.teacher_id || teacherToEdit?.id;
+
+    if (!selectedTeacherId || !activeSchoolId) return;
+
+    setIsTogglingLock(true);
+    const newLockState = isMarkEntryAuthorized; // Next lock state is true (locked) if currently authorized
+
+    const success = await toggleTeacherLockStatus(selectedTeacherId, activeSchoolId, newLockState);
+    if (success) {
+        setIsMarkEntryAuthorized(!newLockState);
+
+        setTeachersList((prev) =>
+          prev.map((t) =>
+            t.teacher_id === selectedTeacherId || t.id === selectedTeacherId
+              ? { ...t, is_marks_locked: newLockState }
+              : t
+          )
+        );
+      }
+    setIsTogglingLock(false);
+  };
   // --- STATE HOOKS ---
   const [message, setMessage] = useState({ type: '', text: '' });
   const [teacherName, setTeacherName] = useState('');
@@ -30,6 +75,8 @@ export default function TeacherAssignment({
   const [teacherResidence, setTeacherResidence] = useState('');
   const [teacherSection, setTeacherSection] = useState('General');
   const [teacherQualification, setTeacherQualification] = useState('');
+  const [subjectSearchQuery, setSubjectSearchQuery] = useState('');
+  const [customTeacherQualification, setCustomTeacherQualification] = useState('');
   
   const [selectedTeacherSubjects, setSelectedTeacherSubjects] = useState([]);
   const [subjectClassSchedules, setSubjectClassSchedules] = useState({});
@@ -42,10 +89,37 @@ export default function TeacherAssignment({
   const [isSubmittingTeacher, setIsSubmittingTeacher] = useState(false);
   const [activeTeacherResult, setActiveTeacherResult] = useState(null);
  
- // --- HELPER ALIASES ---
+// --- HELPER ALIASES ---
   const subjectSchedules = subjectClassSchedules;
   const setSubjectSchedules = setSubjectClassSchedules;
+  const [customDbSubjects, setCustomDbSubjects] = useState([]);
+useEffect(() => {
+    const fetchCustomSubjectsFromDb = async () => {
+      try {
+        let schoolId = activeSchool?.school_id || activeSchool?.id || localStorage.getItem('active_school_id') || localStorage.getItem('activeSchoolId');
+        if (!schoolId) return;
 
+        const { data, error } = await supabase
+          .from('school_academic_configs')
+          .select('*')
+          .eq('school_id', schoolId)
+          .eq('config_type', 'subject');
+
+        if (!error && data) {
+          // Map database records to match the structure of ALL_SUBJECTS_LIST
+          const formatted = data.map(item => ({
+            name: item.name || item.subject,
+            category: item.category || item.section || 'General Core Subjects'
+          }));
+          setCustomDbSubjects(formatted);
+        }
+      } catch (err) {
+        console.error('Error fetching custom subjects for teacher assignment:', err);
+      }
+    };
+
+    fetchCustomSubjectsFromDb();
+  }, [activeSchool]);
   // --- SUBJECT FILTERING & TOGGLING ---
   const getAvailableSubjects = () => {
     const general = ALL_SUBJECTS_LIST
@@ -80,7 +154,7 @@ export default function TeacherAssignment({
       setSubjectSchedules(prev => ({
         ...prev,
         [sub]: [
-          { className: ALL_AVAILABLE_CLASSES[0], day: 'Monday', startTime: '07:30 AM', endTime: '09:00 AM' }
+          { className: getDefaultClassForSection(teacherSection || selectedSection), day: 'Monday', startTime: '07:30 AM', endTime: '09:00 AM' }
         ]
       }));
     } else {
@@ -95,13 +169,20 @@ export default function TeacherAssignment({
   };
 
   // --- SCHEDULE ROW MANAGEMENT ---
+  const getDefaultClassForSection = (sec) => {
+    const s = String(sec || '').toLowerCase();
+    if (s.includes('commercial')) return 'First Year Commercial (Y1Com)';
+    if (s.includes('industrial')) return 'First Year Industrial (Y1Ind)';
+    return 'Form 1A (F1A)';
+  };
+
   const addClassRowToSubject = (subject) => {
     setSubjectSchedules(prev => ({
       ...prev,
       [subject]: [
         ...(prev[subject] || []),
         { 
-          className: teacherSection === 'Technical Commercial(STT)' ? 'First Year Commercial (Y1Com)' : teacherSection === 'Technical Industrial(IND)' ? 'First Year Industrial (Y1Ind)' : 'Form 1A (F1A)', 
+          className: getDefaultClassForSection(teacherSection || selectedSection), 
           day: 'Monday', 
           startTime: '07:30 AM', 
           endTime: '09:00 AM' 
@@ -121,7 +202,7 @@ export default function TeacherAssignment({
   const handleScheduleRowChange = (subject, index, field, value) => {
     setSubjectSchedules((prev) => {
       const list = [...(prev[subject] || [])];
-      const defaultClass = teacherSection === 'Technical Commercial(STT)' || teacherSection === 'Technical Commercial' ? 'First Year Commercial (Y1Com)' : teacherSection === 'Technical Industrial(IND)' || teacherSection === 'Technical Industrial' ? 'First Year Industrial (Y1Ind)' : 'Form 1A (F1A)';
+      const defaultClass = getDefaultClassForSection(teacherSection || selectedSection);
       const existingRow = list[index] || { className: defaultClass, day: '', startTime: '', endTime: '' };
       list[index] = {
         ...existingRow,
@@ -213,71 +294,17 @@ export default function TeacherAssignment({
       return;
     }
 
-    // Flatten and normalize schedules for overlap checks
-    const allScheduleSlots = [];
-    for (const sub of selectedTeacherSubjects) {
-      const baseRows = subjectSchedules[sub] || [];
-      const customRows = schedulerData[sub] || [];
-      const maxLen = Math.max(baseRows.length, customRows.length, 1);
-      const rows = Array.from({ length: maxLen }, (_, rIdx) => {
-        const base = baseRows[rIdx] || {};
-        const custom = customRows[rIdx] || {};
-        return {
-          ...base,
-          ...custom,
-          className: custom.className || base.className || "",
-          day: custom.day || base.day || "Monday",
-          startTime: custom.startTime || base.startTime || "07:30 AM",
-          endTime: custom.endTime || base.endTime || "09:00 AM",
-        };
-      });
-
-      for (const row of rows) {
-        if (!row) continue;
-        const normalizedClass = row?.className || row?.class || row?.form || "";
-        if (normalizedClass && row?.day && row?.startTime && row?.endTime) {
-          allScheduleSlots.push({ ...row, subject: sub, className: normalizedClass });
-        }
-      }
-    }
-
-    let hasConflict = false;
-    for (let i = 0; i < allScheduleSlots.length; i++) {
-      for (let j = i + 1; j < allScheduleSlots.length; j++) {
-        const slotA = allScheduleSlots[i];
-        const slotB = allScheduleSlots[j];
-
-        if (slotA.day === slotB.day && slotA.className === slotB.className) {
-          const startA = parseTimeToMinutes(slotA.startTime);
-          const endA = parseTimeToMinutes(slotA.endTime);
-          const startB = parseTimeToMinutes(slotB.startTime);
-          const endB = parseTimeToMinutes(slotB.endTime);
-
-          if (startA < endB && startB < endA) {
-            hasConflict = true;
-            break;
-          }
-        }
-      }
-      if (hasConflict) break;
-    }
-
-    if (hasConflict) {
-      alert('Conflict Error: A class cannot receive two subjects at the exact same day and time slot!');
-      setIsSubmittingTeacher(false);
-      return;
-    }
-
     const currentSchoolTitle = activeSchool?.name || schoolName || 'Virgin Island';
     const teacherId = teacherToEdit?.teacher_id || teacherToEdit?.id || generateTeacherId(
       currentSchoolTitle,
       teacherSection,
       teacherName,
+
       teacherPhone
     );
 
     const signupToken = 'teach_' + Math.random().toString(36).substring(2, 9);
-    const baseUrl = 'https://nsuhrecords.vercel.app';
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
 
     let activeSchoolId = activeSchool?.school_id || activeSchool?.id || localStorage.getItem('active_school_id') || localStorage.getItem('activeSchoolId');
     let activeSchoolName = activeSchool?.name || activeSchool?.['school-name'] || schoolName;
@@ -307,7 +334,7 @@ export default function TeacherAssignment({
       Object.entries(subjectSchedules).forEach(([subjectKey, slots]) => {
         if (Array.isArray(slots)) {
           normalizedSchedules[subjectKey] = slots.map((slot) => {
-            const resolvedClass = slot.className || slot.classLevel || slot.class_name || teacherSection || 'N/A';
+            const resolvedClass = slot.className || slot.classLevel || slot.class_name || teacherSection || 'h/A';
             return { ...slot, className: resolvedClass, classLevel: resolvedClass };
           });
         } else {
@@ -380,7 +407,9 @@ if (teacherToEdit) {
     if (savedRecord) {
       const formattedSavedTeacher = {
         ...savedRecord,
-        id: savedRecord.teacher_id || savedRecord.id,
+        id: savedRecord.id,
+        teacher_id: savedRecord.teacher_id,
+        school_id: savedRecord.school_id,
         name: savedRecord.name,
         phone: savedRecord.contact || savedRecord.phone || '',
         email: savedRecord.email || '',
@@ -390,9 +419,9 @@ if (teacherToEdit) {
       };
 
       setTeachersList((prev) => {
-        const exists = prev.some((t) => (t.teacher_id || t.id) === formattedSavedTeacher.id);
+      const exists = prev.some((t) => (t.id === formattedSavedTeacher.id || t.teacher_id === formattedSavedTeacher.teacher_id));
         if (exists) {
-          return prev.map((t) => ((t.teacher_id || t.id) === formattedSavedTeacher.id ? formattedSavedTeacher : t));
+          return prev.map((t) => ((t.id === formattedSavedTeacher.id || t.teacher_id === formattedSavedTeacher.teacher_id) ? formattedSavedTeacher : t));s
         }
         return [formattedSavedTeacher, ...prev];
       });
@@ -420,7 +449,7 @@ if (teacherToEdit) {
     // 3. Call parent close handler if provided
     if (typeof onClose === 'function') onClose();
   };
- 
+  
 
   const handleTeacherFileUpload = (e) => {
   const file = e.target.files[0];
@@ -447,7 +476,7 @@ const startTeacherCamera = () => {
       return updated;
     });
   };
- const START_TIME_OPTIONS = [
+  const START_TIME_OPTIONS = [
   "07:30 AM", "08:15 AM", "09:00 AM", "09:45 AM", "10:30 AM", "1:15 AM",
   "12:00 PM", "12:30 PM", "12:45 PM", "01:00 PM", "01:15 PM", "01:30 PM",
   "01:45 PM", "02:00 PM", "02:15 PM", "02:30 PM", "02:45 PM", "03:00 PM",
@@ -462,37 +491,51 @@ const END_TIME_OPTIONS = [
 ];
   const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const [selectedSection, setSelectedSection] = useState('General Education');
+
 const getFilteredSubjects = (section) => {
-  const sec = String(section || '').trim().toLowerCase();
+    const sec = String(section || '').trim().toLowerCase();
 
-  if (sec.includes('commercial')) {
-    const commercial = ALL_SUBJECTS_LIST.filter(s => s.category === "Commercial Subjects");
-    const general = ALL_SUBJECTS_LIST.filter(s => s.category === "General Core Subjects");
-    return [...commercial, ...general];
-  }
-
-  if (sec.includes('industrial')) {
-    const industrial = ALL_SUBJECTS_LIST.filter(s => s.category === "Industrial Subjects");
-    const general = ALL_SUBJECTS_LIST.filter(s => s.category === "General Core Subjects");
-    return [...industrial, ...general];
-  }
-
-  if (sec.includes('both')) {
-    return ALL_SUBJECTS_LIST;
-  }
-
-  return ALL_SUBJECTS_LIST.filter(s => s.category === "General Core Subjects");
-};
-  const getSectionClasses = (section) => {
-    const sec = (section || '').toLowerCase();
     if (sec.includes('commercial')) {
-      return TECHNICAL_COMMERCIAL_CATALOG || [];
-    } else if (sec.includes('industrial')) {
-      return TECHNICAL_INDUSTRIAL_CATALOG || [];
-    } else {
-      return GENERAL_CLASSES_CATALOG || ALL_AVAILABLE_CLASSES || [];
+      const commercial = masterSubjects.filter(s => s.category === "Commercial Subjects");
+      const general = masterSubjects.filter(s => s.category === "General Core Subjects");
+      return [...commercial, ...general];
     }
+
+    if (sec.includes('industrial')) {
+      const industrial = masterSubjects.filter(s => s.category === "Industrial Subjects");
+      const general = masterSubjects.filter(s => s.category === "General Core Subjects");
+      return [...industrial, ...general];
+    }
+
+    if (sec.includes('both') || sec.includes('all')) {
+      return masterSubjects;
+    }
+
+    return masterSubjects.filter(s => s.category === "General Core Subjects");
   };
+
+  const getSectionClasses = (section) => { 
+    const sec = (section || '').toLowerCase();
+    let rawList = masterClassesGen;
+
+    if (sec.includes('commercial')) {
+      rawList = masterClassesComm;
+    } else if (sec.includes('industrial')) {
+      rawList = masterClassesInd;
+    } else if (sec.includes('both') || sec.includes('all')) {
+      rawList = [...masterClassesGen, ...masterClassesComm, ...masterClassesInd];
+    }
+
+    // Deduplicate array values
+    const seen = new Set();
+    return rawList.filter(cls => {
+      const name = typeof cls === 'string' ? cls.trim() : cls?.name?.trim();
+      if (!name || seen.has(name.toLowerCase())) return false;
+      seen.add(name.toLowerCase());
+      return true;
+    });
+  };
+
   const [isCameraActive, setIsCameraActive] = useState(false);
   const videoRef = useRef(null);
 useEffect(() => {
@@ -672,7 +715,7 @@ return (
   {/* Photo Upload (Gallery) & Live Camera Capture Split */}
   <div>
     <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
-     TEACHER PROFILE PICTURE / TAKE PHOTO
+   TEACHER PROFILE PICTURE / TAKE PHOTO
   </label>
   <div className="flex items-center gap-3">
     {/* 📁 Choose File from PC/Phone */}
@@ -760,12 +803,39 @@ return (
               </div>
 
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
-                  Select Subjects Taught (Click subjects to add forms and configure day, start time, and end time)
-           
-               </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400">
+                    Select Subjects Taught (Click subjects to add forms and configure day, start time, and end time)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const settingsTab = Array.from(document.querySelectorAll('button')).find(el => el.textContent?.includes('Class & Coefficient Settings'));
+                      if (settingsTab) settingsTab.click();
+                    }}
+                    className="text-xs text-amber-400 hover:text-amber-300 underline cursor-pointer"
+                  >
+                    + Add/Manage Subjects in Settings
+                  </button>
+                </div>
+
+                <div className="mb-2">
+                  <input
+                    type="text"
+                    placeholder="🔍 Search subjects..."
+                    value={subjectSearchQuery}
+                    onChange={(e) => setSubjectSearchQuery(e.target.value)}
+                    className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 max-h-56 overflow-y-auto bg-[#1f2937]/50 p-3 rounded-lg border border-gray-700/50">
-          {getFilteredSubjects(teacherSection || selectedSection).map((subObj, idx) => {
+          {getFilteredSubjects(teacherSection || selectedSection)
+            .filter((subObj) => {
+              const subName = typeof subObj === 'string' ? subObj : subObj.name;
+              return subName.toLowerCase().includes(subjectSearchQuery.toLowerCase());
+            })
+            .map((subObj, idx) => {
   const sub = typeof subObj === 'string' ? subObj : subObj.name;
   return (
     <label
@@ -818,15 +888,15 @@ return (
   className="w-full bg-[#1f2937] border border-gray-700 rounded p-2 text-xs text-amber-300"
 >
 
-  {/* Dynamically available section classes */}
-  {(typeof getSectionClasses === 'function' ? getSectionClasses(teacherSection || selectedSection || '') : []).map((cls, cId) => (
-    <option key={cId} value={cls}>{cls}</option>
-  ))}
-                                  className="w-full bg-[#1f2937] border border-gray-700 rounded p-2 text-xs text-amber-300"
-                                
-                                  {getSectionClasses(selectedSection || '').map((cls, cId) => (
-  <option key={cId} value={cls}>{cls}</option>
-))}
+ {/* Dynamically available section classes */}
+{(typeof getSectionClasses === 'function' ? getSectionClasses(teacherSection || selectedSection || '') : []).map((cls, cId) => {
+  const className = typeof cls === 'string' ? cls : cls?.name;
+  return (
+    <option key={cId} value={className}>
+      {className}
+    </option>
+  );
+})}
                                 </select>
                               </div>
                               <div className="w-full md:w-36">
@@ -841,8 +911,8 @@ return (
                                   ))}
                                 </select>
                               </div>
-                             {/* Start Time Select */}
-                  {/* Start & End Time Block with Datalist Suggestions */}
+                               {/* Start Time Select */}
+                     {/* Start & End Time Block with Datalist Suggestions */}
                             <datalist id="start-time-suggestions">
                               {START_TIME_OPTIONS.map((time, idx) => (
                                 <option key={idx} value={time} />
@@ -938,6 +1008,26 @@ return (
     {message.text}
   </div>
 )}
+{teacherToEdit && (
+  <button
+    type="button"
+    onClick={handleToggleLock}
+    disabled={isTogglingLock}
+    className={`w-full py-2.5 px-4 rounded-lg font-bold text-xs transition-all flex items-center justify-center gap-2 mb-3 ${
+      isMarkEntryAuthorized
+        ? 'bg-rose-600/20 text-rose-300 border border-rose-500/40 hover:bg-rose-600/30'
+        : 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-600/30'
+    }`}
+  >
+    {isTogglingLock ? (
+      'Updating Lock Status...'
+    ) : isMarkEntryAuthorized ? (
+      <>🔒 Freeze Marks Entry For This Teacher</>
+    ) : (
+      <>🔓 Authorize Marks Entry For This Teacher</>
+    )}
+  </button>
+)}
 <div className="flex gap-4 mt-6">
   <button
     type="submit"
@@ -982,4 +1072,3 @@ return (
 </div>
   );
 }
-          

@@ -3,6 +3,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { getCurrentAcademicYear } from '../../../lib/academicYear';
+import AcademicConfigModal from './AcademicConfigModal';
+import { useAcademicConfigs } from '../context/AcademicConfigsContext';
+
 import { 
   ALL_SUBJECTS_LIST, 
   GENERAL_CLASSES_CATALOG, 
@@ -38,10 +41,17 @@ export default function SubjectCoefficientsManager({ activeSchool }) {
   // Active Subject List State
   const [assignedSubjects, setAssignedSubjects] = useState([]);
   
-  // Custom Subject Modal State
+  // Custom Subject Modal State (Upgraded to multi-row batch state)
   const [showCustomModal, setShowCustomModal] = useState(false);
-  const [customSubjectName, setCustomSubjectName] = useState('');
-  const [customSubjectCategory, setCustomSubjectCategory] = useState('General Core Subjects');
+  const [customRows, setCustomRows] = useState([
+    { name: '', category: 'General Core Subjects' }
+  ]);
+const { masterSubjects } = useAcademicConfigs();
+  // Academic Config Modal State & Custom Dynamic Catalogs
+  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [customClasses, setCustomClasses] = useState({ general: [], commercial: [], industrial: [] });
+  const [customTrades, setCustomTrades] = useState({ commercial: [], industrial: [] });
+  const [customSections, setCustomSections] = useState([]);
 
   // Dropdown & Search State
   const [subjectSearch, setSubjectSearch] = useState('');
@@ -52,17 +62,14 @@ export default function SubjectCoefficientsManager({ activeSchool }) {
 
   // Resolve Active School ID with Fallbacks
   const resolveSchoolId = async () => {
-    // 1. Direct Context Check
     if (activeSchool?.id) {
       localStorage.setItem('active_school_id', activeSchool.id);
       return activeSchool.id;
     }
 
-    // 2. Offline / Local Storage Fallback
     const cachedId = localStorage.getItem('active_school_id');
     if (cachedId) return cachedId;
 
-    // 3. Database Fallback (Fetch from school_details)
     try {
       let query = supabase.from('school_details').select('id');
       if (activeSchool?.name) {
@@ -104,12 +111,16 @@ export default function SubjectCoefficientsManager({ activeSchool }) {
     return isSixthForm;
   }, [selectedSection, isSixthForm]);
 
-  // Switch available classes when section changes
+  // Switch available classes when section changes (prioritizing custom classes at the top)
   const availableClasses = useMemo(() => {
-    if (selectedSection?.includes('Commercial')) return TECHNICAL_COMMERCIAL_CATALOG || [];
-    if (selectedSection?.includes('Industrial')) return TECHNICAL_INDUSTRIAL_CATALOG || [];
-    return GENERAL_CLASSES_CATALOG || [];
-  }, [selectedSection]);
+    if (selectedSection?.includes('Commercial')) {
+      return [...customClasses.commercial, ...(TECHNICAL_COMMERCIAL_CATALOG || [])];
+    }
+    if (selectedSection?.includes('Industrial')) {
+      return [...customClasses.industrial, ...(TECHNICAL_INDUSTRIAL_CATALOG || [])];
+    }
+    return [...customClasses.general, ...(GENERAL_CLASSES_CATALOG || [])];
+  }, [selectedSection, customClasses]);
 
   useEffect(() => {
     if (availableClasses.length > 0 && !availableClasses.includes(selectedClass)) {
@@ -131,14 +142,14 @@ export default function SubjectCoefficientsManager({ activeSchool }) {
 
   const availableUnassignedSubjects = useMemo(() => {
     const assignedNames = new Set(assignedSubjects.map(s => s.name.toLowerCase()));
-    const unassigned = (ALL_SUBJECTS_LIST || []).filter(s => !assignedNames.has(s.name.toLowerCase()));
+    const unassigned = (masterSubjects || []).filter(s => !assignedNames.has(s.name.toLowerCase()));
     
     if (!subjectSearch.trim()) return unassigned;
     return unassigned.filter(s => 
       s.name.toLowerCase().includes(subjectSearch.toLowerCase()) || 
       s.category?.toLowerCase().includes(subjectSearch.toLowerCase())
     );
-  }, [assignedSubjects, subjectSearch]);
+  }, [assignedSubjects, subjectSearch, masterSubjects]);
 
   // Load existing assigned subjects
   useEffect(() => {
@@ -160,7 +171,6 @@ export default function SubjectCoefficientsManager({ activeSchool }) {
     try {
       const schoolId = await resolveSchoolId();
 
-      // Offline First Strategy
       if (!navigator.onLine) {
         const cachedData = localStorage.getItem(cacheKey);
         if (cachedData) {
@@ -236,7 +246,7 @@ export default function SubjectCoefficientsManager({ activeSchool }) {
     const subjectName = e.target.value;
     if (!subjectName) return;
 
-    const fullSubject = ALL_SUBJECTS_LIST.find(s => s.name === subjectName);
+  const fullSubject = masterSubjects.find(s => s.name === subjectName);
     const newEntry = {
       name: subjectName,
       category: fullSubject?.category || 'General Core Subjects',
@@ -247,23 +257,100 @@ export default function SubjectCoefficientsManager({ activeSchool }) {
     setSelectedDropdownSubject('');
   };
 
-  const handleAddCustomSubject = () => {
-    if (!customSubjectName.trim()) return;
+  // Batch Custom Subjects Handlers with Permanent Supabase Persistence & Multitenancy
+  const handleAddCustomRow = () => {
+    setCustomRows(prev => [...prev, { name: '', category: 'General Core Subjects' }]);
+  };
 
-    if (assignedSubjects.some(s => s.name.toLowerCase() === customSubjectName.trim().toLowerCase())) {
-      alert('This subject is already added!');
+  const handleRemoveCustomRow = (index) => {
+    setCustomRows(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleBatchAddCustomSubjects = async () => {
+    const validNewEntries = [];
+    for (const row of customRows) {
+      const trimmedName = row.name.trim();
+      if (!trimmedName) continue;
+      validNewEntries.push({
+        name: trimmedName,
+        category: row.category,
+        coefficient: 1
+      });
+    }
+
+    if (validNewEntries.length === 0) {
+      alert('Please enter at least one valid subject name.');
       return;
     }
 
-    const newEntry = {
-      name: customSubjectName.trim(),
-      category: customSubjectCategory,
-      coefficient: 1
-    };
+    try {
+      const schoolId = await resolveSchoolId();
+      if (!schoolId) {
+        alert('Multitenancy Error: Active School ID could not be identified. Cannot save globally.');
+        return;
+      }
 
-    setAssignedSubjects([...assignedSubjects, newEntry]);
-    setCustomSubjectName('');
-    setShowCustomModal(false);
+      // Persist permanently to single source of truth table with strict school_id, category, and section
+      const payloads = validNewEntries.map(sub => ({
+        school_id: schoolId,
+        config_type: 'subject',
+        section: selectedSection, 
+        category: sub.category,    // Captures the chosen category (General Core, Commercial, etc.)
+        name: sub.name,
+        created_at: new Date().toISOString()
+      }));
+
+      const { error } = await supabase.from('school_academic_configs').insert(payloads);
+      if (error) throw error;
+
+      // Append to active class assigned list as well for immediate usability
+      const existingNames = new Set(assignedSubjects.map(s => s.name.toLowerCase().trim()));
+      const filteredToAdd = validNewEntries.filter(s => !existingNames.has(s.name.toLowerCase().trim()));
+
+      if (filteredToAdd.length > 0) {
+        setAssignedSubjects(prev => [...prev, ...filteredToAdd]);
+      }
+
+      setStatusMessage({
+        type: 'success',
+        text: `Successfully saved ${validNewEntries.length} custom subject(s) permanently to your school database!`
+      });
+
+      setCustomRows([{ name: '', category: 'General Core Subjects' }]);
+      setShowCustomModal(false);
+    } catch (err) {
+      console.error('Error saving custom subjects globally:', err);
+      alert('Failed to save custom subjects to database: ' + err.message);
+    }
+  };
+
+  // Handle saving new configurations from AcademicConfigModal
+  const handleSaveAcademicConfig = (newConfig) => {
+    const { type, section, name } = newConfig;
+
+    if (type === 'classLevel') {
+      const key = section.toLowerCase().includes('commercial') ? 'commercial' : section.toLowerCase().includes('industrial') ? 'industrial' : 'general';
+      setCustomClasses(prev => ({
+        ...prev,
+        [key]: [name, ...(prev[key] || [])]
+      }));
+      setSelectedClass(name);
+    } else if (type === 'tradeSeries') {
+      const key = section.toLowerCase().includes('industrial') ? 'industrial' : 'commercial';
+      setCustomTrades(prev => ({
+        ...prev,
+        [key]: [name, ...(prev[key] || [])]
+      }));
+      setSelectedTradeSeries(name);
+    } else if (type === 'section') {
+      setCustomSections(prev => [name, ...prev]);
+      setSelectedSection(name);
+    }
+
+    setStatusMessage({
+      type: 'success',
+      text: `Successfully added "${name}" and prioritized it at the top of your dropdowns!`
+    });
   };
 
   const handleCoefficientChange = (index, value) => {
@@ -303,12 +390,10 @@ export default function SubjectCoefficientsManager({ activeSchool }) {
     try {
       const schoolId = await resolveSchoolId();
 
-      // Mandatory Multitenant Guard
       if (!schoolId) {
         throw new Error('Multitenancy Violation: Cannot save without an active School ID. Please select a valid school.');
       }
 
-      // Always Cache Locally for Offline Usability
       localStorage.setItem(cacheKey, JSON.stringify(assignedSubjects));
 
       if (!navigator.onLine) {
@@ -320,7 +405,6 @@ export default function SubjectCoefficientsManager({ activeSchool }) {
         return;
       }
 
-      // Clear existing records for specified school, class & series
       await supabase
         .from('class_coefficients')
         .delete()
@@ -329,7 +413,6 @@ export default function SubjectCoefficientsManager({ activeSchool }) {
         .eq('classLevel', selectedClass)
         .eq('trades_series', finalSeries);
 
-      // Save payload with mandatory school_id
       const payload = {
         school_id: schoolId,
         academic_year: getCurrentAcademicYear(),
@@ -369,14 +452,15 @@ export default function SubjectCoefficientsManager({ activeSchool }) {
         </div>
 
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setShowCustomModal(true)}
-            className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-blue-400 border border-blue-500/30 rounded-lg text-xs font-medium transition"
+         <button
+            type="button"
+            onClick={() => setShowConfigModal(true)}
+            className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-blue-400 border border-blue-500/30 rounded-lg text-xs font-medium transition flex items-center gap-1.5 shadow-md"
           >
-            + Add Custom Subject
+            ⚙️ Class Setup Configurations
           </button>
-
           <button
+            type="button"
             onClick={handleSave}
             disabled={loading}
             className="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-gray-950 font-bold text-xs rounded-lg shadow-lg hover:shadow-amber-500/20 transition disabled:opacity-50"
@@ -406,6 +490,9 @@ export default function SubjectCoefficientsManager({ activeSchool }) {
             }}
             className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
           >
+            {customSections.map(sec => (
+              <option key={sec} value={sec}>{sec} (Custom)</option>
+            ))}
             <option value="General Education">General Education</option>
             <option value="Technical Commercial (STT)">Technical Commercial (STT)</option>
             <option value="Technical Industrial (IND)">Technical Industrial (IND)</option>
@@ -463,15 +550,25 @@ export default function SubjectCoefficientsManager({ activeSchool }) {
             )}
 
             {selectedSection?.includes('Commercial') && (
-              COMMERCIAL_TRADE_SERIES?.map(trade => (
-                <option key={trade} value={trade}>{trade}</option>
-              ))
+              <>
+                {customTrades.commercial.map(trade => (
+                  <option key={trade} value={trade}>{trade} (Custom)</option>
+                ))}
+                {COMMERCIAL_TRADE_SERIES?.map(trade => (
+                  <option key={trade} value={trade}>{trade}</option>
+                ))}
+              </>
             )}
 
             {selectedSection?.includes('Industrial') && (
-              INDUSTRIAL_TRADE_SERIES?.map(trade => (
-                <option key={trade} value={trade}>{trade}</option>
-              ))
+              <>
+                {customTrades.industrial.map(trade => (
+                  <option key={trade} value={trade}>{trade} (Custom)</option>
+                ))}
+                {INDUSTRIAL_TRADE_SERIES?.map(trade => (
+                  <option key={trade} value={trade}>{trade}</option>
+                ))}
+              </>
             )}
           </select>
         </div>
@@ -546,6 +643,7 @@ export default function SubjectCoefficientsManager({ activeSchool }) {
                   </td>
                   <td className="p-3 text-right">
                     <button
+                      type="button"
                       onClick={() => handleRemoveSubject(idx)}
                       className="px-2.5 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded border border-red-500/20 transition"
                       title="Remove subject"
@@ -560,53 +658,102 @@ export default function SubjectCoefficientsManager({ activeSchool }) {
         </table>
       </div>
 
-      {/* Modal for Custom Subject */}
+      {/* Modal for Multi-Row Batch Custom Subjects */}
       {showCustomModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-900 border border-gray-800 p-6 rounded-xl max-w-md w-full shadow-2xl">
-            <h3 className="text-base font-bold text-white mb-2">Add Custom Subject</h3>
-            
+          <div className="bg-gray-900 border border-gray-800 p-6 rounded-xl max-w-xl w-full shadow-2xl max-h-[90vh] flex flex-col">
+            <h3 className="text-base font-bold text-white mb-1">Add Multiple Custom Subjects</h3>
             <p className="text-xs text-amber-400/90 bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/20 mb-4">
-              <strong>Notice:</strong> Manually added custom subjects must also be assigned in the Teacher Schedule module so subject teachers can input marks.
+              <strong>Notice:</strong> Manually added custom subjects will be saved permanently to your school database and become globally available across teacher schedules and mark sheets.
             </p>
 
-            <label className="block text-xs font-semibold text-gray-400 mb-1">Subject Name</label>
-            <input
-              type="text"
-              placeholder="e.g. Special Motor Mechanics"
-              value={customSubjectName}
-              onChange={(e) => setCustomSubjectName(e.target.value)}
-              className="w-full bg-gray-950 border border-gray-700 text-white p-2.5 rounded-lg text-xs mb-4 focus:outline-none focus:border-amber-500"
-            />
+            {/* Scrollable Rows Container */}
+            <div className="space-y-3 overflow-y-auto flex-1 pr-1 mb-4">
+              {customRows.map((row, idx) => (
+                <div key={idx} className="flex items-center gap-2 bg-gray-950 p-3 rounded-lg border border-gray-800">
+                  <span className="text-xs font-mono text-gray-500">#{idx + 1}</span>
+                  <div className="flex-1 space-y-2">
+                    <input
+                      type="text"
+                      placeholder="Subject Name (e.g. Special Motor Mechanics)"
+                      value={row.name}
+                      onChange={(e) => {
+                        const updated = [...customRows];
+                        updated[idx].name = e.target.value;
+                        setCustomRows(updated);
+                      }}
+                      className="w-full bg-gray-900 border border-gray-700 text-white p-2 rounded text-xs focus:outline-none focus:border-amber-500"
+                    />
+                    <select
+                      value={row.category}
+                      onChange={(e) => {
+                        const updated = [...customRows];
+                        updated[idx].category = e.target.value;
+                        setCustomRows(updated);
+                      }}
+                      className="w-full bg-gray-900 border border-gray-700 text-white p-2 rounded text-xs focus:outline-none focus:border-amber-500"
+                    >
+                      <option value="General Core Subjects">General Core Subjects</option>
+                      <option value="Commercial Subjects">Commercial Subjects</option>
+                      <option value="Industrial Subjects">Industrial Subjects</option>
+                      <option value="Technical Specialty">Technical Specialty</option>
+                      <option value="Practical / Vocational">Practical / Vocational</option>
+                    </select>
+                  </div>
+                  {customRows.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveCustomRow(idx)}
+                      className="text-red-400 hover:text-red-300 p-2 text-xs font-bold"
+                      title="Remove row"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
 
-            <label className="block text-xs font-semibold text-gray-400 mb-1">Subject Category</label>
-            <select
-              value={customSubjectCategory}
-              onChange={(e) => setCustomSubjectCategory(e.target.value)}
-              className="w-full bg-gray-950 border border-gray-700 text-white p-2.5 rounded-lg text-xs mb-6 focus:outline-none focus:border-amber-500"
+            {/* Add Row Button */}
+            <button
+              type="button"
+              onClick={handleAddCustomRow}
+              className="w-full py-2 bg-gray-800 hover:bg-gray-700 text-amber-400 font-semibold text-xs rounded-lg border border-dashed border-gray-700 mb-6 transition"
             >
-              <option value="General Core Subjects">General Core Subjects</option>
-              <option value="Technical Specialty">Technical Specialty</option>
-              <option value="Practical / Vocational">Practical / Vocational</option>
-            </select>
+              + Add Another Subject Row
+            </button>
 
-            <div className="flex justify-end gap-2">
+            {/* Action Buttons */}
+            <div className="flex justify-end gap-2 pt-3 border-t border-gray-800">
               <button
-                onClick={() => setShowCustomModal(false)}
+                type="button"
+                onClick={() => {
+                  setShowCustomModal(false);
+                  setCustomRows([{ name: '', category: 'General Core Subjects' }]);
+                }}
                 className="px-4 py-2 bg-gray-800 text-gray-300 text-xs rounded-lg hover:bg-gray-700"
               >
                 Cancel
               </button>
               <button
-                onClick={handleAddCustomSubject}
-                className="px-4 py-2 bg-amber-500 text-gray-950 font-bold text-xs rounded-lg hover:bg-amber-600"
+                type="button"
+                onClick={handleBatchAddCustomSubjects}
+                className="px-5 py-2 bg-amber-500 text-gray-950 font-bold text-xs rounded-lg hover:bg-amber-600 shadow-md"
               >
-                Add Subject
+                Save All Custom Subjects
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Academic Config Modal for Classes, Trades, & Sections */}
+      <AcademicConfigModal
+        isOpen={showConfigModal}
+        onClose={() => setShowConfigModal(false)}
+        onSaveConfig={handleSaveAcademicConfig}
+        activeSchoolId={activeSchool?.id}
+      />
     </div>
   );
 }

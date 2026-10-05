@@ -51,3 +51,46 @@ body {
     color: #000000 !important;
   }
 }
+@media print {
+  /* Hide background elements, modals, and dark backdrops */
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  
+  /* Hide UI toolbars, navigation, buttons, and headers */
+  .no-print, nav, header, sidebar, button, .modal-toolbar {
+    display: none !important;
+  }
+
+  /* Isolate printable cards */
+  .printable-card-container {
+    display: block !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    background: white !important;
+  }
+
+  /* Strict 1 page per student */
+  .report-card-sheet {
+    page-break-before: always !important;
+    page-break-after: always !important;
+    break-inside: avoid !important;
+    margin: 0 !important;
+    padding: 10mm !important;
+    box-sizing: border-box !important;
+    width: 210mm !important;
+    min-height: 290mm !important;
+  }
+
+  .report-card-sheet:first-child {
+    page-break-before: avoid !important;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+}

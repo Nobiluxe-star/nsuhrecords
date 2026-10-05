@@ -1,13 +1,13 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import { getCurrentAcademicYear } from '../../lib/academicYear';
 import { toast } from 'react-hot-toast';
+import { getTeacherLockStatus } from '../../lib/markLockService';
 
 import { 
   GENERAL_LOWER_CLASSES,
-  GENERAL_CLASSES_CATALOG, 
   GENERAL_SERIES_CATALOG, 
   COMMERCIAL_TRADE_SERIES,
   TECHNICAL_COMMERCIAL_CATALOG,
@@ -58,6 +58,42 @@ const FORMULA_LIBRARY = {
     { label: 'Slenderness Ratio', symbol: '$$\\lambda = \\frac{L_{eff}}{r}$$' }
   ]
 };
+const RenderFormattedLogContent = ({ content, mediaUrls }) => {
+  if (!content) return null;
+
+  const parts = content.split(/(\$\$[\s\S]*?\$\$|\$[^$]+\$)/g);
+
+  return (
+    <div className="space-y-1.5">
+      <div className="whitespace-pre-wrap word-break-break-word leading-relaxed font-mono text-[11px] text-gray-800">
+        {parts.map((part, i) => {
+          if (part.startsWith('$$') && part.endsWith('$$')) {
+            return (
+              <div key={i} className="my-1.5 p-2 bg-emerald-950/10 rounded border border-emerald-500/20 text-center font-bold text-emerald-950 overflow-x-auto text-[11px]">
+                {part.slice(2, -2)}
+              </div>
+            );
+          } else if (part.startsWith('$') && part.endsWith('$')) {
+            return (
+              <span key={i} className="px-1 py-0.5 bg-emerald-100 text-emerald-900 font-semibold rounded italic text-[11px]">
+                {part.slice(1, -1)}
+              </span>
+            );
+          }
+          return <span key={i}>{part}</span>;
+        })}
+      </div>
+
+      {mediaUrls && mediaUrls.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          {mediaUrls.map((url, imgIdx) => (
+            <img key={imgIdx} src={url} alt="Whiteboard Snapshot" className="w-12 h-12 object-cover rounded border border-gray-300 shadow-sm cursor-pointer hover:opacity-80" />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
   export default function TeacherDashboardPage() {
   const [teacherProfile, setTeacherProfile] = useState({
   school_id: '',
@@ -79,9 +115,71 @@ const FORMULA_LIBRARY = {
   const [navigationHistory, setNavigationHistory] = useState(['overview']);
   const [currentTime, setCurrentTime] = useState(null);
   const [isLoadingStudents, setIsLoadingStudents] = useState(false);
-  const [selectedClassLog, setSelectedClassLog] = useState(/** @type {any} */ (null));
+  const [selectedClassLog, setSelectedClassLog] = useState(/** @type {any} */ (null));const [lessonContent, setLessonContent] = useState('');
+  const [editingLogId, setEditingLogId] = useState(null);
   const [selectedTrade, setSelectedTrade] = useState('ALL');
   const [successBanner, setSuccessBanner] = useState(null);
+  const [databaseTrades, setDatabaseTrades] = useState([]);
+  const [isMarkEntryAuthorized, setIsMarkEntryAuthorized] = useState(true);
+
+  // Priority Mission: Fetch unique enrolled trades/series directly from Supabase
+  useEffect(() => {
+    const fetchEnrolledTradesFromSupabase = async () => {
+      const activeSchoolId = localStorage.getItem('active_school_id') || teacherProfile?.school_id;
+      if (!activeSchoolId || !selectedClassForAction) {
+        setDatabaseTrades([]);
+        return;
+      }
+
+      const currentTeacherId = teacherProfile?.teacher_id || teacherProfile?.id || localStorage.getItem('teacher_id');
+      if (activeSchoolId && currentTeacherId) {
+        getTeacherLockStatus(currentTeacherId, activeSchoolId).then((isLocked) => {
+          setIsMarkEntryAuthorized(!isLocked);
+        });
+      }
+      
+      // Lock General Lower Forms to N/A
+      if (Array.isArray(GENERAL_LOWER_CLASSES) && GENERAL_LOWER_CLASSES.includes(selectedClassForAction)) {
+        setDatabaseTrades(['N/A']);
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from('students')
+          .select('trades_series')
+          .eq('school_id', activeSchoolId)
+          .eq('classLevel', selectedClassForAction.trim());
+
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+          const uniqueTrades = Array.from(
+            new Set(
+              data
+                .map(s => s.trades_series)
+                .filter(t => t && t.trim() !== '' && t !== 'N/A')
+            )
+          );
+          setDatabaseTrades(uniqueTrades);
+        } else {
+          setDatabaseTrades([]);
+        }
+      } catch (err) {
+        console.warn('Error fetching enrolled trades from Supabase:', err.message || err);
+        setDatabaseTrades([]);
+      }
+    };
+
+    fetchEnrolledTradesFromSupabase();
+  }, [selectedClassForAction, teacherProfile?.school_id]);
+  // Universal 24-Hour Strict Edit Lock Checker
+  const checkIsLogLocked = (createdAt) => {
+    if (!createdAt) return false;
+    const createdTime = new Date(createdAt).getTime();
+    const currentTime = Date.now();
+    return (currentTime - createdTime) / (1000 * 60 * 60) >= 24;
+  };
   // Dynamically resolve classes based strictly on the teacher's schedule assignment
 const assignedClassesForSubject = useMemo(() => {
   if (!teacherProfile?.schedules || !selectedSubjectForAction) return [];
@@ -97,33 +195,55 @@ const assignedClassesForSubject = useMemo(() => {
 
 // Dynamically resolve trades/series from catalogs based on the selected class/form
 const assignedTradesForClass = useMemo(() => {
-  if (!selectedClassForAction) return [];
+    if (!selectedClassForAction) return [];
 
-  // If the selected class belongs to general lower classes, they have no trades or series
-  if (Array.isArray(GENERAL_LOWER_CLASSES) && GENERAL_LOWER_CLASSES.includes(selectedClassForAction)) {
-    return ['N/A'];
-  }
+    // If the selected class belongs to general lower classes (Form 1 to 5), disable trade/series
+    if (Array.isArray(GENERAL_LOWER_CLASSES) && GENERAL_LOWER_CLASSES.includes(selectedClassForAction)) {
+      return ['N/A'];
+    }
 
-  const className = selectedClassForAction.toLowerCase();
+    const className = selectedClassForAction.toLowerCase();
 
-  // For General 6th Form (Lower/Upper Sixth)
-  if (className.includes('sixth') || className.includes('form')) {
-    return GENERAL_SERIES_CATALOG || [];
-  }
+    // For General 6th Form (Lower / Upper Sixth)
+    if (className.includes('sixth') || className.includes('form') || className.includes('l6') || className.includes('u6')) {
+      if (!GENERAL_SERIES_CATALOG) return [];
 
-  // For Technical Commercial classes
-  if (className.includes('comm') || className.includes('market') || className.includes('account')) {
-    return COMMERCIAL_TRADE_SERIES || TECHNICAL_COMMERCIAL_CATALOG || [];
-  }
+      const rawArts = GENERAL_SERIES_CATALOG.ARTS || [];
+      const rawScience = GENERAL_SERIES_CATALOG.SCIENCE || [];
 
-  // For Technical Industrial classes
-  if (className.includes('ind') || className.includes('tech') || className.includes('elect')) {
-    return TECHNICAL_INDUSTRIAL_CATALOG || [];
-  }
+      // Extract subject-specific series if catalog metadata is available
+      if (selectedSubjectForAction && GENERAL_SERIES_CATALOG.series) {
+        const matchingArts = (GENERAL_SERIES_CATALOG.series.ARTS || [])
+          .filter(s => s.subjects && s.subjects.includes(selectedSubjectForAction))
+          .map(s => s.code);
 
-  // Default fallback to all general series if class type is general
-  return GENERAL_SERIES_CATALOG || [];
-}, [selectedClassForAction]);
+        const matchingScience = (GENERAL_SERIES_CATALOG.series.SCIENCE || [])
+          .filter(s => s.subjects && s.subjects.includes(selectedSubjectForAction))
+          .map(s => s.code);
+
+        const filtered = [...matchingArts, ...matchingScience];
+        if (filtered.length > 0) return filtered;
+      }
+
+      // Fallback: Return all standard series codes
+      return [...rawArts, ...rawScience];
+    }
+
+    // For Technical Commercial classes
+    if (className.includes('comm') || className.includes('market') || className.includes('account')) {
+      return COMMERCIAL_TRADE_SERIES || TECHNICAL_COMMERCIAL_CATALOG || [];
+    }
+
+    // For Technical Industrial classes
+    if (className.includes('ind') || className.includes('tech') || className.includes('elect')) {
+      return TECHNICAL_INDUSTRIAL_CATALOG || [];
+    }
+
+    // Default fallback
+    const rawArts = GENERAL_SERIES_CATALOG?.ARTS || [];
+    const rawScience = GENERAL_SERIES_CATALOG?.SCIENCE || [];
+    return [...rawArts, ...rawScience];
+  }, [selectedClassForAction, selectedSubjectForAction]);
 
 const assignedSectionsForSubject = useMemo(() => {
   if (!teacherProfile?.schedules || !selectedSubjectForAction) return [];
@@ -508,27 +628,41 @@ useEffect(() => {
     const activeSchoolId = localStorage.getItem('active_school_id') || teacherProfile?.school_id;
     if (!activeSchoolId || !selectedClassLog) return;
 
-    const { error } = await supabase
-      .from('lesson_logs')
-      .insert([
-        {
-          school_id: activeSchoolId,
-          teacher_id: teacherProfile?.id || teacherProfile?.teacher_id || null,
-          teacher_name: teacherProfile?.name || teacherProfile?.full_name || '',
-          subject: selectedClassLog.subject,
-          classLevel: selectedClassLog.className, // Matches Supabase camelCase column
-          lesson_content: lessonText,
-          status: 'SUBMITTED',
-          logged_at: new Date().toISOString(),
-          academic_year: typeof getCurrentAcademicYear === 'function' ? getCurrentAcademicYear() : null,
-          trades_series: selectedClassLog.trades_series || selectedClassLog.tradeSeries || null
-        }
-      ]);
+    let error;
+
+    if (editingLogId) {
+      // Update existing record in place
+      const res = await supabase
+        .from('lesson_logs')
+        .update({ lesson_content: lessonText })
+        .eq('id', editingLogId);
+      error = res.error;
+    } else {
+      // Insert new record
+      const res = await supabase
+        .from('lesson_logs')
+        .insert([
+          {
+            school_id: activeSchoolId,
+            teacher_id: teacherProfile?.id || teacherProfile?.teacher_id || null,
+            teacher_name: teacherProfile?.name || teacherProfile?.full_name || '',
+            subject: selectedClassLog.subject,
+            classLevel: selectedClassLog.className,
+            lesson_content: lessonText,
+            status: 'SUBMITTED',
+            logged_at: new Date().toISOString(),
+            academic_year: typeof getCurrentAcademicYear === 'function' ? getCurrentAcademicYear() : null,
+            trades_series: selectedClassLog.trades_series || selectedClassLog.tradeSeries || null
+          }
+        ]);
+      error = res.error;
+    }
 
     if (error) throw error;
 
     toast.success('Lesson log saved successfully!');
     setLessonText('');
+    setEditingLogId(null); 
     fetchClassLogs();
   } catch (err) {
     console.error('Error saving lesson log:', err);
@@ -552,6 +686,7 @@ useEffect(() => {
 
         if (teacherData && !error) {
           setTeacherProfile(teacherData);
+          setIsMarkEntryAuthorized(!teacherData.is_marks_locked);
         }
       }
 
@@ -672,106 +807,149 @@ if (currentSchoolId) {
   };
   // Trigger precise student fetch whenever teacher selectors change, matching master mark sheet logic
 useEffect(() => {
-  const fetchClassStudents = async () => {
-    const activeSchoolId = localStorage.getItem('active_school_id') || teacherProfile?.school_id;
-    if (!activeSchoolId || !selectedClassForAction) {
-      setClassStudents([]);
-      return;
-    }
-
-    setIsLoadingStudents(true);
-
-    try {
-      let studentQuery = supabase
-        .from('students')
-        .select('*')
-        .eq('school_id', activeSchoolId)
-        .eq('classLevel', selectedClassForAction.trim());
-
-      // Filter by trade/series if applicable
-      if (selectedTrade && selectedTrade !== 'ALL') {
-        studentQuery = studentQuery.eq('trades_series', selectedTrade);
-      }
-
-      const { data, error } = await studentQuery.order('fullName', { ascending: true });
-
-      if (error) throw error;
-      setClassStudents(data || []);
-    } catch (err) {
-      console.error('Error fetching filtered class students:', err.message || err);
-      setClassStudents([]);
-    } finally {
-      setIsLoadingStudents(false);
-    }
-  };
-
-  fetchClassStudents();
-}, [selectedClassForAction, selectedTrade, teacherProfile?.school_id]);
-  useEffect(() => {
-    const fetchExistingMarks = async () => {
+    const fetchClassStudents = async () => {
       const activeSchoolId = localStorage.getItem('active_school_id') || teacherProfile?.school_id;
       
-      if (!activeSchoolId || !selectedClassForAction || !selectedSubjectForAction || !selectedTerm) {
+      if (!activeSchoolId || !selectedClassForAction) {
+        setClassStudents([]);
         return;
       }
 
-      const { data, error } = await supabase
-        .from('marks')
-        .select('student_id, seq1_mark, seq2_mark, seq3_mark, seq4_mark, seq5_mark, seq6_mark, seq1_edit_count, seq2_edit_count, seq3_edit_count, seq4_edit_count, seq5_edit_count, seq6_edit_count')
-        .eq('school_id', activeSchoolId)
-        .eq('academic_year', getCurrentAcademicYear())
-        .eq('classLevel', selectedClassForAction)
-        .eq('subject_name', selectedSubjectForAction)
-        .eq('term', selectedTerm);
+      const cacheKey = `nsuh_students_${activeSchoolId}_${selectedClassForAction.trim()}_${selectedTrade}`;
+      
+      // 1. Instantly load from local device storage first (Instant UI response without waiting for network)
+      const cachedStudents = localStorage.getItem(cacheKey);
+      if (cachedStudents) {
+        try {
+          setClassStudents(JSON.parse(cachedStudents));
+        } catch (e) {
+          console.warn('Failed to parse cached students:', e);
+        }
+      }
 
-     if (error) {
-  console.error('Error fetching existing marks:', error.message || error.details || JSON.stringify(error));
-  return;
-}
+      setIsLoadingStudents(true);
 
-     if (data) {
-  const activeSeqKey = selectedTerm === 'Term 1' ? 'seq1_edit_count' : selectedTerm === 'Term 2' ? 'seq3_edit_count' : 'seq5_edit_count';
-  const hasBeenEdited = data.some(item => (item[activeSeqKey] || 0) >= 2);
-  setIsMarksLocked(hasBeenEdited);
-        const loadedMarks = {};
-        data.forEach(item => {
-         loadedMarks[item.student_id] = {
-  seq1_mark: item.seq1_mark !== null ? item.seq1_mark : '',
-  seq2_mark: item.seq2_mark !== null ? item.seq2_mark : '',
-  seq3_mark: item.seq3_mark !== null ? item.seq3_mark : '',
-  seq4_mark: item.seq4_mark !== null ? item.seq4_mark : '',
-  seq5_mark: item.seq5_mark !== null ? item.seq5_mark : '',
-  seq6_mark: item.seq6_mark !== null ? item.seq6_mark : ''
-};
-        });
-        setMarksRecords(loadedMarks);
+      try {
+        let studentQuery = supabase
+          .from('students')
+          .select('*')
+          .eq('school_id', activeSchoolId)
+          .eq('classLevel', selectedClassForAction.trim());
+
+        if (selectedTrade && selectedTrade !== 'ALL' && selectedTrade !== 'N/A') {
+          studentQuery = studentQuery.eq('trades_series', selectedTrade);
+        }
+
+        const { data, error } = await studentQuery.order('fullName', { ascending: true });
+
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+          setClassStudents(data);
+          // Save fresh network data back to local storage for offline use
+          localStorage.setItem(cacheKey, JSON.stringify(data));
+        }
+      } catch (err) {
+        console.warn('Network issue detected, using cached student list:', err.message || err);
+        // If network fails (Failed to fetch), keep the local cached data intact!
+      } finally {
+        setIsLoadingStudents(false);
       }
     };
 
-    fetchExistingMarks();
-  }, [selectedClassForAction, selectedSubjectForAction, selectedTerm, teacherProfile]);
-useEffect(() => {
-  const fetchTenantStudents = async () => {
-    if (!teacherProfile?.school_id) return;
+    fetchClassStudents();
+  }, [selectedClassForAction, selectedTrade, selectedSubjectForAction, teacherProfile?.school_id]);
 
-    setIsLoadingStudents(true);
+ 
+// Simple, rock-solid data fetcher that never gets stuck on class switch
+  useEffect(() => {
+    let isCancelled = false;
 
-    const { data, error } = await supabase
-      .from('students')
-      .select('*')
-      .eq('school_id', teacherProfile.school_id);
+    const fetchDashboardData = async () => {
+      const activeSchoolId = localStorage.getItem('active_school_id') || teacherProfile?.school_id;
 
-    if (error) {
-      console.error('Error fetching tenant students:', error.message || error.details || JSON.stringify(error));
-    } else if (data) {
-      setClassStudents(data);
-    }
+      if (!activeSchoolId || !selectedClassForAction || !selectedSubjectForAction || !selectedTerm) {
+        setClassStudents([]);
+        setMarksRecords({});
+        return;
+      }
 
-    setIsLoadingStudents(false);
-  };
+      setIsLoadingStudents(true);
 
-  fetchTenantStudents();
-}, [teacherProfile?.school_id]);
+      try {
+        const cleanClass = selectedClassForAction.trim();
+        const lowerClass = cleanClass.toLowerCase();
+        const isSixthFormOrTech = lowerClass.includes('sixth') || lowerClass.includes('l6') || lowerClass.includes('u6') || lowerClass.includes('tech') || lowerClass.includes('form 6');
+
+        // 1. Fetch Students
+        let studentQuery = supabase
+          .from('students')
+          .select('*')
+          .eq('school_id', activeSchoolId)
+          .eq('classLevel', cleanClass);
+
+        // ONLY filter by trade/series if it's a Sixth Form / Specialized class
+        if (isSixthFormOrTech && selectedTrade && selectedTrade !== 'ALL' && selectedTrade !== 'N/A') {
+          studentQuery = studentQuery.eq('trades_series', selectedTrade);
+        }
+
+        const { data: students, error: studErr } = await studentQuery.order('fullName', { ascending: true });
+        if (studErr) throw studErr;
+
+        if (isCancelled) return;
+        const fetchedStudents = students || [];
+        setClassStudents(fetchedStudents);
+
+        // 2. Fetch Marks for those students
+        const studentIds = fetchedStudents.map(s => s.id);
+        if (studentIds.length === 0) {
+          setMarksRecords({});
+          return;
+        }
+
+        const normalizedTerm = selectedTerm.split(' ')[0] + ' ' + selectedTerm.split(' ')[1];
+
+        const { data: marks, error: markErr } = await supabase
+          .from('marks')
+          .select('*')
+          .eq('school_id', activeSchoolId)
+          .eq('academic_year', getCurrentAcademicYear())
+          .ilike('term', `${normalizedTerm.trim()}%`)
+          .in('student_id', studentIds);
+
+        if (markErr) console.warn("Notice loading marks:", markErr.message);
+
+        if (isCancelled) return;
+
+        const loadedMarks = {};
+        (marks || []).forEach(item => {
+          if (!selectedSubjectForAction || item.subject_name?.trim().toLowerCase() === selectedSubjectForAction.trim().toLowerCase()) {
+            loadedMarks[item.student_id] = {
+              seq1_mark: item.seq1_mark ?? '',
+              seq2_mark: item.seq2_mark ?? '',
+              seq3_mark: item.seq3_mark ?? '',
+              seq4_mark: item.seq4_mark ?? '',
+              seq5_mark: item.seq5_mark ?? '',
+              seq6_mark: item.seq6_mark ?? ''
+            };
+          }
+        });
+
+        setMarksRecords(loadedMarks);
+
+      } catch (err) {
+        console.error('Error fetching dashboard data:', err);
+      } finally {
+        if (!isCancelled) setIsLoadingStudents(false);
+      }
+    };
+
+    fetchDashboardData();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [selectedClassForAction, selectedSubjectForAction, selectedTerm, selectedTrade, teacherProfile]);
 
 if (!isMounted) {
     return null;
@@ -1397,34 +1575,39 @@ if (!isMounted) {
           </div>
 
           {/* Active Class & Subject Selection Bar */}
-          <div className="bg-[#1f2937] border border-gray-700 p-4 rounded-xl space-y-3">
-            <h3 className="text-xs font-bold text-amber-400 uppercase tracking-wider">Select Class & Subject Sheet</h3>
-            <div className="flex flex-wrap gap-2">
-              {teacherProfile?.schedules && Object.keys(teacherProfile.schedules).length > 0 ? (
-                Object.entries(teacherProfile.schedules).map(([sub, rows]) =>
-                  rows.map((row, rIdx) => {
-                    const isSelected = selectedClassLog?.className === row.className && selectedClassLog?.subject === sub;
-                    return (
-                      <button
-                        key={`${sub}-${rIdx}`}
-                        onClick={() => setSelectedClassLog({ className: row.className, subject: sub, schedule: row })}
-                        className={`text-xs font-bold px-3 py-2 rounded-lg transition-all border shadow-sm flex items-center gap-2 ${
-                          isSelected
-                            ? 'bg-amber-500 text-black border-amber-400 scale-105 ring-2 ring-amber-300'
-                            : 'bg-[#2D5A27] hover:bg-[#1E3E1A] text-white border-emerald-600'
-                        }`}
-                      >
-                        <span>{row.className}</span>
-                        <span className={isSelected ? 'text-black/80 font-extrabold' : 'text-emerald-200'}>({sub})</span>
-                      </button>
-                    );
-                  })
-                )
-              ) : (
-                <p className="text-xs text-gray-400 italic">No assigned classes found to generate log sheets.</p>
-              )}
-            </div>
-          </div>
+      <div className="bg-[#1f2937] border border-gray-700 p-4 rounded-xl space-y-3">
+        <h3 className="text-xs font-bold text-amber-400 uppercase tracking-wider">Select Class & Subject Sheet</h3>
+        <div className="flex flex-wrap gap-2">
+          {teacherProfile?.schedules && Object.keys(teacherProfile.schedules).length > 0 ? (
+            Object.entries(teacherProfile.schedules).map(([sub, rows]) => {
+              // Deduplicate classes so each subject/class combination appears as a single button
+              const uniqueClassRows = Array.from(
+                new Map(rows.map((item) => [item.className, item])).values()
+              );
+
+              return uniqueClassRows.map((row, rIdx) => {
+                const isSelected = selectedClassLog?.className === row.className && selectedClassLog?.subject === sub;
+                return (
+                  <button
+                    key={`${sub}-${row.className}-${rIdx}`}
+                    onClick={() => setSelectedClassLog({ className: row.className, subject: sub, schedule: row })}
+                    className={`text-xs font-bold px-3 py-2 rounded-lg transition-all border shadow-sm flex items-center gap-1.5 ${
+                      isSelected
+                        ? 'bg-amber-500 text-black border-amber-400 scale-105 ring-2 ring-amber-300'
+                        : 'bg-[#2D5A27] hover:bg-[#1E3E1A] text-white border-emerald-600'
+                    }`}
+                  >
+                    <span>{row.className}</span>
+                    <span className={isSelected ? 'text-black/80 font-extrabold' : 'text-emerald-200'}>({sub})</span>
+                  </button>
+                );
+              });
+            })
+          ) : (
+            <p className="text-xs text-gray-400 italic">No assigned classes found to generate log sheets.</p>
+          )}
+        </div>
+      </div>
 
           {/* Continuous Progression Sheet Feed Placeholder */}
           {/* Continuous Progression Sheet Feed Container */}
@@ -1452,13 +1635,30 @@ if (!isMounted) {
                   <label className="block text-xs font-bold text-[#2D5A27] uppercase tracking-wider">
                     Today's Lesson Taught & Remarks
                   </label>
-                  <textarea
-                    rows={3}
-                    value={lessonText}
-                    onChange={(e) => setLessonText(e.target.value)}
-                    placeholder="Enter chapter title, main sub-topics covered, practical work, or homework assigned..."
-                    className="w-full text-xs p-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#2D5A27] focus:border-transparent outline-none text-gray-800 font-sans"
-                  />
+                 <textarea
+  rows={4}
+  value={lessonText}
+  onChange={(e) => setLessonText(e.target.value)}
+  onPaste={(e) => {
+    // Intercept image pastes (Ctrl+V)
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        const file = items[i].getAsFile();
+        if (file) {
+          const previewUrl = URL.createObjectURL(file);
+          if (typeof setAttachedImages === 'function') {
+            setAttachedImages((prev) => [...prev, { file, previewUrl }]);
+          }
+        }
+      }
+    }
+  }}
+  placeholder="Enter chapter title, copy/paste paragraphs, STEM formulas ($E=mc^2$), or press Ctrl+V to paste a whiteboard picture..."
+  className="w-full text-xs p-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-[#2D5A27] font-mono leading-relaxed resize-y min-h-[120px]"
+  style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+/>
                   <div className="flex justify-end">
                     <button
                       onClick={handleSaveLessonLog}
@@ -1470,52 +1670,90 @@ if (!isMounted) {
                   </div>
                 </div>
 
-                {/* Continuous Historical Log Flow */}
-                <div className="space-y-3 pt-2">
-                  <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider border-b border-gray-300 pb-1">
-                    Continuous Progression Record History
-                  </h4>
-                  <div className="border border-gray-300 rounded-lg overflow-hidden bg-white text-xs">
-                    <div className="grid grid-cols-12 bg-[#1E3E1A] text-white font-bold p-2.5 text-center text-[11px]">
-                      <span className="col-span-2">Date & Time</span>
-                      <span className="col-span-7">Lesson Content Covered</span>
-                      <span className="col-span-3">Status / Action</span>
-                    </div>
-                    {isLoadingLogs ? (
-                    <div className="p-4 text-center text-gray-500 italic">Loading progression history...</div>
-                  ) : logsList.length > 0 ? (
-                    logsList.map((log, idx) => (
-                      <div
-                        key={log.id || idx}
-                        className="grid grid-cols-12 p-2.5 border-b border-gray-200 items-center hover:bg-emerald-50/40 text-gray-800"
-                      >
-                        <span className="col-span-2 text-center text-[11px] font-semibold text-gray-600">
-                          {new Date(log.logged_at).toLocaleDateString()} <br />
-                          <span className="text-[10px] text-gray-400">
-                            {new Date(log.logged_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </span>
-                        <span className="col-span-7 px-2 font-medium">{log.lesson_content}</span>
-                        <span className="col-span-3 text-center">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                              log.status === 'ABSENT'
-                                ? 'bg-rose-100 text-rose-700 border border-rose-300'
-                                : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                            }`}
-                          >
-                            {log.status || 'SUBMITTED'}
-                          </span>
-                        </span>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="p-4 text-center text-gray-500 italic">
-                      No prior logs submitted for this class yet. Entries logged above will flow here continuously.
-                    </div>
-                  )}
-                  </div>
+               {/* Continuous Historical Log Flow */}
+            <div className="space-y-3 pt-2">
+              <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider border-b border-gray-300 pb-1">
+                Continuous Progression Record History
+              </h4>
+              <div className="border border-gray-300 rounded-lg overflow-hidden bg-white text-xs">
+                {/* Table Header (12-Column Grid Alignment) */}
+                <div className="grid grid-cols-12 bg-[#1E3E1A] text-white font-bold p-2.5 text-center text-xs">
+                  <span className="col-span-2">Date & Time</span>
+                  <span className="col-span-5">Lesson Content Covered</span>
+                  <span className="col-span-3">Supervisor Remarks</span>
+                  <span className="col-span-2">Status / Action</span>
                 </div>
+
+                {isLoadingLogs ? (
+                  <div className="p-4 text-center text-gray-500 italic">Loading progression history...</div>
+                ) : logsList && logsList.length > 0 ? (
+                  logsList.map((log, idx) => (
+                    <div
+                      key={log.id || idx}
+                      className="grid grid-cols-12 p-2.5 border-b border-gray-200 items-center hover:bg-emerald-50/40 transition-colors text-xs"
+                    >
+                      {/* Date & Time (col-span-2) */}
+                      <span className="col-span-2 text-center text-[11px] font-semibold text-gray-600">
+                        {new Date(log.logged_at || log.created_at || Date.now()).toLocaleDateString()}<br />
+                        <span className="text-[10px] text-gray-400">
+                          {new Date(log.logged_at || log.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </span>
+
+                      {/* Lesson Content Covered (col-span-5) - Preserves line breaks, STEM formulas & long text */}
+                      <span className="col-span-5 px-2 font-medium whitespace-pre-wrap leading-relaxed text-gray-800">
+                        {log.lesson_content}
+                      </span>
+
+                      {/* Supervisor Remarks from Supabase (col-span-3) */}
+                      <span className="col-span-3 px-2 text-[11px]">
+                        {log.supervisor_remark ? (
+                          <div className="bg-emerald-50 border border-emerald-200 rounded p-1.5 text-emerald-900 font-medium">
+                            <span className="font-bold text-[10px] text-emerald-700 block uppercase">💬 Remark:</span>
+                            "{log.supervisor_remark}"
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 italic text-[11px]">No remark yet</span>
+                        )}
+                      </span>
+
+    {/* Status Badge & Compact Teacher Edit Button (col-span-2) */}
+<div className="col-span-2 text-center flex flex-col items-center justify-center gap-1">
+  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+    log.status === 'ABSENT'
+      ? 'bg-rose-100 text-rose-700 border border-rose-300'
+      : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+  }`}>
+    {log.status || 'SUBMITTED'}
+  </span>
+
+  {checkIsLogLocked(log.created_at || log.logged_at) ? (
+    <span className="text-[9px] text-gray-400 font-semibold flex items-center gap-0.5">
+      🔒 Locked
+    </span>
+  ) : (
+    <button
+      type="button"
+     onClick={() => {
+  setLessonText(log.lesson_content || log.lesson_covered || log.content || '');
+  setEditingLogId(log.id); // Track which log is being updated
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}}
+      className="text-[9px] bg-amber-600 hover:bg-amber-700 text-white font-bold px-2 py-0.5 rounded transition-all shadow-sm"
+    >
+      ✏️ Edit
+    </button>
+  )}
+</div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="p-4 text-center text-gray-500 italic">
+                    No prior logs submitted for this class yet. Entries logged above will flow here continuously.
+                  </div>
+                )}
+              </div>
+            </div>
               </>
             ) : (
               <div className="py-8 text-center space-y-2">
@@ -1669,7 +1907,10 @@ if (!isMounted) {
     </label>
     <select
       value={selectedSubjectForAction}
-      onChange={(e) => setSelectedSubjectForAction(e.target.value)}
+      onChange={(e) => {
+        setClassStudents([]);
+         setSelectedSubjectForAction(e.target.value);
+       }}
       className="w-full bg-[#1f2937] border border-gray-700 rounded-lg p-3 text-sm text-amber-300 font-bold focus:outline-none"
     >
       {teacherProfile?.subjects && teacherProfile.subjects.length > 0 ? (
@@ -1689,7 +1930,10 @@ if (!isMounted) {
     </label>
     <select
       value={selectedClassForAction}
-      onChange={(e) => setSelectedClassForAction(e.target.value)}
+      onChange={(e) => {
+       setClassStudents([]);
+       setSelectedClassForAction(e.target.value);
+        }}
       className="w-full bg-[#1f2937] border border-gray-700 rounded-lg p-3 text-sm text-amber-300 font-bold focus:outline-none"
     >
       {assignedClassesForSubject && assignedClassesForSubject.length > 0 ? (
@@ -1702,24 +1946,44 @@ if (!isMounted) {
     </select>
   </div>
 
-  {/* 4. Trade / Series Selector */}
-  <div>
-    <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
-      Select Trade / Series
-    </label>
-    <select
-      value={selectedTrade}
-      onChange={(e) => setSelectedTrade(e.target.value)}
-      className="w-full bg-[#1f2937] border border-gray-700 rounded-lg p-3 text-sm text-amber-300 font-bold focus:outline-none"
-    >
-      <option value="ALL">All Trades / Series</option>
-      {Array.isArray(assignedTradesForClass) && assignedTradesForClass.map((t, idx) => (
-  <option key={idx} value={typeof t === 'string' ? t : t.code}>
-    {typeof t === 'string' ? t : t.name || t.code}
-  </option>
-))}
-    </select>
-  </div>
+ {/* 4. Trade / Series Selector */}
+<div>
+  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
+    Select Trade / Series
+  </label>
+  {(() => {
+    const isLowerClass = Array.isArray(assignedTradesForClass) && assignedTradesForClass.length === 1 && assignedTradesForClass[0] === 'N/A';
+    return (
+      <select
+        value={isLowerClass ? 'ALL' : selectedTrade}
+        onChange={(e) => setSelectedTrade(e.target.value)}
+        disabled={isLowerClass}
+        className={`w-full border border-gray-700 rounded-lg p-3 text-sm font-bold focus:outline-none transition-all ${
+          isLowerClass
+            ? 'bg-gray-800 text-gray-500 cursor-not-allowed border-gray-800'
+            : 'bg-[#1f2937] text-amber-300'
+        }`}
+      >
+        {isLowerClass ? (
+          <option value="ALL">N/A - General Stream</option>
+        ) : (
+          <>
+            <option value="ALL">All Trades / Series</option>
+            {Array.isArray(assignedTradesForClass) && assignedTradesForClass.map((t, idx) => {
+              const codeVal = typeof t === 'string' ? t : t.code;
+              const displayVal = typeof t === 'string' ? t : (t.name ? `${t.code} - ${t.name}` : t.code);
+              return (
+                <option key={idx} value={codeVal}>
+                  {displayVal}
+                </option>
+              );
+            })}
+          </>
+        )}
+      </select>
+    );
+  })()}
+</div>
 </div>
 
           {/* Empty State: Unassigned Teacher */}
@@ -1742,24 +2006,90 @@ if (!isMounted) {
     };
     const { key1, key2, label1, label2 } = activeKeys;
 const calculateSeqAverage = (seqKey) => {
-    const marks = classStudents
-      .map(s => parseFloat(marksRecords[s.id]?.[seqKey]))
-      .filter(m => !isNaN(m));
-    if (marks.length === 0) return '-';
-    const avg = marks.reduce((acc, curr) => acc + curr, 0) / marks.length;
-    return avg.toFixed(1);
-  };
+  const keyName = seqKey.endsWith('_mark') ? seqKey : `${seqKey}_mark`;
+  const marks = classStudents
+    .map(s => parseFloat(marksRecords[s.id]?.[keyName]))
+    .filter(m => !isNaN(m));
+  if (marks.length === 0) return '-';
+  const avg = marks.reduce((acc, curr) => acc + curr, 0) / marks.length;
+  return avg.toFixed(1);
+};
 
   const calculatePassPercentage = (seqKey) => {
-    const marks = classStudents
-      .map(s => parseFloat(marksRecords[s.id]?.[seqKey]))
-      .filter(m => !isNaN(m));
-    if (marks.length === 0) return '-';
-    const passed = marks.filter(m => m >= 10).length;
-    return ((passed / marks.length) * 100).toFixed(0);
+  const keyName = seqKey.endsWith('_mark') ? seqKey : `${seqKey}_mark`;
+  const marks = classStudents
+    .map(s => parseFloat(marksRecords[s.id]?.[keyName]))
+    .filter(m => !isNaN(m));
+  if (marks.length === 0) return '-';
+  const passed = marks.filter(m => m >= 10).length;
+  return ((passed / marks.length) * 100).toFixed(0);
+};
+
+  const getDynamicTermScore = (studentId, k1, k2) => {
+    const sMarks = marksRecords[studentId] || {};
+    const key1Name = k1.endsWith('_mark') ? k1 : `${k1}_mark`;
+    const key2Name = k2.endsWith('_mark') ? k2 : `${k2}_mark`;
+
+    const val1 = parseFloat(sMarks[key1Name]);
+    const val2 = parseFloat(sMarks[key2Name]);
+
+    const has1 = !isNaN(val1);
+    const has2 = !isNaN(val2);
+
+    if (has1 && has2) return ((val1 + val2) / 2).toFixed(2);
+    if (has1) return val1.toFixed(2);
+    if (has2) return val2.toFixed(2);
+    return '-';
   };
+
+const getRankOrdinal = (n) => {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return s[(v - 20) % 10] || s[v] || s[0];
+};
+
+const getDynamicRankMap = (k1, k2) => {
+  if (!Array.isArray(classStudents) || classStudents.length === 0) return {};
+
+  const scores = classStudents.map(student => {
+    const ts = getDynamicTermScore(student.id, k1, k2);
+    return {
+      id: student.id,
+      score: ts !== '-' ? parseFloat(ts) : -1
+    };
+  });
+
+  scores.sort((a, b) => b.score - a.score);
+
+  const rankMap = {};
+  let currentRank = 1;
+
+  scores.forEach((item, index) => {
+    if (item.score === -1) {
+      rankMap[item.id] = '-';
+    } else {
+      if (index > 0 && item.score < scores[index - 1].score) {
+        currentRank = index + 1;
+      }
+      rankMap[item.id] = `${currentRank}${getRankOrdinal(currentRank)}`;
+    }
+  });
+
+  return rankMap;
+};
     return (
       <div className="hidden md:block overflow-x-auto rounded-lg border border-[#0f5231] bg-[#0f5231] shadow-xl mt-4">
+      {isMarkEntryAuthorized ? (
+        <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 p-3 rounded-lg mb-4 text-xs font-bold flex items-center justify-between">
+          <span>📢 NOTICE: Your account is AUTHORIZED for student marks entry and submission.</span>
+          <span className="bg-emerald-500/20 px-2 py-0.5 rounded text-[10px] text-emerald-300">AUTHORIZED</span>
+        </div>
+      ) : (
+        <div className="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-3 rounded-lg mb-4 text-xs font-bold flex items-center justify-between">
+          <span>🔒 NOTICE: Marks entry for your account is currently FROZEN by Admin.</span>
+          <span className="bg-rose-500/20 px-2 py-0.5 rounded text-[10px] text-rose-300">FROZEN</span>
+        </div>
+      )}
         <table className="w-full text-left text-sm border-collapse">
           <thead>
             {/* Top Header Row */}
@@ -1811,7 +2141,7 @@ const calculateSeqAverage = (seqKey) => {
     {student.full_name || student.fullName || student.name}
   </td>
   <td className="p-3 border-r border-slate-200 text-center text-xs font-semibold text-slate-600">
-    {student.trade || student.series || student.specialty || '-'}
+    {student.trades_series || student.trade || student.series || student.specialty || '-'}
   </td>
   <td className="p-2 border-r border-slate-200 text-center">
     <input
@@ -1819,6 +2149,7 @@ const calculateSeqAverage = (seqKey) => {
       step="0.25"
       min="0"
       max="20"
+      disabled={!isMarkEntryAuthorized}
       value={studentMarks[key1] ?? ''}
       onChange={(e) => handleMarkChange(student.id, key1, e.target.value)}
       className="w-full text-center font-extrabold bg-transparent text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-500 rounded px-1"
@@ -1831,18 +2162,29 @@ const calculateSeqAverage = (seqKey) => {
       step="0.25"
       min="0"
       max="20"
+      disabled={!isMarkEntryAuthorized}
       value={studentMarks[key2] ?? ''}
       onChange={(e) => handleMarkChange(student.id, key2, e.target.value)}
       className="w-full text-center font-extrabold bg-transparent text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-500 rounded px-1"
       placeholder="-"
     />
   </td>
-  <td className="p-3 border-r border-slate-200 text-center font-bold text-slate-700 bg-slate-50">
-    {studentMarks['term_score'] ?? '-'}
-  </td>
-  <td className="p-3 text-center font-bold text-emerald-700 bg-slate-50">
-    {studentMarks['rank'] ?? '-'}
-  </td>
+  {(() => {
+            const termScoreVal = getDynamicTermScore(student.id, key1, key2);
+            const rankMap = getDynamicRankMap(key1, key2);
+            const rankVal = rankMap[student.id] || '-';
+
+            return (
+              <>
+                <td className="p-3 border-r border-slate-200 text-center font-bold text-slate-700 bg-slate-50">
+                  {termScoreVal}
+                </td>
+                <td className="p-3 text-center font-bold text-emerald-700 bg-slate-50">
+                  {rankVal}
+                </td>
+              </>
+            );
+          })()}
 </tr>
                 );
               })
@@ -1862,13 +2204,22 @@ const calculateSeqAverage = (seqKey) => {
         Subject Average (/20):
       </td>
       <td className="p-2 text-center text-amber-400 font-bold border-r border-emerald-900/40">
-        {calculateSeqAverage(`${key1}_mark`)}
+        {calculateSeqAverage(key1)}
       </td>
       <td className="p-2 text-center text-amber-400 font-bold border-r border-emerald-900/40">
-        {calculateSeqAverage(`${key2}_mark`)}
+        {calculateSeqAverage(key2)}
       </td>
-      <td className="p-2 text-center text-gray-400 border-r border-emerald-900/40">-</td>
-      <td className="p-2 text-center text-gray-400">-</td>
+     <td className="p-2 text-center text-amber-400 font-bold border-r border-emerald-900/40">
+  {(() => {
+    if (!Array.isArray(classStudents) || classStudents.length === 0) return '-';
+    const scores = classStudents
+      .map(s => parseFloat(getDynamicTermScore(s.id, key1, key2)))
+      .filter(s => !isNaN(s));
+    if (scores.length === 0) return '-';
+    return (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1);
+  })()}
+</td>
+  <td className="p-2 text-center text-gray-400">-</td>
     </tr>
 
     {/* Percentage Passed Row */}
@@ -1877,13 +2228,23 @@ const calculateSeqAverage = (seqKey) => {
         Passed (% ≥ 10/20):
       </td>
       <td className="p-2 text-center text-emerald-400 font-bold border-r border-emerald-900/40">
-        {calculatePassPercentage(`${key1}_mark`)}%
+        {calculatePassPercentage(key1)}%
       </td>
       <td className="p-2 text-center text-emerald-400 font-bold border-r border-emerald-900/40">
         {calculatePassPercentage(`${key2}_mark`)}%
       </td>
-      <td className="p-2 text-center text-gray-400 border-r border-emerald-900/40">-</td>
-      <td className="p-2 text-center text-gray-400">-</td>
+      <td className="p-2 text-center text-emerald-400 font-bold border-r border-emerald-900/40">
+  {(() => {
+    if (!Array.isArray(classStudents) || classStudents.length === 0) return '-';
+    const scores = classStudents
+      .map(s => parseFloat(getDynamicTermScore(s.id, key1, key2)))
+      .filter(s => !isNaN(s));
+    if (scores.length === 0) return '-';
+    const passed = scores.filter(s => s >= 10).length;
+    return `${((passed / scores.length) * 100).toFixed(0)}%`;
+  })()}
+</td>
+  <td className="p-2 text-center text-gray-400">-</td>
     </tr>
   </tfoot>
 )}

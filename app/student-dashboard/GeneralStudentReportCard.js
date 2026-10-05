@@ -5,7 +5,7 @@ import { getCurrentAcademicYear } from '../../lib/academicYear';
 export const dynamic = 'force-dynamic';
 import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { GENERAL_LOWER_CLASSES } from '../admin-dashboard/page';
+import { GENERAL_LOWER_CLASSES, GENERAL_SERIES_CATALOG } from '../admin-dashboard/page';
 
 function getOrdinalSuffix(i) {
   if (!i || isNaN(i)) return '—';
@@ -48,7 +48,7 @@ function calculateGrade(score, isSixthForm) {
   }
 }
 
-function GeneralEducationReportContent() {
+function GeneralEducationReportContent(props) {
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -78,14 +78,17 @@ function GeneralEducationReportContent() {
     async function loadReportData() {
       setIsLoading(true);
 
-      const schoolId = searchParams.get('school_id');
-      const studentRowId = searchParams.get('row_id');
-      const uniqueCodeParam = searchParams.get('unique_code') || searchParams.get('id') || searchParams.get('code') || searchParams.get('student_id');
-      const urlSchoolName = searchParams.get('school_name');
-      const currentYear = getCurrentAcademicYear();
+      // Single Source of Truth for Academic Year
+      const currentYearVal = getCurrentAcademicYear();
+      setAcademicYear(currentYearVal);
 
-      if (!schoolId && !urlSchoolName) {
-        router.push('/');
+      const schoolId = props?.overrideSchoolId || props?.student?.school_id || props?.schoolInfo?.school_id || searchParams.get('school_id');
+      const studentRowId = props?.overrideStudentRowId || props?.student?.id || props?.student?.row_id || searchParams.get('row_id');
+      const studentCode = props?.overrideStudentCode || props?.student?.unique_code || props?.student?.code || props?.student?.student_id || props?.student?.matricule || searchParams.get('id') || searchParams.get('unique_code') || searchParams.get('code');
+      const urlSchoolName = searchParams.get('school_name');
+
+      if (!schoolId && !urlSchoolName && !props?.student) {
+        setIsLoading(false);
         return;
       }
 
@@ -93,7 +96,9 @@ function GeneralEducationReportContent() {
         await supabase.rpc('set_active_school', { school_id: schoolId });
       }
 
-      // 1. Fetch School Details
+      // =============================================================
+      // PARALLEL BATCH 1: Fetch School Details & Student Profile Concurrently
+      // =============================================================
       let schoolQuery = supabase.from('school_details').select('*');
       if (schoolId) {
         schoolQuery = schoolQuery.eq('school_id', schoolId);
@@ -101,44 +106,38 @@ function GeneralEducationReportContent() {
         schoolQuery = schoolQuery.ilike('name', urlSchoolName);
       }
 
-      const { data: schoolData } = await schoolQuery.maybeSingle();
+      let profileQuery = null;
+      if (studentRowId) {
+        profileQuery = supabase.from('students').select('*').eq('id', studentRowId);
+        if (schoolId) profileQuery = profileQuery.eq('school_id', schoolId);
+      } else if (studentCode) {
+        profileQuery = supabase
+          .from('students')
+          .select('*')
+          .or(`unique_code.eq."${studentCode}",code.eq."${studentCode}",student_id.eq."${studentCode}"`);
+        if (schoolId) profileQuery = profileQuery.eq('school_id', schoolId);
+      }
 
+      const [schoolRes, profileRes] = await Promise.all([
+        schoolQuery.maybeSingle(),
+        profileQuery ? profileQuery.maybeSingle() : Promise.resolve({ data: null })
+      ]);
+
+      const schoolData = schoolRes.data;
       if (schoolData) {
         setSchoolName(schoolData.name || schoolData.institution_name || schoolData.school_name || urlSchoolName || '');
-        setSchoolRegion(schoolData.region || schoolData.regional_delegation || '');
+        setSchoolRegion(schoolData.region || '');
         setSchoolAddress(schoolData.address_location || schoolData.address || schoolData.location || '');
-        setAcademicYear(schoolData.academic_year || currentYear);
         setSchoolMotto(schoolData.motto || schoolData.school_motto || '');
         setAppDeveloper(schoolData.app_developer_credit || '');
         setSchoolLogo(schoolData.logo_url || schoolData.logo || '');
         setSchoolPhone(schoolData.contact_line || schoolData.phone || '');
         setSchoolEmail(schoolData.official_email || schoolData.email || '');
-      } else {
-        if (urlSchoolName) setSchoolName(urlSchoolName);
-        setAcademicYear(currentYear);
+      } else if (urlSchoolName) {
+        setSchoolName(urlSchoolName);
       }
 
-      // 2. Fetch Student Profile
-      let profile = null;
-
-      if (studentRowId) {
-        let q = supabase.from('students').select('*').eq('id', studentRowId);
-        if (schoolId) q = q.eq('school_id', schoolId);
-        const { data } = await q.maybeSingle();
-        profile = data;
-      }
-
-      if (!profile && uniqueCodeParam) {
-        let q = supabase
-          .from('students')
-          .select('*')
-          .or(`unique_code.eq."${uniqueCodeParam}",code.eq."${uniqueCodeParam}",student_id.eq."${uniqueCodeParam}"`);
-        
-        if (schoolId) q = q.eq('school_id', schoolId);
-        const { data } = await q.maybeSingle();
-        profile = data;
-      }
-
+      const profile = profileRes.data || props?.student;
       if (!profile) {
         setIsLoading(false);
         return;
@@ -146,8 +145,9 @@ function GeneralEducationReportContent() {
 
       const effectiveSchoolId = profile.school_id || schoolId;
       const activeClass = (profile.classLevel || profile.class_level || profile.class_name || profile.class || '').trim();
+      const activeSeries = (profile.trades_series || profile.series || profile.trade || '—').trim();
       const activeStudentId = profile.id;
-      const activeUniqueCode = profile.unique_code || profile.code || profile.student_id || uniqueCodeParam || '';
+      const activeUniqueCode = profile.unique_code || profile.code || profile.student_id || studentCode || '';
       const detectedPhoto = profile.picture || profile.photo_url || profile.passport_photo || profile.avatar_url || profile.image_url || null;
 
       setStudentData({
@@ -155,42 +155,71 @@ function GeneralEducationReportContent() {
         display_name: profile.fullName || profile.full_name || profile.name || `${profile.first_name || ''} ${profile.last_name || ''}`.trim(),
         display_class: activeClass,
         display_section: profile.section || profile.academic_section || profile.education_type || 'General Education',
-        display_series: profile.trades_series || profile.series || profile.trade || '—',
+        display_series: activeSeries,
         photo_url: detectedPhoto,
         matricule: activeUniqueCode
       });
 
       const termString = `Term ${activeTerm}`;
 
-      // 3. School-Scoped Class Enrolment Query
-      let classStudents = [];
-      if (activeClass) {
-        let classQuery = supabase.from('students').select('*');
-        if (effectiveSchoolId) classQuery = classQuery.eq('school_id', effectiveSchoolId);
+      // =============================================================
+      // PARALLEL BATCH 2: Concurrently Fetch Enrolment, Coeffs, Teachers, Marks, Fees, Discipline & Remarks
+      // =============================================================
+      let cQuery = supabase.from('students').select('*');
+      if (effectiveSchoolId) cQuery = cQuery.eq('school_id', effectiveSchoolId);
 
-        const { data: cStudents } = await classQuery;
-
-        if (Array.isArray(cStudents)) {
-          classStudents = cStudents.filter(s => {
-            const sClass = (s.classLevel || s.class_level || s.class_name || s.class || '').trim().toLowerCase();
-            return sClass === activeClass.toLowerCase();
-          });
-          setTotalStudents(classStudents.length);
-        }
-      }
-
-      // 4. Fetch Class Coefficients & Teachers (Scoped)
-      let loadedSubjects = [];
       let coeffQuery = supabase.from('class_coefficients').select('*');
       let teacherQuery = supabase.from('teachers').select('*');
+      let marksQuery = supabase.from('marks').select('*');
+      let feesQ = supabase.from('school_fees').select('*').or(`student_id.eq."${activeStudentId}",unique_code.eq."${activeUniqueCode}"`);
+      let discQ = supabase.from('student_term_summaries').select('*').or(`student_id.eq."${activeStudentId}",unique_code.eq."${activeUniqueCode}"`).or(`term.eq."${termString}",term.eq."${activeTerm}"`);
+      let remQ = supabase.from('principal_notices').select('*').or(`student_id.eq."${activeStudentId}",unique_code.eq."${activeUniqueCode}"`).or(`term.eq."${termString}",term.eq."${activeTerm}"`);
 
       if (effectiveSchoolId) {
         coeffQuery = coeffQuery.eq('school_id', effectiveSchoolId);
         teacherQuery = teacherQuery.eq('school_id', effectiveSchoolId);
+        marksQuery = marksQuery.eq('school_id', effectiveSchoolId);
+        feesQ = feesQ.eq('school_id', effectiveSchoolId);
+        discQ = discQ.eq('school_id', effectiveSchoolId);
+        remQ = remQ.eq('school_id', effectiveSchoolId);
       }
 
-      const [subRes, teachersRes] = await Promise.all([coeffQuery, teacherQuery]);
+      const [cStudentsRes, subRes, teachersRes, marksRes, feesRes, disciplineRes, remarksRes] = await Promise.all([
+        cQuery,
+        coeffQuery,
+        teacherQuery,
+        marksQuery,
+        feesQ.maybeSingle(),
+        discQ.maybeSingle(),
+        remQ.maybeSingle()
+      ]);
 
+      // --- 1. Class Enrolment & Sixth Form Series Filtering ---
+      const activeClassLower = activeClass.toLowerCase();
+      const isLowerClass = GENERAL_LOWER_CLASSES.some(c => c.toLowerCase().trim() === activeClassLower || activeClassLower.includes(c.toLowerCase().trim()));
+      const isSixthFormClass = !isLowerClass || activeClassLower.includes('sixth') || activeClassLower.includes('lower 6') || activeClassLower.includes('upper 6') || activeClassLower.includes('l6') || activeClassLower.includes('u6');
+
+      let classStudents = [];
+      if (Array.isArray(cStudentsRes.data)) {
+        classStudents = cStudentsRes.data.filter(s => {
+          const sClass = (s.classLevel || s.class_level || s.class_name || s.class || '').trim().toLowerCase();
+          const sSeries = (s.trades_series || s.series || s.trade || '').trim().toLowerCase();
+
+          const matchesClass = sClass === activeClassLower;
+          if (!matchesClass) return false;
+
+          // Sixth Form: Filter by exact Series / Trade
+          if (isSixthFormClass && activeSeries !== '—' && activeSeries !== 'N/A' && activeSeries !== '') {
+            return sSeries === activeSeries.toLowerCase();
+          }
+
+          return true;
+        });
+        setTotalStudents(classStudents.length);
+      }
+
+      // --- 2. Process Coefficients & Teachers ---
+      let loadedSubjects = [];
       const allCoefficientsRows = subRes.data || [];
       const teachersData = teachersRes.data || [];
 
@@ -238,16 +267,10 @@ function GeneralEducationReportContent() {
           });
         }
       }
-
       setSubjects(loadedSubjects);
 
-      // 5. Fetch Class Marks Scoped to School
-      let marksQuery = supabase.from('marks').select('*');
-      if (effectiveSchoolId) marksQuery = marksQuery.eq('school_id', effectiveSchoolId);
-
-      const { data: allClassMarks } = await marksQuery;
-      const rawMarks = allClassMarks || [];
-      
+      // --- 3. Process Marks & Subject Ranks ---
+      const rawMarks = marksRes.data || [];
       const classMarksList = rawMarks.filter(m => {
         const mTerm = String(m.term || '').trim().toLowerCase();
         return mTerm === termString.toLowerCase() || mTerm === String(activeTerm);
@@ -289,7 +312,7 @@ function GeneralEducationReportContent() {
       setMarksMap(scoreLookup);
       setSubjectRanksMap(rankLookup);
 
-      // Compute Class Rank & Class Average across students
+      // --- 4. Compute Overall Class Rank & Class Average ---
       let computedRank = null;
       let computedClassAvg = null;
 
@@ -348,23 +371,7 @@ function GeneralEducationReportContent() {
       setStudentRank(computedRank);
       setClassAverage(computedClassAvg);
 
-      // 6. Fetch Fees, Discipline, & Remarks
-      let feesQ = supabase.from('school_fees').select('*').or(`student_id.eq."${activeStudentId}",unique_code.eq."${activeUniqueCode}"`);
-      let discQ = supabase.from('student_term_summaries').select('*').or(`student_id.eq."${activeStudentId}",unique_code.eq."${activeUniqueCode}"`).or(`term.eq."${termString}",term.eq."${activeTerm}"`);
-      let remQ = supabase.from('principal_notices').select('*').or(`student_id.eq."${activeStudentId}",unique_code.eq."${activeUniqueCode}"`).or(`term.eq."${termString}",term.eq."${activeTerm}"`);
-
-      if (effectiveSchoolId) {
-        feesQ = feesQ.eq('school_id', effectiveSchoolId);
-        discQ = discQ.eq('school_id', effectiveSchoolId);
-        remQ = remQ.eq('school_id', effectiveSchoolId);
-      }
-
-      const [feesRes, disciplineRes, remarksRes] = await Promise.all([
-        feesQ.maybeSingle(),
-        discQ.maybeSingle(),
-        remQ.maybeSingle()
-      ]);
-
+      // --- 5. Set Fees, Discipline & Remarks Records ---
       setFeesRecord(feesRes.data || null);
       setDisciplineRecord(disciplineRes.data || null);
       setAdminRemarks(remarksRes.data || null);
@@ -382,7 +389,7 @@ function GeneralEducationReportContent() {
     }
 
     loadReportData();
-  }, [activeTerm, searchParams, router]);
+  }, [activeTerm, searchParams, router, props]);
 
   const handleShare = () => {
     if (typeof window !== 'undefined') {
@@ -441,6 +448,8 @@ function GeneralEducationReportContent() {
             padding: 0 !important;
             margin: 0 !important;
             max-width: 100% !important;
+            page-break-after: always !important;
+            break-after: page !important;
           }
           .print-compact-table td, .print-compact-table th {
             padding-top: 3px !important;
@@ -450,7 +459,7 @@ function GeneralEducationReportContent() {
         }
       `}</style>
 
-      <div className="max-w-4xl mx-auto space-y-4 print:space-y-2 print-container">
+      <div className="max-w-4xl mx-auto space-y-4 print:space-y-0 print-container">
         <div className="flex justify-between items-center no-print">
           <button onClick={() => router.push('/')} className="text-xs font-semibold text-blue-600 hover:underline">&larr; Back to Portal Login</button>
           <div className="flex space-x-2">
@@ -460,27 +469,29 @@ function GeneralEducationReportContent() {
         </div>
 
         <div className="bg-white border border-slate-300 rounded-3xl p-4 sm:p-8 shadow-xl space-y-4 print:space-y-3 print:rounded-none">
-          {/* Header Layout */}
           <div className="border border-slate-300 bg-blue-50/20 rounded-2xl p-3 shadow-sm flex flex-row items-center gap-4">
             <div className="w-20 h-20 sm:w-24 sm:h-24 border border-slate-300 rounded-xl bg-white flex items-center justify-center shrink-0 overflow-hidden p-1">
               {schoolLogo ? <img src={schoolLogo} alt="School Logo" className="w-full h-full object-contain" /> : <span className="text-[9px] font-bold text-slate-400 text-center uppercase">LOGO</span>}
             </div>
             <div className="flex-1 border border-slate-300 rounded-xl bg-white divide-y divide-slate-200 text-center">
+              {/* Line 1: School Name & Single Source of Truth Academic Year */}
               <div className="p-1.5">
                 <h1 className="text-base sm:text-xl font-black text-blue-800 uppercase tracking-tight">{schoolName || 'COLLEGE NAME'}</h1>
-                <p className="text-[10px] sm:text-xs font-semibold text-blue-600">Academic Year: {academicYear || getCurrentAcademicYear()}</p>
+                <p className="text-[10px] sm:text-xs font-semibold text-blue-600">Academic Year: {academicYear}</p>
               </div>
-              <div className="p-1">
-                <p className="text-[11px] sm:text-xs font-bold text-blue-700 uppercase">
-                  REGIONAL DELEGATION OF SECONDARY EDUCATION{schoolRegion ? ` FOR THE ${schoolRegion}` : ''}
+              {/* Line 2: Regional Delegation Title */}
+              <div className="p-1 bg-blue-50/50">
+                <p className="text-[10px] sm:text-xs font-black text-blue-900 uppercase tracking-tight whitespace-nowrap">
+                  REGIONAL DELEGATION FOR SECONDARY EDUCATION
+                  {schoolRegion && ` FOR THE ${schoolRegion.toUpperCase()}`}
                 </p>
               </div>
-              <div className="p-1 flex justify-center items-center gap-x-3 sm:gap-x-4 text-[10px] sm:text-xs font-bold text-blue-600">
-                <span>Address: {schoolAddress || '—'}</span>
-                <span>•</span>
+
+              {/* Line 3: Contact Metadata */}
+              <div className="p-1 flex justify-center items-center gap-x-4 text-[10px] sm:text-xs font-bold text-blue-900 flex-wrap whitespace-nowrap">
                 <span>Tel: {schoolPhone || '—'}</span>
-                <span>•</span>
                 <span>Email: {schoolEmail || '—'}</span>
+                {schoolAddress && <span>Location: {schoolAddress}</span>}
               </div>
             </div>
           </div>

@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../../../../lib/supabase';
 import { getCurrentAcademicYear } from '../../../../lib/academicYear';
+
+
 import { 
   TECHNICAL_INDUSTRIAL_CATALOG, 
   INDUSTRIAL_TRADE_SERIES 
@@ -19,6 +21,7 @@ export default function TechnicalIndustrialMarkSheet({
   );
   const [currentTerm, setCurrentTerm] = useState(selectedTerm);
   const [currentTrade, setCurrentTrade] = useState(selectedTrade);
+  const [isBulkCardOpen, setIsBulkCardOpen] = useState(false);
   
   useEffect(() => {
     if (selectedTerm) {
