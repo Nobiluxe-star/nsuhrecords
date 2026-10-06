@@ -20,7 +20,7 @@ export default function LandingPage() {
   const dropdownRef = useRef(null);
 
   // Authentication Modals State
-  const [activeModal, setActiveModal] = useState(null); // 'staff' | 'forgot_password' | null
+  const [activeModal, setActiveModal] = useState(null); // 'staff' | 'forgot_password' | 'about' | 'contact' | null
   const [selectedRole, setSelectedRole] = useState('');
   const [rolePath, setRolePath] = useState('');
 
@@ -216,27 +216,27 @@ export default function LandingPage() {
 
     // 2. OTHER SCHOOL STAFF (Administrators, Bursar, Supervisor, Discipline Master, Principal, etc.)
     if (selectedRole !== 'Administrator') {
-    const cleanId = inputIdentifier.trim();
+      const cleanId = inputIdentifier.trim();
 
-  const [pRes, aRes] = await Promise.all([
-    supabase
-      .from('school_personnel')
-      .select('*')
-      .or(`unique_id.eq.${cleanId},email.eq.${cleanId.toLowerCase()}`)
-      .maybeSingle(),
-    supabase
-      .from('assigned_schools')
-      .select('*')
-      .or(`unique_id.eq.${cleanId},email.eq.${cleanId.toLowerCase()}`)
-      .maybeSingle()
-  ]);
+      const [pRes, aRes] = await Promise.all([
+        supabase
+          .from('school_personnel')
+          .select('*')
+          .or(`unique_id.eq.${cleanId},email.eq.${cleanId.toLowerCase()}`)
+          .maybeSingle(),
+        supabase
+          .from('assigned_schools')
+          .select('*')
+          .or(`unique_id.eq.${cleanId},email.eq.${cleanId.toLowerCase()}`)
+          .maybeSingle()
+      ]);
 
-  const personnel = pRes.data || aRes.data;
+      const personnel = pRes.data || aRes.data;
 
-  if (!personnel) {
-    alert('Invalid Email or Unique Code.');
-    return;
-  }
+      if (!personnel) {
+        alert('Invalid Email or Unique Code.');
+        return;
+      }
 
       const targetEmail = personnel.email
         ? personnel.email.trim().toLowerCase()
@@ -357,14 +357,30 @@ export default function LandingPage() {
       {/* Top Header */}
       <header className="px-6 py-6 border-b border-slate-800 flex justify-between items-center max-w-7xl mx-auto w-full">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center font-black text-xl text-white shadow-lg shadow-blue-500/30">
-            NR
+          <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center font-black text-lg text-white shadow-lg shadow-blue-500/30">
+            CLs
           </div>
           <div>
-            <h1 className="text-xl font-bold tracking-tight text-white">NsuhRecords</h1>
+            <h1 className="text-xl font-bold tracking-tight text-white">ClassLogs</h1>
             <p className="text-xs text-slate-400">Academic Year 2026 - 2027</p>
           </div>
         </div>
+
+        {/* Top Header Menu Navigation */}
+        <nav className="flex items-center space-x-4 sm:space-x-6 text-xs sm:text-sm font-semibold">
+          <button
+            onClick={() => setActiveModal('about')}
+            className="text-slate-300 hover:text-blue-400 transition cursor-pointer"
+          >
+            ABOUT
+          </button>
+          <button
+            onClick={() => setActiveModal('contact')}
+            className="text-slate-300 hover:text-blue-400 transition cursor-pointer"
+          >
+            CONTACT
+          </button>
+        </nav>
       </header>
 
       {/* Hero Content Area */}
@@ -374,15 +390,15 @@ export default function LandingPage() {
             Modern Mobile Registry for General & Technical Education
           </h2>
           <p className="text-slate-400 text-base leading-relaxed">
-            Eliminating paper delays across Cameroonian schools. Teachers submit sequence scores instantly, parents track live grades, and school leaders manage complete fee records—online or offline.
+            Eliminating paper delays across Cameroonian schools. Teachers submit sequence scores and progression sheets instantly, parents track live grades, and school leaders manage complete fee records—online or offline.
           </p>
           
           <div className="p-6 bg-slate-800/60 rounded-2xl border border-slate-700/60 backdrop-blur-sm space-y-2">
             <h3 className="text-sm font-bold text-slate-200 tracking-wider">
-              ABOUT NsuhRecords
+              Why ClassLogs?
             </h3>
             <p className="text-xs text-slate-300 leading-relaxed">
-              For decades, manual result compilation delayed term performance updates. NsuhRecords brings real-time American-style registry standards to General and Technical (CAP, Industrial F-Series, Commercial STT) schools, featuring instant student access and enterprise-grade data security.
+              For decades, manual result compilation delayed term performance and results updates. ClassLogs brings real-time Modern-style registry standards to General and Technical (CAP, Industrial F-Series, Commercial STT) schools, featuring instant student access and enterprise-grade data security.
             </p>
           </div>
         </div>
@@ -542,8 +558,139 @@ export default function LandingPage() {
       </section>
 
       <footer className="p-6 border-t border-slate-800 text-center space-y-1">
-        <p className="text-xs text-slate-500">&copy; 2026 NsuhRecords. All rights reserved.</p>
+        <p className="text-xs text-slate-500">&copy; 2026 ClassLogs by NsuRecords. All rights reserved.</p>
       </footer>
+
+      {/* ABOUT MODAL */}
+      {activeModal === 'about' && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 sm:p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto space-y-6 shadow-2xl relative">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-4 sticky top-0 bg-slate-900 z-10">
+              <div>
+                <span className="text-xs font-bold text-blue-400 tracking-wider uppercase">Product Overview</span>
+                <h3 className="text-xl font-extrabold text-white">What is ClassLogs</h3>
+              </div>
+              <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-white text-lg font-bold p-1">✕</button>
+            </div>
+
+            <div className="space-y-5 text-slate-300 text-xs sm:text-sm leading-relaxed">
+              <p className="text-sm font-semibold text-white bg-blue-900/30 p-3.5 rounded-xl border border-blue-700/40">
+                ClassLogs by NsuRecords is not just as an ordinary school management app like any other, It is an operational control center for school administrators, teachers and students.
+              </p>
+
+              <p className="font-bold text-white text-base pt-1">
+                Here is why ClassLogs is an Indispensible Tool for all Secondary and High Schools:
+              </p>
+
+              <div className="space-y-4">
+                <div className="p-4 bg-slate-800/60 rounded-xl border border-slate-700/60 space-y-1">
+                  <h4 className="font-bold text-blue-400 text-sm">
+                    "ClassLogs is Built Specifically for Cameroonian Classrooms, Not Generic Schools"
+                  </h4>
+                  <p className="text-slate-300">
+                    "Other apps force you to adapt your technical or commercial trade series to their basic template. ClassLogs comes pre-configured for official MINSEC trade codes and academic series out of the box."
+                  </p>
+                </div>
+
+                <div className="p-4 bg-slate-800/60 rounded-xl border border-slate-700/60 space-y-1">
+                  <h4 className="font-bold text-amber-400 text-sm">
+                    Real-Time Inspectorate & Syllabus Tracking
+                  </h4>
+                  <p className="text-slate-300">
+                    Stop flipping through physical paper logbooks. ClassLogs digitizes daily teacher log sheets so administrators can track lesson progression per subject in real time across the entire term and year. This is coupled with an official MINSEC link that can be sent to supervisors to track teacher progression sheets.
+                  </p>
+                </div>
+
+                <div className="p-4 bg-slate-800/60 rounded-xl border border-slate-700/60 space-y-1">
+                  <h4 className="font-bold text-emerald-400 text-sm">
+                    One Minute Report Generation and Instant Download
+                  </h4>
+                  <p className="text-slate-300">
+                    Do not disturb teachers to fill report cards manually, rather enforce them to fill marks from their phones and get them centralised into a unified master mark sheet that automatically calculates averages, ranks students, and produce report cards that can be downloaded instantly with just a click from any devise.
+                  </p>
+                </div>
+
+                <div className="p-4 bg-slate-800/60 rounded-xl border border-slate-700/60 space-y-1">
+                  <h4 className="font-bold text-purple-400 text-sm">
+                    "Zero Software Maintenance via Multi-Tenancy"
+                  </h4>
+                  <p className="text-slate-300">
+                    "You don't need local IT servers or complex database maintenance when there is any technical error. Our cloud multi-tenant framework means your school gets instant access, enterprise-level security, and continuous updates without taking down your system."
+                  </p>
+                </div>
+
+                <div className="p-4 bg-slate-800/60 rounded-xl border border-slate-700/60 space-y-1">
+                  <h4 className="font-bold text-cyan-400 text-sm">
+                    "Blazing Fast on Any Device"
+                  </h4>
+                  <p className="text-slate-300">
+                    "Built on modern React and web standards, the app loads instantly on cheap smartphones, tablets, or old desktop computers, even on slow mobile connections." Though it requires the internet
+                  </p>
+                </div>
+
+                <div className="p-4 bg-slate-800/60 rounded-xl border border-slate-700/60 space-y-1">
+                  <h4 className="font-bold text-pink-400 text-sm">
+                    Parents track their student performance at home
+                  </h4>
+                  <p className="text-slate-300">
+                    With a dedicated Parent/students portal, parents can track the results of their children back by using just the student matricule.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                onClick={() => setActiveModal('contact')}
+                className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-xl font-semibold text-xs transition shadow-lg shadow-blue-600/30"
+              >
+                Claim Your 03 Months Free Trial →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONTACT MODAL */}
+      {activeModal === 'contact' && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 sm:p-8 max-w-lg w-full space-y-6 shadow-2xl relative">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+              <div>
+                <span className="text-xs font-bold text-emerald-400 tracking-wider uppercase">Direct Onboarding & Support</span>
+                <h3 className="text-xl font-extrabold text-white">CONTACT US</h3>
+              </div>
+              <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-white text-lg font-bold p-1">✕</button>
+            </div>
+
+            <div className="space-y-5 text-slate-300 text-xs sm:text-sm leading-relaxed">
+              <div className="bg-gradient-to-r from-blue-900/40 to-slate-800 p-5 rounded-2xl border border-blue-700/50 space-y-2">
+                <h4 className="text-base font-bold text-white">Need an app like this for your school?</h4>
+                <p className="text-slate-200">
+                  Installation is simple, contact us via the number <strong className="text-emerald-400 text-sm">682491149</strong> and get a <span className="bg-amber-500/20 text-amber-300 font-bold px-2 py-0.5 rounded">03 months free trial version</span>. You only pay once you are satisfied with the results.
+                </p>
+              </div>
+
+              <div className="p-4 bg-slate-800/60 rounded-xl border border-slate-700/60 space-y-2">
+                <h4 className="font-bold text-slate-200 text-xs uppercase tracking-wider">About The Engineering Team</h4>
+                <p className="text-slate-300">
+                  NsuRecords is a Software Engineering Company specialised in the production of all kinds of software that solves real life problems. Front end, and back end web developement, mobile applications and any digital product on demand are related services.
+                </p>
+              </div>
+            </div>
+
+            <div className="pt-2 flex justify-between items-center border-t border-slate-800">
+              <span className="text-xs text-slate-400">Call / WhatsApp: 682491149</span>
+              <button
+                onClick={() => setActiveModal(null)}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-xl font-semibold text-xs transition"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* STAFF LOGIN MODAL */}
       {activeModal === 'staff' && (

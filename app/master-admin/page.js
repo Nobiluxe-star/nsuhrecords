@@ -40,6 +40,13 @@ export default function MasterDeveloperPortal() {
   // Selected school for deep student & teacher auditing
   const [selectedSchoolId, setSelectedSchoolId] = useState(null);
 
+  // Edit School Modal State
+  const [editingSchool, setEditingSchool] = useState(null);
+  const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editRegion, setEditRegion] = useState('Northwest');
+
   // Form state for assigning a new school
   const [newSchoolName, setNewSchoolName] = useState('');
   const [newSchoolEmail, setNewSchoolEmail] = useState('');
@@ -66,26 +73,53 @@ export default function MasterDeveloperPortal() {
   const fetchAssignedSchools = async () => {
     setIsLoadingSchools(true);
     try {
-      const { data, error } = await supabase
-        .from('assigned_schools')
-        .select('*');
+      const [schoolsRes, personnelRes, teachersRes] = await Promise.all([
+        supabase.from('assigned_schools').select('*'),
+        supabase.from('school_personnel').select('school_id, id'),
+        supabase.from('teachers').select('school_id, teacher_id')
+      ]);
 
-      if (error) {
-        console.error('Error fetching assigned schools:', error);
-      } else if (data) {
-        const mappedSchools = data.map((item) => ({
-          id: item.school_id || item.id,
-          name: item.name || 'Unnamed Institution',
-          region: item.region || 'Northwest',
-          contactEmail: item.admin_email || item.email || item.contact_email || 'admin@school.cm',
-          contactPhone: item.contact_phone || item.phone || '670000000',
-          status: item.status || 'Active',
-          isDeleted: item.is_deleted === true || item.isDeleted === true,
-          plan: item.plan || 'Standard',
-          portalLink: item.portal_link || '',
-          registrationUsed: item.registration_used === true,
-          students: item.students || [],
-          teachers: item.teachers || []
+      if (schoolsRes.error) {
+        console.error('Error fetching assigned schools:', schoolsRes.error);
+      } else if (schoolsRes.data) {
+        const personnelData = personnelRes.data || [];
+        const teachersData = teachersRes.data || [];
+
+        const mappedSchools = await Promise.all(schoolsRes.data.map(async (item) => {
+          const sId = item.school_id || item.id;
+          
+          // Query all student tables for complete student count
+          const [baseStudents, genRes, techCommRes, techIndRes] = await Promise.all([
+            supabase.from('students').select('*').eq('school_id', sId),
+            supabase.from('general_education_students').select('*').eq('school_id', sId),
+            supabase.from('technical_commercial_students').select('*').eq('school_id', sId),
+            supabase.from('technical_industrial_students').select('*').eq('school_id', sId)
+          ]);
+
+          const bStu = baseStudents.data || [];
+          const genStu = genRes.data || [];
+          const tcStu = techCommRes.data || [];
+          const tiStu = techIndRes.data || [];
+          const allStudents = [...bStu, ...genStu, ...tcStu, ...tiStu];
+
+          const schoolPersonnelCount = personnelData.filter(p => p.school_id === sId).length;
+          const schoolTeachers = item.teachers || teachersData.filter(t => t.school_id === sId);
+
+          return {
+            id: sId,
+            name: item.name || 'Unnamed Institution',
+            region: item.region || 'Northwest',
+            contactEmail: item.admin_email || item.email || item.contact_email || 'admin@school.cm',
+            contactPhone: item.contact_phone || item.phone || '670000000',
+            status: item.status || 'Active',
+            isDeleted: item.is_deleted === true || item.isDeleted === true,
+            plan: item.plan || 'Standard',
+            portalLink: item.portal_link || '',
+            registrationUsed: item.registration_used === true,
+            students: allStudents,
+            teachers: schoolTeachers,
+            personnelCount: schoolPersonnelCount
+          };
         }));
         setSchools(mappedSchools);
       }
@@ -147,6 +181,19 @@ export default function MasterDeveloperPortal() {
       .eq('school_id', schoolId);
   };
 
+  const handlePermanentDeleteSchool = async (schoolId) => {
+    if (!confirm('Are you sure you want to permanently delete this school? This action cannot be undone.')) {
+      return;
+    }
+
+    setSchools(prev => prev.filter(sch => sch.id !== schoolId));
+
+    await supabase
+      .from('assigned_schools')
+      .delete()
+      .eq('school_id', schoolId);
+  };
+
   const handleRestoreSchool = async (schoolId) => {
     setSchools(prev => prev.map(sch => {
       if (sch.id === schoolId) {
@@ -161,6 +208,52 @@ export default function MasterDeveloperPortal() {
       .eq('school_id', schoolId);
   };
 
+  const openEditModal = (sch) => {
+    setEditingSchool(sch);
+    setEditName(sch.name);
+    setEditEmail(sch.contactEmail);
+    setEditPhone(sch.contactPhone);
+    setEditRegion(sch.region);
+  };
+
+  const handleSaveEditSchool = async (e) => {
+    e.preventDefault();
+    if (!editingSchool) return;
+
+    // Fixed: strict schema payload without 'institution_name'
+    const updatedPayload = {
+      name: editName.trim(),
+      admin_email: editEmail.trim(),
+      contact_phone: editPhone.trim(),
+      region: editRegion
+    };
+
+    const { error } = await supabase
+      .from('assigned_schools')
+      .update(updatedPayload)
+      .eq('school_id', editingSchool.id);
+
+    if (error) {
+      alert('Error updating school: ' + error.message);
+      return;
+    }
+
+    setSchools(prev => prev.map(sch => {
+      if (sch.id === editingSchool.id) {
+        return {
+          ...sch,
+          name: editName.trim(),
+          contactEmail: editEmail.trim(),
+          contactPhone: editPhone.trim(),
+          region: editRegion
+        };
+      }
+      return sch;
+    }));
+
+    setEditingSchool(null);
+  };
+
   const handleAddSchool = async (e) => {
     e.preventDefault();
     if (!newSchoolName.trim() || !newSchoolEmail.trim() || !newSchoolPhone.trim()) return;
@@ -168,9 +261,11 @@ export default function MasterDeveloperPortal() {
     const generatedSchoolUuid = crypto.randomUUID();
     const portalToken = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
     
-    const origin = 'https://nsuhrecords.vercel.app';
-    const encodedSchoolName = encodeURIComponent(newSchoolName.trim());
-    const portalLink = `${origin}/newadminregister?school_id=${generatedSchoolUuid}&school_name=${encodedSchoolName}&token=${portalToken}`;
+    const origin = 'https://classlogs.cc';
+    const slugifiedName = encodeURIComponent(newSchoolName.trim());
+    const portalLink = `${origin}/newadminregister?school_id=${generatedSchoolUuid}&school_name=${slugifiedName}&token=${portalToken}`;
+    
+    // Fixed: payload matched strictly to Supabase columns (name, admin_email, contact_phone)
     const newSchoolSupabasePayload = {
       school_id: generatedSchoolUuid,
       name: newSchoolName.trim(),
@@ -206,11 +301,12 @@ export default function MasterDeveloperPortal() {
       portalLink: portalLink,
       registrationUsed: false,
       students: [],
-      teachers: []
+      teachers: [],
+      personnelCount: 0
     };
 
     setSchools(prev => [...prev, newSchoolObj]);
-    setCreatedSchoolResult({ name: newSchoolName.trim(), link: portalLink });
+    setCreatedSchoolResult({ name: newSchoolName.trim(), link: portalLink, phone: newSchoolPhone.trim() });
     setNewSchoolName('');
     setNewSchoolEmail('');
     setNewSchoolPhone('');
@@ -221,6 +317,11 @@ export default function MasterDeveloperPortal() {
     navigator.clipboard.writeText(linkText);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 3000);
+  };
+
+  const shareViaWhatsApp = (schoolName, linkText, phone) => {
+    const message = encodeURIComponent(`Hello Administrator, here is your official ClassLogs portal onboarding link for ${schoolName}:\n\n${linkText}\n\nPlease click to set up your master password and complete your registration.`);
+    window.open(`https://wa.me/${phone.replace(/[^0-9]/g, '')}?text=${message}`, '_blank');
   };
 
   if (!isDeveloperAuthenticated) {
@@ -238,7 +339,7 @@ export default function MasterDeveloperPortal() {
             <div className="inline-block bg-amber-500/10 text-amber-400 border border-amber-500/30 text-[10px] uppercase font-mono px-3 py-1 rounded-full mb-1">
               Master Developer Restricted Area
             </div>
-            <h1 className="text-xl font-bold tracking-tight text-white">NsuhRecords Core Control</h1>
+            <h1 className="text-xl font-bold tracking-tight text-white">ClassLogs Core Console</h1>
             <p className="text-xs text-gray-400">Authenticate to manage platform access & authorized schools</p>
           </div>
 
@@ -271,7 +372,7 @@ export default function MasterDeveloperPortal() {
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-xs font-medium focus:outline-none"
                 >
-                  {showPassword ? '👁️‍🗨️' : '👁️'}
+                  {showPassword ? '👁‍🗨️️' : '👁️'}
                 </button>
               </div>
             </div>
@@ -291,7 +392,7 @@ export default function MasterDeveloperPortal() {
           </form>
 
           <div className="text-center text-[11px] text-gray-500 pt-2 border-t border-gray-800">
-            Norbert Che Nsuh — Master Infrastructure Portal
+            ClassLogs by NsuRecords — Master Infrastructure Portal
           </div>
         </div>
       </div>
@@ -301,7 +402,14 @@ export default function MasterDeveloperPortal() {
   const activeSchools = schools.filter(s => !s.isDeleted);
   const deletedSchools = schools.filter(s => s.isDeleted);
   const selectedSchool = schools.find(s => s.id === selectedSchoolId);
-  const totalRegisteredUsers = schools.reduce((acc, s) => acc + (s.students?.length || 0) + (s.teachers?.length || 0) + 1, 0);
+  
+  // Dynamic user count (Students + Teachers + School Personnel)
+  const totalRegisteredUsers = schools.reduce((acc, s) => {
+    const studentCount = s.students?.length || 0;
+    const teacherCount = s.teachers?.length || 0;
+    const personnelCount = s.personnelCount || 1;
+    return acc + studentCount + teacherCount + personnelCount;
+  }, 0);
 
   return (
     <div className="min-h-screen bg-[#07090e] text-white font-sans">
@@ -315,12 +423,12 @@ export default function MasterDeveloperPortal() {
           </button>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold tracking-tight text-white">NsuhRecords</h1>
+              <h1 className="text-lg font-bold tracking-tight text-white">ClassLogs</h1>
               <span className="bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] font-mono px-2 py-0.5 rounded">
                 Master Developer Console
               </span>
             </div>
-            <p className="text-xs text-gray-400 mt-0.5">Global Tenant Management & School Access Control</p>
+            <p className="text-xs text-gray-400 mt-0.5">Global Tenant Management & School Access Control (Powered by NsuRecords)</p>
           </div>
         </div>
         <div className="flex items-center gap-4">
@@ -381,16 +489,29 @@ export default function MasterDeveloperPortal() {
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* User Breakdown Metrics */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="bg-[#0f172a] border border-gray-800 p-5 rounded-xl">
-                <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">Total Registered Students</span>
-                <p className="text-4xl font-black mt-2 text-emerald-400">{selectedSchool.students.length}</p>
-                <p className="text-[11px] text-gray-500 mt-1">Full verified student roster and guardian contacts</p>
+                <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">Total Students</span>
+                <p className="text-3xl font-black mt-2 text-emerald-400">{selectedSchool.students.length}</p>
+                <p className="text-[11px] text-gray-500 mt-1">General & Technical Education</p>
               </div>
               <div className="bg-[#0f172a] border border-gray-800 p-5 rounded-xl">
-                <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">Total Registered Teachers</span>
-                <p className="text-4xl font-black mt-2 text-blue-400">{selectedSchool.teachers.length}</p>
-                <p className="text-[11px] text-gray-500 mt-1">Complete faculty directory and phone contacts</p>
+                <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">Total Teachers</span>
+                <p className="text-3xl font-black mt-2 text-blue-400">{selectedSchool.teachers.length}</p>
+                <p className="text-[11px] text-gray-500 mt-1">Faculty & Logbook Instructors</p>
+              </div>
+              <div className="bg-[#0f172a] border border-gray-800 p-5 rounded-xl">
+                <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">School Personnel</span>
+                <p className="text-3xl font-black mt-2 text-purple-400">{selectedSchool.personnelCount || 1}</p>
+                <p className="text-[11px] text-gray-500 mt-1">Admins, Bursars, Discipline Masters</p>
+              </div>
+              <div className="bg-[#0f172a] border border-amber-500/40 p-5 rounded-xl bg-amber-500/5">
+                <span className="text-xs font-semibold uppercase tracking-wider text-amber-400">Billable Active Users</span>
+                <p className="text-3xl font-black mt-2 text-amber-300">
+                  {selectedSchool.students.length + selectedSchool.teachers.length + (selectedSchool.personnelCount || 1)}
+                </p>
+                <p className="text-[11px] text-amber-200/60 mt-1">Combined Subscription Metric</p>
               </div>
             </div>
 
@@ -417,12 +538,12 @@ export default function MasterDeveloperPortal() {
                     ) : (
                       selectedSchool.students.map((stu, i) => (
                         <tr key={i} className="hover:bg-gray-800/40">
-                          <td className="p-3.5 font-mono text-amber-400 font-bold">{stu.id}</td>
-                          <td className="p-3.5 font-semibold text-white">{stu.name}</td>
-                          <td className="p-3.5">{stu.className}</td>
-                          <td className="p-3.5 font-mono">{stu.contact}</td>
-                          <td className="p-3.5">{stu.guardianName}</td>
-                          <td className="p-3.5 font-mono">{stu.guardianContact}</td>
+                          <td className="p-3.5 font-mono text-amber-400 font-bold">{stu.id || stu.unique_code}</td>
+                          <td className="p-3.5 font-semibold text-white">{stu.name || stu.full_name}</td>
+                          <td className="p-3.5">{stu.className || stu.class_name || 'N/A'}</td>
+                          <td className="p-3.5 font-mono">{stu.contact || stu.phone || 'N/A'}</td>
+                          <td className="p-3.5">{stu.guardianName || stu.parent_name || 'N/A'}</td>
+                          <td className="p-3.5 font-mono">{stu.guardianContact || stu.parent_phone || 'N/A'}</td>
                         </tr>
                       ))
                     )}
@@ -451,8 +572,8 @@ export default function MasterDeveloperPortal() {
                     ) : (
                       selectedSchool.teachers.map((tch, i) => (
                         <tr key={i} className="hover:bg-gray-800/40">
-                          <td className="p-3.5 font-semibold text-white">{tch.name}</td>
-                          <td className="p-3.5 font-mono text-blue-400">{tch.contact}</td>
+                          <td className="p-3.5 font-semibold text-white">{tch.name || tch.full_name}</td>
+                          <td className="p-3.5 font-mono text-blue-400">{tch.contact || tch.phone || tch.teacher_id}</td>
                           <td className="p-3.5 text-gray-300">{tch.subjects || 'General Curriculum'}</td>
                         </tr>
                       ))
@@ -497,15 +618,16 @@ export default function MasterDeveloperPortal() {
                       <th className="p-3.5">Region</th>
                       <th className="p-3.5">One-Time Sign-Up Link</th>
                       <th className="p-3.5">Status</th>
+                      <th className="p-3.5 text-center">Edit / Actions</th>
                       <th className="p-3.5 text-center">Toggle Access</th>
                       <th className="p-3.5 text-center">Remove / Trash</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-800">
                     {isLoadingSchools ? (
-                      <tr><td colSpan="7" className="p-8 text-center text-gray-400">Loading schools from Supabase...</td></tr>
+                      <tr><td colSpan="8" className="p-8 text-center text-gray-400">Loading schools from Supabase...</td></tr>
                     ) : activeSchools.length === 0 ? (
-                      <tr><td colSpan="7" className="p-8 text-center text-gray-500">No schools found in database. Use the "Create School Sign-Up Link" tab to add one.</td></tr>
+                      <tr><td colSpan="8" className="p-8 text-center text-gray-500">No schools found in database. Use the "Create School Sign-Up Link" tab to add one.</td></tr>
                     ) : (
                       activeSchools.map((sch) => (
                        <tr
@@ -518,25 +640,35 @@ export default function MasterDeveloperPortal() {
                     <td className="p-3.5 text-gray-300">{sch.region}</td>
                     <td className="p-3.5">
                       {sch.portalLink ? (
-                        <div className="flex items-center gap-2 bg-emerald-950/60 border border-emerald-500/40 p-1.5 rounded-md">
+                        <div className="flex items-center gap-1.5 bg-emerald-950/60 border border-emerald-500/40 p-1.5 rounded-md">
                           <a
-                            href={sch.portalLink.replace(/^(https?:\/\/localhost:\d+|^\/)/, 'https://nsuhrecords.vercel.app')}
+                            href={sch.portalLink.replace(/^(https?:\/\/localhost:\d+|^\/)/, 'https://classlogs.cc')}
                             target="_blank"
                             rel="noopener noreferrer"
                             onClick={(e) => e.stopPropagation()}
                             className="font-mono text-[11px] text-emerald-300 bg-emerald-900/80 hover:bg-emerald-800 hover:underline px-2 py-0.5 rounded truncate max-w-xs transition"
                             title="Click to open link"
                           >
-                            {sch.portalLink.replace(/^(https?:\/\/localhost:\d+|^\/)/, 'https://nsuhrecords.vercel.app')}
+                            {sch.portalLink.replace(/^(https?:\/\/localhost:\d+|^\/)/, 'https://classlogs.cc')}
                           </a>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              copyToClipboard(sch.portalLink.replace(/^(https?:\/\/localhost:\d+|^\/)/, 'https://nsuhrecords.vercel.app'));
+                              copyToClipboard(sch.portalLink.replace(/^(https?:\/\/localhost:\d+|^\/)/, 'https://classlogs.cc'));
                             }}
-                            className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-2.5 py-1 rounded text-[10px] transition shrink-0"
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-2 py-1 rounded text-[10px] transition shrink-0"
                           >
-                            Copy Link
+                            Copy
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              shareViaWhatsApp(sch.name, sch.portalLink.replace(/^(https?:\/\/localhost:\d+|^\/)/, 'https://classlogs.cc'), sch.contactPhone);
+                            }}
+                            className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold px-2 py-1 rounded text-[10px] transition shrink-0"
+                            title="Share on WhatsApp"
+                          >
+                            WhatsApp
                           </button>
                         </div>
                       ) : (
@@ -547,6 +679,14 @@ export default function MasterDeveloperPortal() {
                       <span className={`px-2 py-1 rounded text-xs font-bold ${sch.status === 'Active' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-red-950 text-red-400 border border-red-800'}`}>
                         {sch.status || 'Active'}
                       </span>
+                    </td>
+                    <td className="p-3.5 text-center">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); openEditModal(sch); }}
+                        className="px-3 py-1.5 bg-blue-950/60 hover:bg-blue-900 text-blue-300 border border-blue-800 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                      >
+                        Edit
+                      </button>
                     </td>
                     <td className="p-3.5 text-center">
                       <button
@@ -598,6 +738,12 @@ export default function MasterDeveloperPortal() {
                     className="flex-1 bg-amber-600 hover:bg-amber-500 text-white font-semibold py-2.5 rounded-lg text-xs shadow transition-colors cursor-pointer"
                   >
                     {copiedLink ? 'Copied to Clipboard!' : 'Copy Sign-Up Link'}
+                  </button>
+                  <button
+                    onClick={() => shareViaWhatsApp(createdSchoolResult.name, createdSchoolResult.link, createdSchoolResult.phone)}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-2.5 rounded-lg text-xs shadow transition-colors cursor-pointer"
+                  >
+                    Share on WhatsApp
                   </button>
                   <button
                     onClick={() => setCreatedSchoolResult(null)}
@@ -694,11 +840,12 @@ export default function MasterDeveloperPortal() {
                     <th className="p-3.5">Region</th>
                     <th className="p-3.5">Contact Email</th>
                     <th className="p-3.5 text-center">Restore Access</th>
+                    <th className="p-3.5 text-center">Permanent Delete</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-800">
                   {deletedSchools.length === 0 ? (
-                    <tr><td colSpan="5" className="p-8 text-center text-gray-500">Trash is currently empty. No schools have been soft-deleted.</td></tr>
+                    <tr><td colSpan="6" className="p-8 text-center text-gray-500">Trash is currently empty. No schools have been soft-deleted.</td></tr>
                   ) : (
                     deletedSchools.map((sch) => (
                       <tr key={sch.id} className="hover:bg-gray-800/40">
@@ -714,6 +861,14 @@ export default function MasterDeveloperPortal() {
                             Restore School
                           </button>
                         </td>
+                        <td className="p-3.5 text-center">
+                          <button
+                            onClick={() => handlePermanentDeleteSchool(sch.id)}
+                            className="px-3 py-1.5 bg-red-900/60 hover:bg-red-800 text-white border border-red-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                          >
+                            Delete Permanently
+                          </button>
+                        </td>
                       </tr>
                     ))
                   )}
@@ -723,6 +878,82 @@ export default function MasterDeveloperPortal() {
           </div>
         ) : null}
       </main>
+
+      {/* EDIT SCHOOL MODAL */}
+      {editingSchool && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-50">
+          <div className="bg-[#0f172a] border border-gray-700 rounded-2xl p-6 max-w-md w-full space-y-5 shadow-2xl relative">
+            <div className="flex justify-between items-center border-b border-gray-800 pb-3">
+              <h3 className="text-base font-bold text-white">Edit Assigned School Details</h3>
+              <button onClick={() => setEditingSchool(null)} className="text-gray-400 hover:text-white text-lg font-bold">✕</button>
+            </div>
+
+            <form onSubmit={handleSaveEditSchool} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-semibold uppercase tracking-wider text-gray-400 mb-1">Institution Name</label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full bg-[#1e293b] border border-gray-700 rounded-lg p-2.5 text-white focus:outline-none focus:border-amber-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold uppercase tracking-wider text-gray-400 mb-1">Admin Email</label>
+                <input
+                  type="email"
+                  value={editEmail}
+                  onChange={(e) => setEditEmail(e.target.value)}
+                  className="w-full bg-[#1e293b] border border-gray-700 rounded-lg p-2.5 text-white focus:outline-none focus:border-amber-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold uppercase tracking-wider text-gray-400 mb-1">Contact Phone Number</label>
+                <input
+                  type="text"
+                  value={editPhone}
+                  onChange={(e) => setEditPhone(e.target.value)}
+                  className="w-full bg-[#1e293b] border border-gray-700 rounded-lg p-2.5 text-white focus:outline-none focus:border-amber-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold uppercase tracking-wider text-gray-400 mb-1">Region</label>
+                <select
+                  value={editRegion}
+                  onChange={(e) => setEditRegion(e.target.value)}
+                  className="w-full bg-[#1e293b] border border-gray-700 rounded-lg p-2.5 text-white focus:outline-none focus:border-amber-500"
+                >
+                  {CAMEROON_REGIONS.map(reg => (
+                    <option key={reg} value={reg}>{reg}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="pt-2 flex gap-3">
+                <button
+                  type="submit"
+                  className="flex-1 bg-amber-600 hover:bg-amber-500 text-white font-bold py-2.5 rounded-lg text-xs transition"
+                >
+                  Save Changes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingSchool(null)}
+                  className="px-4 bg-gray-800 hover:bg-gray-700 text-gray-300 font-semibold py-2.5 rounded-lg text-xs transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

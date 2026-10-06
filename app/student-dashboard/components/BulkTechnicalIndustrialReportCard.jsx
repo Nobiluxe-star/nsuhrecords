@@ -1097,19 +1097,25 @@ export default function BulkTechnicalIndustrialReportCard({
 
           {/* PRINT & DOWNLOAD PDF BUTTONS */}
           <div className="flex items-center gap-2 self-end">
-            <button
-              type="button"
-              disabled={isDownloading || studentsList.length === 0}
-              onClick={handleDownloadPDF}
-              className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow-md transition-all flex items-center gap-1.5 disabled:opacity-50"
-            >
-              <span>📥</span> {isDownloading ? statusMessage || 'Exporting...' : 'Download Vector PDF'}
-            </button>
-
+           <button
+  type="button"
+  disabled={isDownloading || studentsList.length === 0}
+  onClick={handleDownloadPDF}
+  className="px-2 sm:px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow transition-all flex items-center gap-1 shrink-0 disabled:opacity-50"
+  title="Download Vector PDF"
+>
+  <span className="text-sm">📥</span>
+  <span className="hidden sm:inline">
+    {isDownloading ? statusMessage || 'Exporting...' : 'Download Vector PDF'}
+  </span>
+  <span className="inline sm:hidden">
+    {isDownloading ? '...' : 'PDF'}
+  </span>
+</button>
             <button
               type="button"
               onClick={() => window.print()}
-              className="px-4 py-1.5 bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-black rounded-xl shadow-md transition-all"
+              className="px-2 sm:px-4 py-1.5 bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-black rounded-xl shadow-md transition-all shrink-0"
             >
               Print
             </button>
@@ -1117,7 +1123,7 @@ export default function BulkTechnicalIndustrialReportCard({
             <button
               type="button"
               onClick={onClose}
-              className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-xl transition-all"
+              className="px-2 sm:px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-xl transition-all shrink-0"
             >
               Close
             </button>

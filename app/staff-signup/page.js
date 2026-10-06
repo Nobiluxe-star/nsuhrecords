@@ -182,11 +182,11 @@ function StaffSignupContent() {
       <header className="flex items-center justify-between max-w-5xl w-full mx-auto py-2">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-xl text-white shadow-lg shadow-blue-500/20">
-            N
+            
           </div>
           <div>
             <h1 className="text-lg font-bold tracking-tight text-white leading-none">
-              NsuhRecords
+            ClassLogs by NsuRecords
             </h1>
             <p className="text-xs text-slate-400 mt-1">
               Registry for General & Technical Education
@@ -202,7 +202,7 @@ function StaffSignupContent() {
               {roleParam} Onboarding {activeSchoolName ? `• ${activeSchoolName}` : ""}
             </span>
             <h2 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight">
-              Welcome to NsuhRecords
+              Welcome to ClassLogs
             </h2>
             <p className="text-sm text-slate-400 mt-1">
               Complete your initial account setup to access your portal.
@@ -360,7 +360,7 @@ function StaffSignupContent() {
       </main>
 
       <footer className="text-center py-2 text-xs text-slate-500">
-        &copy; {new Date().getFullYear()} NsuhRecords System. All rights reserved.
+        &copy; {new Date().getFullYear()} ClassLogs by NsuRecords. All rights reserved.
       </footer>
     </div>
   );

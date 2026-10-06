@@ -1,6 +1,7 @@
 'use client';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
+import { APP_BASE_URL } from '../lib/classlogsConfig';
 import * as XLSX from 'xlsx';
 
 import { getCurrentAcademicYear } from '../../lib/academicYear';
@@ -372,6 +373,7 @@ export default function AdminDashboardPage() {
   const [selectedTeacherForLogs, setSelectedTeacherForLogs] = useState(null);
   const [fetchedLessonLogs, setFetchedLessonLogs] = useState([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+  const [teacherSearchQuery, setTeacherSearchQuery] = useState('');
 
 // --- MEMBER REGISTRATION INITIAL DRAFT RECOVERY ---
   const getInitialDraft = () => {
@@ -1151,7 +1153,7 @@ const [teacherPhotoPreview, setTeacherPhotoPreview] = useState(null);
   const [currentTime, setCurrentTime] = useState(null);
   const [schedulerData, setSchedulerData] = useState({});
 
-  const [editingStudent, setEditingStudent] = useState(null);
+const [editingStudent, setEditingStudent] = useState(null);
 const [editFormData, setEditFormData] = useState({});
 const [studentToDelete, setStudentToDelete] = useState(null);
 const handleRowClick = (student) => {
@@ -1164,6 +1166,7 @@ const handleRowClick = (student) => {
 
  const handleSaveStudent = async (e) => {
     e.preventDefault();
+ const currentSchoolId = activeSchool?.school_id || activeSchool?.id || (typeof window !== 'undefined' ? localStorage.getItem('active_school_id') : null);
 // Strict validation guard using single source of truth trade arrays
 const targetSec = (editFormData?.section || '').toLowerCase();
 const chosenTrade = editFormData?.trades_series || editFormData?.series || '';
@@ -1192,10 +1195,10 @@ if (!editFormData?.residence || !editFormData.residence.trim()) {
 
   // 1. Save changes to Supabase database
   const { error } = await supabase
-    .from('students')
-    .eq('school_id', currentSchoolId)
-    .update(payloadToSave)
-    .eq('id', editFormData.id);
+  .from('students')
+  .update(payloadToSave)
+  .eq('id', editFormData.id)
+  .eq('school_id', currentSchoolId);
 
     if (error) {
       alert("Error saving student to Supabase: " + error.message);
@@ -2324,13 +2327,12 @@ const cachedStudents = JSON.parse(localStorage.getItem(studentCacheKey) || '[]')
   }
 
   const token = Math.random().toString(36).substring(2, 10);
-  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://nsuhrecords.vercel.app/';
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : APP_BASE_URL;
 
   // Explicitly passes role= parameter and formatted query params
-  const signupLink = activeEditRecord?.signup_link || `${baseUrl}/staff-signup?role=${encodeURIComponent(regRole)}&token=${token}&id=${uniqueStaffId}`;
-
-   const activeSchoolId = typeof schoolId !== 'undefined' ? schoolId : (activeSchool?.school_id || activeSchool?.id || '');
-const activeSchoolName = (typeof active_school_name !== 'undefined' ? active_school_name : null) || activeSchool?.name || activeSchool?.['school-name'] || 'NsuhRecords School';
+const signupLink = activeEditRecord?.signup_link || `${baseUrl}/staff-signup?role=${encodeURIComponent(regRole)}&school_id=${encodeURIComponent(activeSchoolId)}&token=${token}`;
+const activeSchoolId = typeof schoolId !== 'undefined' ? schoolId : (activeSchool?.school_id || activeSchool?.id || '');
+const activeSchoolName = (typeof active_school_name !== 'undefined' ? active_school_name : null) || activeSchool?.name || activeSchool?.['school-name'] || 'NsuRecords School';
 const newStaffRecord = {
   school_id: activeSchoolId,
   school_name: activeSchoolName,
@@ -2371,7 +2373,7 @@ if (error) {
     ...savedPerson,
     fullName: fullName,
     uniqueStaffId: uniqueStaffId,
-    signupLink: `${savedPerson.signupLink}&school_id=${activeSchoolId}`
+    signupLink: savedPerson.signupLink
   });
 }
 setFullName('');
@@ -2932,13 +2934,14 @@ const handleUpdatePersonnel = async (e) => {
 
     {/* ACTIONS */}
     <div className="flex flex-wrap items-center gap-4 pt-2">
-      <button
-        type="button"
-        onClick={handleDownloadBulkTemplate}
-        className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg text-xs font-semibold flex items-center gap-2 shadow-md transition-all"
-      >
-        📥 Download Class Template (.xlsx)
-      </button>
+     <button
+  type="button"
+  onClick={handleDownloadBulkTemplate}
+  className="px-3 sm:px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shrink-0"
+>
+  📊 <span className="hidden sm:inline">Download Class Template (.xlsx)</span>
+  <span className="inline sm:hidden">Template (.xlsx)</span>
+</button>
 
       <input
         type="file"
@@ -3393,7 +3396,16 @@ const handleUpdatePersonnel = async (e) => {
 
             {successPopup && (
               <div className="absolute inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-6 z-50">
-                <div className="bg-[#111827] border border-amber-500 p-6 rounded-2xl max-w-md w-full text-center space-y-4 shadow-2xl">
+               <div className="relative bg-[#111827] border border-amber-500 p-6 rounded-2xl max-w-md w-full text-center space-y-4 shadow-2xl">
+                {/* Top Right Close Button */}
+           <button
+           type="button"
+             onClick={() => setSuccessPopup(null)}
+              className="absolute top-3 right-3 text-gray-400 hover:text-white text-lg font-bold w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors"
+              title="Close"
+                  >
+                  ✕
+            </button>
                   <div className="w-12 h-12 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center mx-auto text-xl font-bold">✓</div>
                   <h3 className="text-lg font-bold text-white">Student Registered Successfully!</h3>
                   <div className="bg-[#1f2937] border border-dashed border-amber-500/60 p-3 rounded-xl text-amber-400 font-mono text-lg font-bold select-all">
@@ -3402,7 +3414,7 @@ const handleUpdatePersonnel = async (e) => {
                   <button 
                     onClick={() => {
                       navigator.clipboard.writeText(successPopup);
-                      alert('Copied to clipboard!');
+                      
                       setSuccessPopup(null);
                     }}
                     className="w-full bg-amber-600 hover:bg-amber-500 text-white font-semibold py-2.5 rounded-lg text-sm"
@@ -3635,14 +3647,17 @@ const handleUpdatePersonnel = async (e) => {
 </div>
 </div>
 
-<div className="relative group sm:w-auto w-full">
-  <button
-    type="button"
-    onClick={handleExportExcel}
-    className="w-full sm:w-auto px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 active:scale-95 transition-transform text-white font-semibold text-xs rounded-lg flex items-center justify-center gap-1.5 shadow-sm"
-  >
-    📊 Export to Excel
-  </button>
+<div className="relative group flex-1 sm:flex-initial">
+ <button
+  type="button"
+  onClick={handleExportExcel}
+  className="w-full sm:w-auto px-2 sm:px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 active:scale-95 transition-transform text-white text-xs font-bold rounded-lg shadow flex items-center justify-center gap-1 shrink-0"
+  title="Export to Excel"
+>
+  <span className="text-sm">📊</span>
+  <span className="hidden sm:inline">Export to Excel</span>
+  <span className="inline sm:hidden">Excel</span>
+</button>
   
   {/* Pop-up Tooltip */}
   <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:flex group-active:flex flex-col items-center w-64 p-2.5 bg-[#0f172a] text-white text-[11px] rounded-md shadow-2xl border border-gray-700 pointer-events-none z-50 text-center leading-tight">
@@ -3650,15 +3665,20 @@ const handleUpdatePersonnel = async (e) => {
     <div className="w-2 h-2 bg-[#0f172a] border-r border-b border-gray-700 rotate-45 -mb-3 mt-1"></div>
   </div>
 </div>
-
-<button
-  type="button"
-  onClick={() => setShowPdfModal(true)}
-  className="w-full sm:w-auto px-3 py-1.5 bg-rose-700 hover:bg-rose-600 active:scale-95 transition-transform text-white font-medium text-xs rounded flex items-center justify-center gap-1.5 cursor-pointer"
->
-  📄 Download PDF
-</button>
+{/* PDF Export Button */}
+  <div className="relative group flex-1 sm:flex-initial">
+    <button
+      type="button"
+      onClick={() => setShowPdfModal(true)}
+      className="w-full sm:w-auto px-2 sm:px-3 py-1.5 bg-rose-700 hover:bg-rose-600 active:scale-95 transition-transform text-white text-xs font-bold rounded-lg shadow flex items-center justify-center gap-1"
+      title="Download PDF"
+    >
+      <span className="text-sm">📄</span>
+      <span className="hidden sm:inline">Download PDF</span>
+      <span className="inline sm:hidden">PDF</span>
+    </button>
   </div>
+</div>
   {/* PDF Export Modal */}
 {showPdfModal && (
   <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -3877,27 +3897,57 @@ const handleUpdatePersonnel = async (e) => {
         {/* 1. ASSIGNED TEACHERS SUB-TAB */}
         {teacherSubTab === 'assigned' && (
           <div className="space-y-4">
-            <h2 className="text-lg font-bold text-white border-b border-gray-800 pb-3 flex justify-between items-center">
-              <span>All Assigned Teachers Summary (Click ID to Copy)</span>
-              <span className="text-xs bg-amber-500/20 text-amber-400 px-3 py-1 rounded-full border border-amber-500/30">
-                Total: {teachersList.length}
-              </span>
-            </h2>
-          </div>
-          
-        )}
-            {teachersList.length === 0 ? (
-              <div className="text-center py-12 text-gray-500 text-sm">
-                No teachers assigned yet. Use the "Assign New Teacher" tab to add faculty members.
-              </div>
-            ) : (
-   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-  {deleteBanner && (
-    <div className="col-span-full mb-2 p-4 rounded-lg text-sm font-medium text-center shadow-lg transition-all bg-emerald-900/60 border border-emerald-500 text-emerald-300">
-      {deleteBanner.message}
+           <h2 className="text-lg font-bold text-white border-b border-gray-800 pb-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+  <span>All Assigned Teachers Summary (Click ID to Copy)</span>
+  
+  <div className="flex items-center gap-3 w-full sm:w-auto">
+    <div className="relative flex-1 sm:w-64">
+      <input
+        type="text"
+        placeholder="Search teacher, subject..."
+        value={teacherSearchQuery}
+        onChange={(e) => setTeacherSearchQuery(e.target.value)}
+        className="w-full bg-[#111827] border border-amber-500/50 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-400 focus:outline-none focus:border-amber-400 transition-colors"
+      />
+      {teacherSearchQuery && (
+        <button
+          type="button"
+          onClick={() => setTeacherSearchQuery('')}
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white text-xs p-1"
+        >
+          ✕
+        </button>
+      )}
     </div>
-  )}
-  {teachersList.map((teacher, index) => ( 
+
+    <span className="text-xs bg-amber-500/20 text-amber-400 px-3 py-1.5 rounded-full border border-amber-500/30 whitespace-nowrap">
+      Total: {teachersList.filter(t => !teacherSearchQuery || JSON.stringify(t).toLowerCase().includes(teacherSearchQuery.toLowerCase())).length}
+    </span>
+  </div>
+</h2>
+          </div>
+       
+        )}
+
+  {teachersList.filter(t => 
+  !teacherSearchQuery || 
+  JSON.stringify(t).toLowerCase().includes(teacherSearchQuery.toLowerCase())
+).length === 0 ? (
+  <div className="text-center py-12 text-gray-500 text-sm">
+    No matching teachers found for "{teacherSearchQuery}".
+  </div>
+) : (
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    {deleteBanner && (
+      <div className="col-span-full mb-2 p-4 rounded-lg text-sm font-medium text-center shadow-lg transition-all">
+        {deleteBanner.message}
+      </div>
+    )}
+    {teachersList.filter(t => 
+      !teacherSearchQuery || 
+      JSON.stringify(t).toLowerCase().includes(teacherSearchQuery.toLowerCase())
+    ).map((teacher, index) => (
+
 <div key={`${teacher.id || teacher.teacher_id || 'teacher'}-${index}`} className="bg-[#1f2937]/50 border border-gray-800 p-5 rounded-xl space-y-4">
     <div>
       {/* Header: Teacher Name, Contact & Copyable ID */}
@@ -5011,9 +5061,12 @@ const handleUpdatePersonnel = async (e) => {
 
     doc.save(`${teacherName.replace(/\s+/g, '_')}_Timetable.pdf`);
   }}
-  className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-3 py-2 rounded-lg"
+className="px-2 sm:px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg shadow flex items-center gap-1 shrink-0"
+  title="Download Timetable PDF"
 >
-  Download PDF
+  <span className="text-sm">📄</span>
+  <span className="hidden sm:inline">Download PDF</span>
+  <span className="inline sm:hidden">PDF</span>
 </button>
               </div>
             </div>
@@ -5171,7 +5224,7 @@ return (
           🎓
         </div>
         <h2 className="text-2xl font-extrabold text-blue-400">
-          Welcome to NsuhRecords, thank you for trusting us!
+          Welcome to ClassLogs, thank you for trusting us!
         </h2>
         <p className="text-gray-300 text-sm font-semibold mt-2">
           School administration dashboard for <span className="text-blue-300 font-bold">{activeSchool?.name || activeSchool?.institution_name || "Your School"}</span>
@@ -5186,9 +5239,9 @@ return (
           <li>Easily register and manage new students.</li>
           <li>Assign teachers and generate downloadable time tables upon assignment.</li>
           <li>Empower teachers to record student marks easily with their phones.</li>
-          <li>Manage institutional financial records seamlessly.</li>
+          <li>Instantly generate MINSEC report cards after marks are entered.</li>
           <li>Help parents track real-time live performance of their children at school.</li>
-          <li>Track and record student attendance.</li>
+          <li>Manage institutional financial records seamlessly.</li>
           <li>Permit school supervisors to have access and control school records.</li>
         </ul>
       </div>

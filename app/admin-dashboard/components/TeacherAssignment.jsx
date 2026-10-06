@@ -304,8 +304,7 @@ useEffect(() => {
     );
 
     const signupToken = 'teach_' + Math.random().toString(36).substring(2, 9);
-    const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
-
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : (APP_BASE_URL || 'https://classlogs.cc');
     let activeSchoolId = activeSchool?.school_id || activeSchool?.id || localStorage.getItem('active_school_id') || localStorage.getItem('activeSchoolId');
     let activeSchoolName = activeSchool?.name || activeSchool?.['school-name'] || schoolName;
 
