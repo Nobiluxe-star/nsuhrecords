@@ -1842,7 +1842,7 @@ const handleExportPDF = async (exportType = 'all') => {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(16);
     doc.setTextColor(4, 80, 42); // Forest Green
-    doc.text(String(tenantSchoolName || 'DEVELOPPER TEST INSTITUTE').toUpperCase(), 105, currentY, { align: 'center' });
+    doc.text(String(tenantSchoolName || activeSchool?.name || 'INSTITUTION').toUpperCase(), 105, currentY);
     currentY += 5;
 
     // Decorative Accent Line
@@ -2490,76 +2490,53 @@ const handleUpdatePersonnel = async (e) => {
 
   return (
     <div className="min-h-screen bg-[#0b0f19] text-white font-sans">
-      <header className="bg-[#111827] border-b border-gray-800 px-6 py-4 flex justify-between items-center shadow-lg">
-        <div className="flex items-center gap-4">
-          {navigationHistory.length > 1 && (
-            <button 
-              onClick={handleGoBack}
-              className="bg-gray-800 hover:bg-gray-700 text-sky-400 border border-gray-700 text-xs px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1 transition-colors"
-            >
-              ← Back
-            </button>
+    {/* Modern International Header Presentation */}
+    <header className="w-full bg-[#0d1527] border-b border-slate-800 px-4 py-3 sm:px-6">
+      <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
+
+        {/* LEFT: School Logo */}
+        <div className="flex items-center shrink-0">
+          {schoolLogo && (schoolLogo.startsWith('http') || schoolLogo.startsWith('data:image')) ? (
+            <img
+              src={schoolLogo}
+              alt="School Logo"
+              className="h-10 sm:h-12 md:h-14 w-auto object-contain filter drop-shadow-md transition-all"
+            />
+          ) : (
+            <div className="h-9 w-9 sm:h-11 sm:w-11 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center">
+              <span className="text-[10px] sm:text-xs font-bold text-sky-400">LOGO</span>
+            </div>
           )}
-          <div>
-            <h1 className="text-xl font-bold tracking-tight text-blue-500 uppercase">
-              {hasMounted ? (localStorage.getItem('active_school_name') || localStorage.getItem('activeSchoolName') || 'School Admin Portal') : 'School Admin Portal'}
-</h1>
-<p className="text-xs text-gray-400">Academic Year: {getCurrentAcademicYear()} | Administrator Portal | Contact: {schoolContact}</p>          </div>
         </div>
-    {/* High-Resolution School Logo Container */}
-<div className="hidden md:flex items-center justify-center p-1">
-  {schoolLogo && (schoolLogo.startsWith('http') || schoolLogo.startsWith('data:image')) ? (
-    <img
-      src={schoolLogo}
-      alt="School Logo"
-      className="max-h-12 max-w-full object-contain filter drop-shadow-md"
-    />
-  ) : (
-    <span className="text-xs font-semibold text-sky-400 tracking-wider">LOGO</span>
-  )}
-</div>
-        <div className="flex items-center gap-4">
-          <div className="text-right hidden sm:block">
-            <div className="text-xs font-mono text-blue-400 font-semibold">
-              {currentTime ? currentTime.toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' }) : 'Loading date...'}
-            </div>
-            <div className="text-xs font-mono text-gray-400">
-              {currentTime ? currentTime.toLocaleTimeString() : ''}
-            </div>
-          </div>
-          <span className="text-xs bg-emerald-900/60 text-emerald-400 border border-emerald-700/50 px-3 py-1 rounded-full font-medium">
-            Active Session
+
+        {/* CENTER: Centralized Title & Academic Year */}
+        <div className="text-center flex-1 min-w-0 px-2">
+          <h1 className="text-sm sm:text-base md:text-xl font-extrabold tracking-tight text-amber-100 uppercase truncate">
+            {hasMounted 
+              ? (localStorage.getItem('active_school_name') || localStorage.getItem('activeSchoolName') || activeSchool?.name || activeSchool?.school_name || 'SCHOOL MANAGEMENT SYSTEM') 
+              : 'LOADING...'}
+          </h1>
+          <p className="text-[10px] sm:text-xs text-slate-400 font-medium mt-0.5">
+            Academic Year: <span className="text-amber-100 font-semibold">{getCurrentAcademicYear()}</span>
+            <span className="hidden sm:inline"> | Administrator Portal</span>
+          </p>
+        </div>
+
+        {/* RIGHT: Active Session Badge */}
+        <div className="flex items-center justify-end shrink-0">
+          <span className="text-[10px] sm:text-xs font-semibold bg-emerald-950/90 text-emerald-400 border border-emerald-700/60 px-2.5 py-1 rounded-full inline-flex items-center gap-1.5 shadow-sm">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span className="hidden sm:inline">Active Session</span>
+            <span className="sm:hidden">Active</span>
           </span>
         </div>
-      </header>
-<nav className="hidden md:flex bg-[#111827]/60 border-b border-gray-800 px-6 space-x-6 overflow-x-auto">
-       {[
-  { id: 'overview', label: 'Overview' },
-  { id: 'register', label: 'Register New Member' },
-  { id: 'students', label: 'All Students List' },
-  { id: 'teachers', label: 'Assign New Teacher' },
-  { id: 'teacher-list', label: 'All Teachers List' },
-  { id: 'personnel', label: 'Other School Personnel' },
-  { id: 'coefficients', label: 'Class & Coefficient Settings' },
-  { id: 'master-marks', label: 'Master Mark Sheet' },
-  { id: 'details', label: 'School Details' },
-  { id: 'settings', label: 'General Settings' },
-   
-].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => changeTab(tab.id)}
-            className={`py-3 text-sm font-semibold border-b-2 transition-colors whitespace-nowrap ${
-              activeTab === tab.id
-                ? 'border-blue-500 text-blue-400'
-                : 'border-transparent text-gray-400 hover:text-white'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </nav>
-      <div className={`${activeTab !== 'overview' ? 'hidden' : 'flex'} flex-col gap-2 p-3 md:hidden w-full`}>
+
+      </div>
+    </header>
+
+    {/* Responsive Horizontal Tab Navigation */}
+    <nav className="w-full bg-[#080d1a] border-b border-slate-800/80 px-3 sm:px-6 overflow-x-auto whitespace-nowrap">
+      <div className="flex items-center space-x-1.5 sm:space-x-2 py-2 min-w-max">
         {[
           { id: 'overview', label: 'Overview' },
           { id: 'register', label: 'Register New Member' },
@@ -2569,23 +2546,24 @@ const handleUpdatePersonnel = async (e) => {
           { id: 'personnel', label: 'Other School Personnel' },
           { id: 'coefficients', label: 'Class & Coefficient Settings' },
           { id: 'master-marks', label: 'Master Mark Sheet' },
-          { id: 'details', label: 'School Details' }
+          { id: 'details', label: 'School Details' },
+          { id: 'settings', label: 'General Settings' },
         ].map((tab) => (
           <button
             key={tab.id}
             type="button"
             onClick={() => changeTab(tab.id)}
-           className={`w-full p-4 rounded-xl border text-left font-medium text-sm transition-all duration-200 flex items-center justify-between shadow-sm ${
-  activeTab === tab.id
-    ? 'bg-[#052e16] border-emerald-600 text-[#fdfbf7] shadow-emerald-900/20 ring-1 ring-emerald-500/30'
-    : 'bg-gray-900/90 border-gray-800 text-gray-300 hover:bg-gray-800 hover:border-gray-700'
-}`}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
+              activeTab === tab.id
+                ? 'bg-emerald-950/80 border border-emerald-600/80 text-emerald-200 shadow-sm'
+                : 'bg-slate-900/60 border border-slate-800/80 text-slate-400 hover:text-slate-200'
+            }`}
           >
-            <span>{tab.label}</span>
-            <span className="text-xs">{activeTab === tab.id ? '▲' : '▼'}</span>
+            {tab.label}
           </button>
         ))}
       </div>
+    </nav>
 <main className="p-3 sm:p-6 max-w-7xl mx-auto space-y-6 sm:space-y-8">
   {activeTab !== 'overview' && activeTab !== null && (
   <div className="block md:hidden">
@@ -2640,47 +2618,106 @@ const handleUpdatePersonnel = async (e) => {
                 </div>
               ) : (
                 <div className="overflow-x-auto w-full">
-                  <table className="w-full text-left text-xs text-gray-300 border border-gray-700">
-                    <thead className="bg-[#1f2937] text-amber-100 uppercase font-semibold">
-                      <tr>
-                        <th className="p-3 border border-gray-700">Teacher Name (ID)</th>
-                        <th className="p-3 border border-gray-700">Subjects Taught</th>
-                        <th className="p-3 border border-gray-700">Class & Schedule Summary</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-800">
+               <>
+  {/* DESKTOP VIEW (2-COLUMN STREAMLINED LAYOUT) */}
+  <div className="hidden md:block overflow-x-auto w-full">
+    <table className="w-full text-left text-xs text-gray-300 border border-gray-800 rounded-xl overflow-hidden">
+      <thead className="bg-[#1f2937] text-amber-100 uppercase font-semibold text-[11px] tracking-wider border-b border-gray-800">
+        <tr>
+          <th className="p-3.5 border-r border-gray-800 w-1/3">Teacher Name (ID)</th>
+          <th className="p-3.5 w-2/3">Class & Schedule Summary</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-gray-800">
+        {teachersList.map((t, i) => (
+          <tr key={i} className="hover:bg-gray-800/40 transition-colors">
+            
+            {/* Column 1: Teacher Details */}
+            <td className="p-4 align-top border-r border-gray-800 space-y-1">
+              <div className="font-bold text-sm text-white">{t.name}</div>
+              <div className="font-mono text-[11px] text-amber-100/80">
+                {t.id || t.teacher_id}
+              </div>
+              <div className="pt-2">
+                <span className="inline-block bg-blue-900/30 text-blue-300 border border-blue-700/50 text-[10px] font-semibold px-2 py-0.5 rounded-full">
+                  {(t.subjects || []).length} Subject(s) Allocated
+                </span>
+              </div>
+            </td>
 
-                      {teachersList.map((t, i) => (
-                        <tr key={i} className="hover:bg-gray-800/40">
-                          <td className="p-3 border border-gray-700 font-bold text-white">
-                            <div>{t.name}</div>
-                            <span className="text-[10px] font-mono text-amber-100/80">{t.id || t.teacher_id}</span>
-                          </td>
-                          <td className="p-3 border text-amber-100">
-  <div className="flex flex-col gap-1.5 items-start">
-    {t.subjects.map((sub, sIdx) => (
-      <span key={sIdx} className="inline-block bg-blue-900/30 text-blue-300 border border-blue-700/50 rounded px-2 py-1 text-xs whitespace-normal max-w-full">
-        {sub}
-      </span>
+            {/* Column 2: Subject & Schedule Allocations */}
+            <td className="p-4 align-top space-y-3">
+              {Object.entries(t.schedules || {}).length === 0 ? (
+                <span className="text-gray-500 italic text-[11px]">No active schedule entries set</span>
+              ) : (
+                Object.entries(t.schedules || {}).map(([sub, rows], rIdx) => (
+                  <div key={rIdx} className="bg-[#1f2937]/70 border border-gray-800/80 p-3 rounded-xl space-y-2">
+                    <div className="font-bold text-amber-100 text-xs tracking-wide border-b border-gray-800 pb-1 flex justify-between items-center">
+                      <span>{sub}</span>
+                      <span className="text-[10px] font-mono text-amber-200/80 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                        {rows.length} Period Slot(s)
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 pt-1">
+                      {rows.map((row, rowIdx) => (
+                        <div key={rowIdx} className="flex items-center justify-between bg-gray-950/80 border border-gray-800/80 px-2.5 py-1.5 rounded-lg text-[11px]">
+                          <span className="font-semibold text-gray-200">{row.className}</span>
+                          <span className="font-mono text-amber-200/90 text-[10px] bg-slate-900 px-2 py-0.5 rounded border border-slate-700/60">
+                            {row.day} | {row.startTime} - {row.endTime}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </td>
+
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+  {/* MOBILE STACKED CARDS VIEW */}
+  <div className="block md:hidden space-y-4">
+    {teachersList.map((t, i) => (
+      <div key={i} className="bg-[#1f2937]/80 border border-gray-800 rounded-xl p-4 space-y-3 shadow-lg">
+        <div className="flex justify-between items-start border-b border-gray-800 pb-2">
+          <div>
+            <h4 className="font-bold text-white text-sm">{t.name}</h4>
+            <p className="font-mono text-[11px] text-amber-100/80">{t.id || t.teacher_id}</p>
+          </div>
+          <span className="bg-blue-900/40 text-blue-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-700/50">
+            {(t.subjects || []).length} Subject(s)
+          </span>
+        </div>
+
+        <div className="space-y-2.5 pt-1">
+          {Object.entries(t.schedules || {}).map(([sub, rows], rIdx) => (
+            <div key={rIdx} className="bg-gray-950/90 border border-gray-800 p-2.5 rounded-lg space-y-1.5">
+              <h5 className="font-bold text-amber-100 text-xs border-b border-gray-800 pb-1">
+                {sub}
+              </h5>
+              <div className="space-y-1">
+                {rows.map((row, rowIdx) => (
+                  <div key={rowIdx} className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-[#111827] p-1.5 rounded text-[11px] gap-1">
+                    <span className="font-medium text-gray-300">• {row.className}</span>
+                    <span className="font-mono text-amber-200 text-[10px] bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                      {row.day} ({row.startTime} - {row.endTime})
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     ))}
   </div>
-</td>
-                          <td className="p-3 border border-gray-700 font-mono text-[11px]">
-                            {Object.entries(t.schedules).map(([sub, rows], rIdx) => (
-                              <div key={rIdx} className="mb-1">
-                                <span className="text-amber-300 font-bold">{sub}:</span>{' '}
-                                {rows.map((row, rowIdx) => (
-                                  <span key={rowIdx} className="text-gray-300 block ml-2">
-                                    • {row.className} | {row.day} ({row.startTime} - {row.endTime})
-                                  </span>
-                                ))}
-                              </div>
-                            ))}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+</>  
+                  
                 </div>
               )}
             </div>
@@ -4016,28 +4053,34 @@ const handleUpdatePersonnel = async (e) => {
   }
 
   return displayItems.map((item, sIdx) => (
-    <button
-      key={sIdx}
-      onClick={() => setSelectedTeacherForLogs({
-        teacher,
-        subject: item.subject,
-        classLevel: item.classLevel,
-        className: item.classLevel,
-        section: teacher.section
-      })}
-      className="bg-blue-900/40 border border-blue-600/50 hover:bg-blue-600 text-blue-200 text-xs px-2.5 py-1 rounded flex items-center gap-2 mb-1.5"
-    >
-      <span>📄</span>
-      <span>
-        <strong>{item.subject}</strong>
-        {item.classLevel && (
-          <span className="ml-1.5 bg-blue-800/80 text-blue-100 px-1.5 py-0.5 rounded text-[10px] font-bold">
-            ({item.classLevel})
-          </span>
-        )}
-      </span>
-      <span className="text-gray-400 text-[11px]">(View Logs & Progression)</span>
-    </button>
+   <button
+  key={sIdx}
+  onClick={() => setSelectedTeacherForLogs({
+    teacher,
+    subject: item.subject,
+    classLevel: item.classLevel,
+    className: item.classLevel,
+    section: teacher.section
+  })}
+  className="w-full sm:w-auto bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 hover:border-emerald-600/60 text-slate-200 text-xs px-2.5 py-1.5 rounded-md transition-all shadow-sm flex items-center justify-between gap-3"
+>
+  <div className="flex items-center gap-2 min-w-0">
+    <span className="text-emerald-400 text-xs shrink-0">📄</span>
+    <div className="flex flex-col text-left min-w-0 leading-tight">
+      <strong className="text-slate-100 font-bold text-[11px] truncate">
+        {item.subject}
+      </strong>
+      {item.classLevel && (
+        <span className="text-[10px] text-amber-200/90 font-normal truncate mt-0.5">
+          {item.classLevel}
+        </span>
+      )}
+    </div>
+  </div>
+  <span className="text-[10px] text-slate-400 font-medium shrink-0 ml-auto">
+    View Progression →
+  </span>
+</button>
   ));
 })()}
   </div>
@@ -4441,6 +4484,7 @@ const handleUpdatePersonnel = async (e) => {
 </div>
 
 {/* ACADEMIC YEAR - DYNAMIC SINGLE SOURCE OF TRUTH (STATIC) */}
+
 <div>
   <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
     Academic Year
@@ -5004,7 +5048,7 @@ const handleUpdatePersonnel = async (e) => {
 
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
     const teacherName = selectedTeacherModal.name || 'Teacher';
-    const school = schoolName || activeSchoolName || 'DEVELOPPER TEST INSTITUTE';
+    const school = schoolName || activeSchoolName || activeSchool?.name || activeSchool?.school_name || 'INSTITUTION';
 
     // 3. Document Header
     doc.setTextColor(0, 0, 0);
@@ -5341,190 +5385,271 @@ return (
             {/* Content Body - White-Beige Theme */}
             <div className="p-5 overflow-y-auto flex-1 bg-[#FDFBF7]">
               
-              <div className="border-2 border-[#2D5A27] rounded-lg overflow-hidden bg-[#FDFBF7] shadow-sm">
-                <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-[#2D5A27] text-white text-xs font-bold uppercase tracking-wider">
-                <th className="p-3 border border-[#2D5A27] w-[10%] text-center">Week</th>
-                <th className="p-3 border border-[#2D5A27] w-[15%] text-center">Date & Time</th>
-                <th className="p-3 border border-[#2D5A27] w-[50%] text-center">Lesson Taught</th>
-                <th className="p-3 border border-[#2D5A27] w-[25%] text-center">Supervisor Remarks</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#2D5A27]/30 text-xs">
-              {isLoadingLogs ? (
-                <tr>
-                  <td colSpan="4" className="text-center py-6 text-gray-600 font-medium bg-[#FDFBF7]">
+            {/* =========================================================================
+                RESPONSIVE PROGRESSION SHEET CONTENT (Mobile WhatsApp Cards + Desktop Table)
+               ========================================================================= */}
+            <div className="space-y-4">
+              {/* 1. MOBILE VIEW (< 768px): WhatsApp / Messaging Card Feed */}
+              <div className="md:hidden space-y-3 p-1 bg-[#FDFBF7]">
+                {isLoadingLogs ? (
+                  <div className="text-center py-6 text-gray-600 font-medium text-xs bg-white rounded-lg border border-[#2D5A27]/20">
                     Loading teacher logs...
-                  </td>
-                </tr>
-              ) : fetchedLessonLogs && fetchedLessonLogs.length > 0 ? (
-                (() => {
-                  const groupedMap = new Map();
-                  fetchedLessonLogs.forEach((log) => {
-                    const weekNum =
-                      log.week_number ||
-                      calculateAcademicWeek(
-                        academicYearStartDate,
-                        log.date_logged || log.created_at
-                      );
-                    if (!groupedMap.has(weekNum)) {
-                      groupedMap.set(weekNum, []);
-                    }
-                    groupedMap.get(weekNum).push(log);
-                  });
+                  </div>
+                ) : fetchedLessonLogs && fetchedLessonLogs.length > 0 ? (
+                  (() => {
+                    const groupedMap = new Map();
+                    fetchedLessonLogs.forEach((log) => {
+                      const weekNum = log.week_number || calculateAcademicWeek(academicYearStartDate, log.date_logged || log.created_at);
+                      if (!groupedMap.has(weekNum)) {
+                        groupedMap.set(weekNum, []);
+                      }
+                      groupedMap.get(weekNum).push(log);
+                    });
 
-                  return Array.from(groupedMap.entries()).flatMap(
-                    ([weekNum, logs]) =>
+                    return Array.from(groupedMap.entries()).flatMap(([weekNum, logs]) =>
                       logs.map((log, index) => {
                         const logDate = log.date_logged || log.created_at;
                         const formattedDate = logDate
-                          ? new Date(logDate).toLocaleDateString('en-GB', {
-                              weekday: 'short',
-                              month: 'short',
-                              day: '2-digit',
-                            })
+                          ? new Date(logDate).toLocaleDateString('en-GB', { weekday: 'short', month: 'short', day: '2-digit' })
                           : '-';
                         const formattedTime = logDate
-                          ? new Date(logDate).toLocaleTimeString([], {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })
+                          ? new Date(logDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                           : '';
 
                         return (
-                          <tr
+                          <div
                             key={log.id || `${weekNum}-${index}`}
-                            className="bg-[#FDFBF7] hover:bg-[#EFECE6]/50"
+                            className="bg-white border-2 border-[#2D5A27]/40 rounded-xl p-3.5 shadow-sm space-y-2.5 text-slate-800"
                           >
-                            {index === 0 && (
-                              <td
-                                rowSpan={logs.length}
-                                className="p-3 border border-[#2D5A27]/40 text-center font-bold text-[#2D5A27] bg-[#EFECE6] align-middle"
-                              >
-                                <div className="text-xs font-extrabold">
-                                  W{weekNum}
-                                </div>
-                              </td>
-                            )}
-                            {/* Lesson Taught Cell with Drawing/Image Attachment Support */}
-                          {/* Column 2: Date & Time */}
-                            <td className="p-3 border border-[#2D5A27]/40 text-center text-[11px] font-medium text-gray-800 bg-[#FDFBF7] align-top">
-                              <div>{formattedDate}</div>
-                              {formattedTime && (
-                                <span className="text-[10px] text-[#2D5A27] font-bold">
-                                  {formattedTime}
-                                </span>
-                              )}
-                            </td>
+                            {/* Top Bar: Week Badge on Left, Date & Time on Right */}
+                            <div className="flex items-center justify-between border-b border-[#2D5A27]/20 pb-2 text-[11px]">
+                              <span className="bg-[#2D5A27] text-white font-extrabold px-2.5 py-0.5 rounded-md text-[10px]">
+                                W{weekNum}
+                              </span>
+                              <div className="text-right text-[10px] text-gray-600 font-medium">
+                                <span>📅 {formattedDate}</span>
+                                {formattedTime && <span className="ml-1.5 font-bold text-[#2D5A27]">⏱ {formattedTime}</span>}
+                              </div>
+                            </div>
 
-                          {/* Column 3: Lesson Taught (Wide, Centered Header, Spacious Text) */}
-                            <td className="p-3 border border-[#2D5A27]/40 font-medium text-gray-900 bg-[#FDFBF7] align-top text-left">
-                              <div className="whitespace-pre-line text-xs leading-relaxed break-words">
+                            {/* Lesson Content Area: Full Width Chat Bubble */}
+                            <div className="bg-[#FDFBF7] border border-[#2D5A27]/30 rounded-lg p-3 text-xs leading-relaxed font-sans">
+                              <span className="block text-[10px] font-bold text-[#2D5A27] uppercase tracking-wider mb-1">
+                                Lesson Taught:
+                              </span>
+                              <p className="whitespace-pre-line leading-relaxed text-gray-900 text-xs font-medium break-words">
                                 {log.lesson_content && log.lesson_content !== 'EMPTY'
                                   ? log.lesson_content
                                   : 'No lesson details entered'}
-                              </div>
+                              </p>
 
                               {/* Attachment Preview Chip */}
                               {(log.attachment_url || log.image_url) && (
-                                <div className="mt-2.5 flex items-center gap-2">
+                                <div className="mt-2.5 pt-2 border-t border-[#2D5A27]/20">
                                   <a
                                     href={log.attachment_url || log.image_url}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1.5 bg-[#2D5A27]/10 hover:bg-[#2D5A27]/20 text-[#2D5A27] text-[10px] font-bold px-2.5 py-1 rounded border border-[#2D5A27]/30 transition-colors"
+                                    className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#2D5A27] hover:underline bg-[#2D5A27]/10 px-2 py-1 rounded"
                                   >
-                                    <span>🖼️</span> View Attached Diagram / Work
+                                    🖼️ View Attached Diagram / Work
                                   </a>
                                 </div>
                               )}
-                            </td>
+                            </div>
 
-                            {/* Column 4: Status & Supervisor Remarks */}
-                            {/* Column 4: Dedicated Supervisor Remarks Editor */}
-<td className="p-3 border border-[#2D5A27]/40 bg-[#FDFBF7] text-center align-top">
-  <div className="text-left">
-    {editingRemarkId === log.id ? (
-      /* Active Editing Box */
-      <div className="space-y-1.5">
-        <textarea
-          value={tempRemarkText}
-          onChange={(e) => setTempRemarkText(e.target.value)}
-          placeholder="Type supervisor remark..."
-          className="w-full text-[10px] p-2 border border-[#2D5A27] rounded bg-white focus:outline-none focus:ring-1 focus:ring-[#2D5A27]"
-          rows={2}
-        />
-        <div className="flex items-center gap-1.5 justify-end">
-          <button
-            onClick={() => { setEditingRemarkId(null); setTempRemarkText(""); }}
-            className="text-[9px] px-2 py-0.5 text-gray-600 bg-gray-200 hover:bg-gray-300 rounded font-bold"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={() => handleSaveSupervisorRemark(log.id)}
-            disabled={savingRemark}
-            className="text-[9px] px-2.5 py-0.5 text-white bg-[#2D5A27] hover:bg-[#1e3e1a] rounded font-bold shadow-xs"
-          >
-            {savingRemark ? 'Saving...' : 'Save Remark'}
-          </button>
-        </div>
-      </div>
-    ) : log.supervisor_remark || log.admin_remark || log.remarks ? (
-      /* Display Saved Supervisor Remark with Edit Option */
-      <div className="bg-[#2D5A27]/10 border-l-2 border-[#2D5A27] p-2 rounded-r text-[10px] text-gray-800">
-        <div className="flex items-center justify-between mb-0.5">
-          <span className="font-extrabold text-[#2D5A27] flex items-center gap-1 uppercase tracking-wider text-[9px]">
-            💬 Remark
-          </span>
-          <button
-            onClick={() => {
-              setEditingRemarkId(log.id);
-              setTempRemarkText(log.supervisor_remark || log.admin_remark || log.remarks || "");
-            }}
-            className="text-[9px] text-[#2D5A27] underline font-bold hover:text-black"
-          >
-            Edit
-          </button>
-        </div>
-        <p className="italic leading-tight font-medium text-gray-700">
-          "{log.supervisor_remark || log.admin_remark || log.remarks}"
-        </p>
-      </div>
-    ) : (
-      /* Clickable Button to Add Remark */
-      <button
-        onClick={() => {
-          setEditingRemarkId(log.id);
-          setTempRemarkText("");
-        }}
-        className="w-full bg-gray-100/80 hover:bg-[#2D5A27]/10 border border-dashed border-gray-300 hover:border-[#2D5A27] p-2 rounded text-center text-[10px] text-gray-600 hover:text-[#2D5A27] font-medium italic transition-colors flex items-center justify-center gap-1"
-      >
-        <span>✏️</span> Add Supervisor Remark
-      </button>
-    )}
-  </div>
-</td>
-                          </tr>
+                            {/* Supervisor Remarks Area */}
+                            <div className="pt-1">
+                              {editingRemarkId === log.id ? (
+                                <div className="space-y-1.5 bg-[#EFECE6] p-2 rounded-lg border border-[#2D5A27]/30">
+                                  <textarea
+                                    value={tempRemarkText}
+                                    onChange={(e) => setTempRemarkText(e.target.value)}
+                                    placeholder="Type supervisor remark..."
+                                    className="w-full text-[11px] p-2 border border-[#2D5A27] rounded bg-white focus:outline-none"
+                                    rows={2}
+                                  />
+                                  <div className="flex items-center gap-1.5 justify-end">
+                                    <button
+                                      type="button"
+                                      onClick={() => { setEditingRemarkId(null); setTempRemarkText(""); }}
+                                      className="text-[10px] px-2 py-1 text-gray-600 bg-gray-200 hover:bg-gray-300 rounded font-bold"
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSaveSupervisorRemark(log.id)}
+                                      disabled={savingRemark}
+                                      className="text-[10px] px-2.5 py-1 text-white bg-[#2D5A27] hover:bg-[#1e3e1a] rounded font-bold transition"
+                                    >
+                                      {savingRemark ? 'Saving...' : 'Save Remark'}
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : log.supervisor_remark ? (
+                                <div className="bg-[#EFECE6]/60 border border-[#2D5A27]/20 p-2.5 rounded-lg text-xs text-slate-800">
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="font-bold text-[#2D5A27] text-[10px]">💬 Supervisor Remark:</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => { setEditingRemarkId(log.id); setTempRemarkText(log.supervisor_remark || ""); }}
+                                      className="text-[10px] text-[#2D5A27] font-bold hover:underline"
+                                    >
+                                      Edit
+                                    </button>
+                                  </div>
+                                  <p className="italic text-gray-700 text-[11px]">{log.supervisor_remark}</p>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => { setEditingRemarkId(log.id); setTempRemarkText(""); }}
+                                  className="w-full text-center text-xs text-[#2D5A27] font-bold py-2 bg-[#2D5A27]/10 hover:bg-[#2D5A27]/20 border border-dashed border-[#2D5A27]/40 rounded-lg transition"
+                                >
+                                  ✏️ Add Supervisor Remark
+                                </button>
+                              )}
+                            </div>
+                          </div>
                         );
                       })
-                  );
-                })()
-              ) : (
-                <tr>
-                  <td
-                    colSpan="4"
-                    className="text-center py-6 text-gray-500 italic bg-[#FDFBF7]"
-                  >
+                    );
+                  })()
+                ) : (
+                  <div className="text-center py-6 text-gray-500 italic text-xs bg-white rounded-lg border border-[#2D5A27]/20">
                     No lesson logs recorded for this subject yet.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-
+                  </div>
+                )}
               </div>
+
+              {/* 2. DESKTOP VIEW (>= 768px): Original High-Density Forest Green Table */}
+              <div className="hidden md:block border-2 border-[#2D5A27] rounded-lg overflow-hidden bg-[#FDFBF7] shadow-sm">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-[#2D5A27] text-white text-xs font-bold uppercase tracking-wider">
+                      <th className="p-3 border border-[#2D5A27] w-[10%] text-center">Week</th>
+                      <th className="p-3 border border-[#2D5A27] w-[15%] text-center">Date & Time</th>
+                      <th className="p-3 border border-[#2D5A27] w-[50%] text-center">Lesson Taught</th>
+                      <th className="p-3 border border-[#2D5A27] w-[25%] text-center">Supervisor Remarks</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#2D5A27]/30 text-xs">
+                    {isLoadingLogs ? (
+                      <tr>
+                        <td colSpan="4" className="text-center py-6 text-gray-600 font-medium bg-[#FDFBF7]">
+                          Loading teacher logs...
+                        </td>
+                      </tr>
+                    ) : fetchedLessonLogs && fetchedLessonLogs.length > 0 ? (
+                      (() => {
+                        const groupedMap = new Map();
+                        fetchedLessonLogs.forEach((log) => {
+                          const weekNum = log.week_number || calculateAcademicWeek(academicYearStartDate, log.date_logged || log.created_at);
+                          if (!groupedMap.has(weekNum)) {
+                            groupedMap.set(weekNum, []);
+                          }
+                          groupedMap.get(weekNum).push(log);
+                        });
+
+                        return Array.from(groupedMap.entries()).flatMap(([weekNum, logs]) =>
+                          logs.map((log, index) => {
+                            const logDate = log.date_logged || log.created_at;
+                            const formattedDate = logDate
+                              ? new Date(logDate).toLocaleDateString('en-GB', { weekday: 'short', month: 'short', day: '2-digit' })
+                              : '-';
+                            const formattedTime = logDate
+                              ? new Date(logDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                              : '';
+
+                            return (
+                              <tr key={log.id || `${weekNum}-${index}`} className="bg-[#FDFBF7] hover:bg-[#EFECE6]/50">
+                                {index === 0 && (
+                                  <td rowSpan={logs.length} className="p-3 border border-[#2D5A27]/40 text-center font-bold text-[#2D5A27]">
+                                    <div className="text-xs font-extrabold">W{weekNum}</div>
+                                  </td>
+                                )}
+                                <td className="p-3 border border-[#2D5A27]/40 text-center text-[11px] font-medium">
+                                  <div>{formattedDate}</div>
+                                  {formattedTime && <span className="text-[10px] text-[#2D5A27] font-bold">{formattedTime}</span>}
+                                </td>
+                                <td className="p-3 border border-[#2D5A27]/40 font-medium text-gray-900 bg-[#FDFBF7]">
+                                  <div className="whitespace-pre-line text-xs leading-relaxed break-words">
+                                    {log.lesson_content && log.lesson_content !== 'EMPTY' ? log.lesson_content : 'No lesson details entered'}
+                                  </div>
+                                  {(log.attachment_url || log.image_url) && (
+                                    <div className="mt-2.5 flex items-center gap-2">
+                                      <a
+                                        href={log.attachment_url || log.image_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1.5 bg-[#2D5A27]/10 hover:bg-[#2D5A27]/20 text-[#2D5A27] font-bold text-[11px] px-2 py-1 rounded transition"
+                                      >
+                                        <span>🖼️</span> View Attached Diagram / Work
+                                      </a>
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="p-3 border border-[#2D5A27]/40 bg-[#FDFBF7] text-center align-top">
+                                  <div className="text-left">
+                                    {editingRemarkId === log.id ? (
+                                      <div className="space-y-1.5">
+                                        <textarea
+                                          value={tempRemarkText}
+                                          onChange={(e) => setTempRemarkText(e.target.value)}
+                                          placeholder="Type supervisor remark..."
+                                          className="w-full text-[10px] p-2 border border-[#2D5A27] rounded bg-white focus:outline-none"
+                                          rows={2}
+                                        />
+                                        <div className="flex items-center gap-1.5 justify-end">
+                                          <button
+                                            type="button"
+                                            onClick={() => { setEditingRemarkId(null); setTempRemarkText(""); }}
+                                            className="text-[9px] px-2 py-0.5 text-gray-600 bg-gray-200 hover:bg-gray-300 rounded font-bold"
+                                          >
+                                            Cancel
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleSaveSupervisorRemark(log.id)}
+                                            disabled={savingRemark}
+                                            className="text-[9px] px-2.5 py-0.5 text-white bg-[#2D5A27] hover:bg-[#1e3e1a] rounded font-bold"
+                                          >
+                                            {savingRemark ? 'Saving...' : 'Save Remark'}
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => { setEditingRemarkId(log.id); setTempRemarkText(log.supervisor_remark || ""); }}
+                                        className="w-full bg-gray-100/80 hover:bg-[#2D5A27]/10 border border-dashed border-gray-300 hover:border-[#2D5A27] text-gray-700 hover:text-[#2D5A27] text-[11px] p-2 rounded transition text-left"
+                                      >
+                                        {log.supervisor_remark ? (
+                                          <span>💬 {log.supervisor_remark}</span>
+                                        ) : (
+                                          <span className="italic text-gray-400">+ Add Supervisor Remark</span>
+                                        )}
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        );
+                      })()
+                    ) : (
+                      <tr>
+                        <td colSpan="4" className="text-center py-6 text-gray-500 italic bg-[#FDFBF7]">
+                          No lesson logs recorded for this subject yet.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
             </div>
           </div>
         </div>
