@@ -5,6 +5,7 @@ import { supabase } from '../../../lib/supabase';
 import { getCurrentAcademicYear } from '../../../lib/academicYear';
 import AcademicConfigModal from './AcademicConfigModal';
 import { useAcademicConfigs } from '../context/AcademicConfigsContext';
+import { db } from '../../../lib/db';
 
 import { 
   ALL_SUBJECTS_LIST, 
@@ -387,32 +388,14 @@ const { masterSubjects } = useAcademicConfigs();
     const finalSeries = isSeriesRequired ? selectedTradeSeries : 'N/A';
     const cacheKey = `class_coeffs_${selectedSection}_${selectedClass}_${finalSeries}`;
 
-    try {
+   try {
       const schoolId = await resolveSchoolId();
 
       if (!schoolId) {
         throw new Error('Multitenancy Violation: Cannot save without an active School ID. Please select a valid school.');
       }
 
-      localStorage.setItem(cacheKey, JSON.stringify(assignedSubjects));
-
-      if (!navigator.onLine) {
-        setStatusMessage({ 
-          type: 'success', 
-          text: 'Saved locally (Offline Mode). Changes will sync when online.' 
-        });
-        setLoading(false);
-        return;
-      }
-
-      await supabase
-        .from('class_coefficients')
-        .delete()
-        .eq('school_id', schoolId)
-        .eq('section', selectedSection)
-        .eq('classLevel', selectedClass)
-        .eq('trades_series', finalSeries);
-
+      // Also ensure Dexie database instance is imported/available in scope
       const payload = {
         school_id: schoolId,
         academic_year: getCurrentAcademicYear(),
@@ -421,10 +404,50 @@ const { masterSubjects } = useAcademicConfigs();
         trades_series: finalSeries,
         subject_coefficients: assignedSubjects,
         is_included: true,
+        updated_at: new Date().toISOString()
       };
 
-      const { error } = await supabase.from('class_coefficients').insert([payload]);
-      if (error) throw error;
+      // 1. INSTANT LOCAL SAVE TO DEXIE (INDEXEDDB)
+      try {
+        if (typeof db !== 'undefined' && db.class_coefficients) {
+          await db.class_coefficients.put(payload);
+
+          // Queue UPDATE action for background sync
+          await db.pendingSyncQueue.add({
+            action_type: 'UPDATE',
+            table_name: 'class_coefficients',
+            payload: payload,
+            timestamp: Date.now()
+          });
+        }
+      } catch (localErr) {
+        console.warn('Local coefficients save notice:', localErr);
+      }
+
+      // Fallback cache for existing UI readers
+      localStorage.setItem(cacheKey, JSON.stringify(assignedSubjects));
+
+      // 2. BACKGROUND SYNC TO SUPABASE IF ONLINE
+      if (navigator.onLine) {
+        await supabase
+          .from('class_coefficients')
+          .delete()
+          .eq('school_id', schoolId)
+          .eq('section', selectedSection)
+          .eq('classLevel', selectedClass)
+          .eq('trades_series', finalSeries);
+
+        const { error } = await supabase.from('class_coefficients').insert([payload]);
+        if (error) throw error;
+
+        // Clear offline queue item if remote save succeeded
+        if (typeof db !== 'undefined' && db.pendingSyncQueue) {
+          await db.pendingSyncQueue
+            .where('table_name')
+            .equals('class_coefficients')
+            .delete();
+        }
+      }
 
       setStatusMessage({ type: 'success', text: 'Class subjects & coefficients saved successfully!' });
     } catch (err) {
@@ -438,11 +461,12 @@ const { masterSubjects } = useAcademicConfigs();
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 text-white shadow-2xl">
       {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+     {/* Header & Controls Block */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4 border-b border-gray-800 pb-4">
         <div>
-          <div className="flex items-center gap-3">
-            <h2 className="text-xl font-bold tracking-wide">Class & Subject Coefficients</h2>
-            <span className="bg-amber-500/20 text-amber-400 text-xs font-semibold px-2.5 py-1 rounded-full border border-amber-500/30">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h2 className="text-base sm:text-xl font-bold tracking-wide text-white">Class & Subject Coefficients</h2>
+            <span className="bg-amber-500/20 text-amber-400 text-xs font-semibold px-2.5 py-0.5 rounded-full border border-amber-500/30 shrink-0">
               {assignedSubjects.length} Active Subjects
             </span>
           </div>
@@ -451,19 +475,21 @@ const { masterSubjects } = useAcademicConfigs();
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-         <button
+        {/* Action Buttons Group */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full sm:w-auto shrink-0">
+          <button
             type="button"
             onClick={() => setShowConfigModal(true)}
-            className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-blue-400 border border-blue-500/30 rounded-lg text-xs font-medium transition flex items-center gap-1.5 shadow-md"
+            className="px-3.5 py-2 bg-gray-800 hover:bg-gray-700 text-blue-400 border border-blue-500/30 rounded-xl text-xs font-semibold transition active:scale-95 flex items-center justify-center gap-2 shadow-sm"
           >
-            ⚙️ Class Setup Configurations
+            <span>⚙️</span> Class Setup Configurations
           </button>
+
           <button
             type="button"
             onClick={handleSave}
             disabled={loading}
-            className="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-gray-950 font-bold text-xs rounded-lg shadow-lg hover:shadow-amber-500/20 transition disabled:opacity-50"
+            className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-gray-950 font-extrabold text-xs rounded-xl shadow-md transition active:scale-95 flex items-center justify-center gap-2 border border-amber-400/50"
           >
             {loading ? 'Saving...' : 'Save & Validate'}
           </button>

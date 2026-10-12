@@ -12,6 +12,7 @@ import TechnicalIndustrialMarkSheet from './components/mark-sheets/TechnicalIndu
 import SubjectCoefficientsManager from './components/SubjectCoefficientsManager';
 import TeacherAssignment from './components/TeacherAssignment';
 import SchoolSettings from './components/SchoolSettings';
+import { downloadFullSchoolData, syncOfflineQueueToSupabase } from '../../lib/offlineSync';
 
 import BulkGeneralReportCard from '../student-dashboard/components/BulkGeneralReportCard';
 import BulkTechnicalCommercialReportCard from '../student-dashboard/components/BulkTechnicalCommercialReportCard';
@@ -113,8 +114,7 @@ export const COMMERCIAL_TRADE_SERIES = [
   'G3 - Commercial Action / Marketing',
   'FIG - Taxation and Management Information Systems',
   'ACA - Administrative Action and Communication',
-  'ESF - Home Economics',
-  'IH - Bespoke Tailoring',
+  'HE - Home Economics',
   'HOT - Hotel Management',
   'TO - Tourism',
   'BO - Bakery and Pastry'
@@ -122,18 +122,18 @@ export const COMMERCIAL_TRADE_SERIES = [
 
 // Trade Series mapping for Technical Industrial
 export const INDUSTRIAL_TRADE_SERIES = [
-  'FOUNDATIONAL',
-  'F1 - Mechanical Manufacturing',
+    'FOUNDATIONAL',
+    'ARM - Automobile Repair Mechanics',
     'F2 - Electronics',
     'F3 - Electrical Power Systems',
-    'F4BA - Civil Engineering Building Construction',
+    'BUCO - Civil Engineering Building Construction',
     'F4BE - Building Study and Study Office',
     'F4TP - Public Works',
     'F5 - Air Conditioning and Ventilation',
     'F6 - Laboratory Chemistry',
     'F7 - Biological Sciences',
     'F8 - Medical and Social Sciences',
-    'ARM - Automobile Repair Mechanics',
+    'IH - Bespoke Tailoring',
     'PL - Plumbing and Hydraulic Installation Systems'
 ];
 
@@ -357,7 +357,9 @@ const getFilteredSubjects = (section) => {
 
   return ALL_SUBJECTS_LIST.filter(s => s.category === "General Core Subjects");
 };
+
 export default function AdminDashboardPage() {
+  const [activeSchool, setActiveSchool] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [deleteBanner, setDeleteBanner] = useState(null);
@@ -374,7 +376,14 @@ export default function AdminDashboardPage() {
   const [fetchedLessonLogs, setFetchedLessonLogs] = useState([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const [teacherSearchQuery, setTeacherSearchQuery] = useState('');
-
+  const [schoolMotto, setSchoolMotto] = useState('');
+  const [schoolRules, setSchoolRules] = useState('');
+  const [rulesFileUrl, setRulesFileUrl] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showPdfModal, setShowPdfModal] = useState(false);
+  const [registrationMode, setRegistrationMode] = useState('single'); // 'single' or 'bulk'
+  const [teacherSubTab, setTeacherSubTab] = useState('assigned');
+  
 // --- MEMBER REGISTRATION INITIAL DRAFT RECOVERY ---
   const getInitialDraft = () => {
     if (typeof window !== 'undefined') {
@@ -443,34 +452,55 @@ const [isMarkEntryAuthorized, setIsMarkEntryAuthorized] = useState(true);
   const [savingRemark, setSavingRemark] = useState(false);
   
   // Save Supervisor Remark directly to Supabase
+  // Save Supervisor Remark locally FIRST, then sync in background
   const handleSaveSupervisorRemark = async (logId) => {
     if (!tempRemarkText.trim()) return;
     setSavingRemark(true);
-    
-    const currentSchoolId = selectedTeacherForLogs?.school_id || (typeof schoolId !== 'undefined' ? schoolId : null) || (typeof userSchoolId !== 'undefined' ? userSchoolId : null) || activeSchool?.school_id || activeSchool?.id;
+
+    const updatedRemark = tempRemarkText.trim();
+    const currentSchoolId = selectedTeacherForLogs?.school_id || activeSchool?.school_id || activeSchool?.id;
+
+    // 1. Update UI state instantly
+    setFetchedLessonLogs((prev) =>
+      prev.map((item) =>
+        item.id === logId ? { ...item, supervisor_remark: updatedRemark } : item
+      )
+    );
+
+    // 2. Save instantly to local Dexie IndexedDB
     try {
-      const { error } = await supabase
-        .from('lesson_logs')
-        .update({ supervisor_remark: tempRemarkText.trim() })
-        .eq('id', logId)
-        .eq('school_id', currentSchoolId);
+      const existingLog = await db.lesson_logs.get(logId);
+      if (existingLog) {
+        await db.lesson_logs.update(logId, { supervisor_remark: updatedRemark });
+      }
 
-      if (error) throw error;
-
-      // Update local state immediately so UI reflects the change
-      setFetchedLessonLogs((prev) =>
-        prev.map((item) =>
-          item.id === logId ? { ...item, supervisor_remark: tempRemarkText.trim() } : item
-        )
-
-      );
-      setEditingRemarkId(null);
-      setTempRemarkText("");
-    } catch (err) {
-      alert("Failed to save remark: " + err.message);
-    } finally {
-      setSavingRemark(false);
+      // 3. Queue update action for background sync
+      await db.pendingSyncQueue.add({
+        action_type: 'UPDATE',
+        table_name: 'lesson_logs',
+        payload: { id: logId, supervisor_remark: updatedRemark, school_id: currentSchoolId },
+        timestamp: Date.now()
+      });
+    } catch (dbErr) {
+      console.warn('Local remark storage notice:', dbErr);
     }
+
+    // 4. Background Sync to Supabase if connected
+    if (navigator.onLine) {
+      try {
+        await supabase
+          .from('lesson_logs')
+          .update({ supervisor_remark: updatedRemark })
+          .eq('id', logId)
+          .eq('school_id', currentSchoolId);
+      } catch (err) {
+        console.warn('Network sync delayed. Remark queued in local storage.');
+      }
+    }
+
+    setEditingRemarkId(null);
+    setTempRemarkText("");
+    setSavingRemark(false);
   };
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   // Bulk Multi-Track Report Card States
@@ -527,9 +557,9 @@ const [isMarkEntryAuthorized, setIsMarkEntryAuthorized] = useState(true);
 
   const registrationClasses = getClassLevelsBySection(activeSection);
   const registrationTrades = getSeriesOrTrades(activeSection, activeClass);
+  
   useEffect(() => {
     if (!selectedTeacherForLogs) return;
-
   const loadTeacherLogs = async () => {
     setIsLoadingLogs(true);
     
@@ -539,14 +569,12 @@ const [isMarkEntryAuthorized, setIsMarkEntryAuthorized] = useState(true);
     const subjectName = String(selectedTeacherForLogs?.subject || selectedTeacherForLogs?.subject_name || '').trim();
     const targetClass = String(selectedTeacherForLogs?.classLevel || selectedTeacherForLogs?.class_level || '').trim();
     const cacheKey = `nsuh_logs_${teacherId || teacherName}_${subjectName}`;
-
     try {
       if (navigator.onLine) {
         let query = supabase
           .from('lesson_logs')
           .select('*')
           .ilike('subject', subjectName);
-
         if (teacherId && teacherName) {
           query = query.or(`teacher_id.eq.${teacherId},teacher_name.ilike.%${teacherName}%`);
         } else if (teacherName) {
@@ -554,13 +582,10 @@ const [isMarkEntryAuthorized, setIsMarkEntryAuthorized] = useState(true);
         } else if (teacherId) {
           query = query.eq('teacher_id', teacherId);
         }
-
         const { data, error } = await query.order('created_at', { ascending: true });
-
         if (error) {
           console.error('Error fetching lesson logs:', error);
         }
-
         if (data && data.length > 0) {
           let finalLogs = data;
           if (targetClass) {
@@ -570,9 +595,14 @@ const [isMarkEntryAuthorized, setIsMarkEntryAuthorized] = useState(true);
             });
             if (filtered.length > 0) finalLogs = filtered;
           }
-
           setFetchedLessonLogs(finalLogs);
           localStorage.setItem(cacheKey, JSON.stringify(finalLogs));
+          
+          // Save to local Dexie database for instant offline viewing
+          if (Array.isArray(finalLogs) && finalLogs.length > 0) {
+            await db.lesson_logs.bulkPut(finalLogs);
+          }
+          
           setIsLoadingLogs(false);
           return;
         }
@@ -581,6 +611,29 @@ const [isMarkEntryAuthorized, setIsMarkEntryAuthorized] = useState(true);
       console.warn('Online fetch failed, checking offline cache:', err);
     }
 
+    // OFFLINE FALLBACK: First check Dexie IndexedDB, then fallback to localStorage
+    try {
+      const localDexieLogs = await db.lesson_logs
+        .where('school_id')
+        .equals(activeSchool?.id || activeSchool?.school_id || '')
+        .toArray();
+
+      const matchedDexieLogs = localDexieLogs.filter(log => {
+        const matchesSubject = String(log.subject || '').toLowerCase() === subjectName.toLowerCase();
+        const matchesClass = !targetClass || String(log.classLevel || log.class_level || '').toLowerCase().includes(targetClass.toLowerCase());
+        return matchesSubject && matchesClass;
+      });
+
+      if (matchedDexieLogs.length > 0) {
+        setFetchedLessonLogs(matchedDexieLogs);
+        setIsLoadingLogs(false);
+        return;
+      }
+    } catch (dexieErr) {
+      console.warn('Dexie offline read notice:', dexieErr);
+    }
+
+    // Legacy localStorage Fallback
     const cached = localStorage.getItem(cacheKey);
     if (cached) {
       try {
@@ -593,18 +646,28 @@ const [isMarkEntryAuthorized, setIsMarkEntryAuthorized] = useState(true);
     }
     setIsLoadingLogs(false);
   };
-
     loadTeacherLogs();
   }, [selectedTeacherForLogs]);
-const [isSubmittingTeacher, setIsSubmittingTeacher] = useState(false);
-const [isDeleting, setIsDeleting] = useState(false);
-const [schoolMotto, setSchoolMotto] = useState('');
-  const [schoolRules, setSchoolRules] = useState('');
-  const [rulesFileUrl, setRulesFileUrl] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showPdfModal, setShowPdfModal] = useState(false);
-  const [registrationMode, setRegistrationMode] = useState('single'); // 'single' or 'bulk'
-  const [teacherSubTab, setTeacherSubTab] = useState('assigned');
+  const [isSubmittingTeacher, setIsSubmittingTeacher] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  
+  useEffect(() => {
+    const activeSchoolId = activeSchool?.id || activeSchool?.school_id || (typeof window !== 'undefined' ? localStorage.getItem('active_school_id') : null);
+
+    if (activeSchoolId) {
+      downloadFullSchoolData(activeSchoolId);
+      syncOfflineQueueToSupabase();
+    }
+
+    const handleOnline = () => {
+      console.log('⚡ Connection restored! Syncing ClassLogs offline queue...');
+      syncOfflineQueueToSupabase();
+    };
+
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, [activeSchool]);
+
   const handleRulesFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -982,7 +1045,7 @@ const handleEditTeacherSchedule = (teacher) => {
 };
 const [phoneError, setPhoneError] = useState("");
   const [selectedSeries, setSelectedSeries] = useState('');
-  const [activeSchool, setActiveSchool] = useState(null);
+ 
  useEffect(() => {
     const hydrateActiveSchool = async () => {
       // 1. Read flat keys directly from localStorage
@@ -1188,27 +1251,67 @@ if (!editFormData?.residence || !editFormData.residence.trim()) {
     // Sanitize trades_series so lower forms are strictly 'N/A'
   const currentClass = editFormData?.classLevel || editFormData?.class_name || '';
   const currentSeries = editFormData?.trades_series || editFormData?.series || '';
-  const payloadToSave = {
-    ...editFormData,
-    trades_series: GENERAL_LOWER_CLASSES.includes(currentClass) ? 'N/A' : (currentSeries || 'N/A')
-  };
+  // Clean and strictly separate Guardian Contact and Student Contact
+    const cleanGuardianPhone = String(editFormData?.guardian_phone || '').trim() || 'N/A';
+    const cleanStudentPhone = String(editFormData?.phone || '').trim() || 'N/A';
 
-  // 1. Save changes to Supabase database
-  const { error } = await supabase
-  .from('students')
-  .update(payloadToSave)
-  .eq('id', editFormData.id)
-  .eq('school_id', currentSchoolId);
+    const payloadToSave = {
+      ...editFormData,
+      fullName: editFormData?.fullName?.trim() || editFormData?.name?.trim() || '',
+      residence: editFormData?.residence?.trim() || 'N/A',
+      medical_history: editFormData?.medical_history?.trim() || 'None',
+      guardian_name: editFormData?.guardian_name?.trim() || 'Parent',
+      guardian_phone: cleanGuardianPhone, // Strict Guardian Contact
+      phone: cleanStudentPhone,          // Strict Student Contact (Optional / N/A)
+      trades_series: GENERAL_LOWER_CLASSES.includes(currentClass) ? 'N/A' : (currentSeries || 'N/A'),
+      updated_at: new Date().toISOString()
+    };
 
-    if (error) {
-      alert("Error saving student to Supabase: " + error.message);
-      return;
+    const studentId = editFormData?.id;
+
+    // 1. INSTANT LOCAL UPDATE IN DEXIE (INDEXEDDB)
+    try {
+      if (studentId) {
+        await db.students.put(payloadToSave);
+
+        // Queue UPDATE action for background sync if offline
+        await db.pendingSyncQueue.add({
+          action_type: 'UPDATE',
+          table_name: 'students',
+          payload: payloadToSave,
+          timestamp: Date.now()
+        });
+      }
+    } catch (localErr) {
+      console.warn("Local student edit notice:", localErr);
     }
 
-    // 2. Update UI locally
+    // 2. BACKGROUND SYNC TO SUPABASE IF ONLINE
+    if (navigator.onLine && studentId) {
+      try {
+        const { error } = await supabase
+          .from('students')
+          .update(payloadToSave)
+          .eq('id', studentId)
+          .eq('school_id', currentSchoolId);
+
+        if (!error) {
+          // Clear queue item if cloud update succeeded
+          await db.pendingSyncQueue
+            .where('payload.id')
+            .equals(studentId)
+            .delete();
+        }
+      } catch (err) {
+        console.warn("Remote edit delayed. Action queued in local storage.");
+      }
+    }
+
+    // 3. UPDATE LOCAL UI STATE IMMEDIATELY
     setStudentsList((prev) =>
-      prev.map((s) => (s.id === editFormData.id ? payloadToSave : s))
+      prev.map((s) => (s.id === studentId ? payloadToSave : s))
     );
+
     setEditingStudent(null);
   };
  // Opens the delete confirmation modal
@@ -1219,53 +1322,65 @@ const promptDeleteStudent = (student, e) => {
 };
 
 // Performs the actual deletion when confirmed in the modal
+// Performs the actual deletion locally FIRST, then queues/syncs with Supabase
 const confirmDeleteStudent = async () => {
-    if (!studentToDelete) return;
-setIsDeleting(true);
-   // 1. HARD SAFETY GAURDS & MULTI-TENANT CONTEXT
-    const studentId = studentToDelete?.id;
-    const studentCode = studentToDelete?.unique_code || studentToDelete?.matricule;
-    const currentSchoolId = activeSchool?.id || studentToDelete?.school_id;
+  if (!studentToDelete) return;
+  setIsDeleting(true);
 
-    // Reject operation if primary key or tenant identity is missing
-    if (!studentId) {
-      alert("Safety Lock: Cannot delete record without a valid UUID primary key.");
-      setIsDeleting(false);
-      return;
-    }
+  const studentId = studentToDelete?.id;
+  const studentCode = studentToDelete?.unique_code || studentToDelete?.matricule;
+  const currentSchoolId = activeSchool?.id || studentToDelete?.school_id;
 
-    if (!currentSchoolId) {
-      alert("Multi-Tenant Lock: Operation aborted because school session context is missing.");
-      return;
-    }
-
-    // 2. ATOMIC MULTI-TENANT DELETION QUERY
-    // Strictly targets the primary key ID AND the specific school_id tenant
-    let query = supabase
-      .from('students')
-      .delete()
-      .eq('id', studentId)
-      .eq('school_id', currentSchoolId);
-
-    // Explicitly add unique_code matching if present on the object
-    if (studentCode) {
-      query = query.eq('unique_code', studentCode);
-    }
-
-    const { error } = await query;
-
-    if (error) {
-      alert("Error deleting student from database: " + error.message);
-      setIsDeleting(false);
-      return;
-    }
-
-    // 3. PERMANENT LOCAL UI STATE PURGE
-    setStudentsList((prev) => prev.filter((s) => s.id !== studentId));
-    setStudentToDelete(null);
-    changeTab('students');
+  if (!studentId || !currentSchoolId) {
+    alert("Safety Lock: Cannot delete record without valid student ID and school context.");
     setIsDeleting(false);
-  };
+    return;
+  }
+
+  // 1. INSTANT LOCAL DELETE FROM DEXIE (INDEXEDDB)
+  try {
+    await db.students.delete(studentId);
+
+    // Queue DELETE action for background sync if offline
+    await db.pendingSyncQueue.add({
+      action_type: 'DELETE',
+      table_name: 'students',
+      payload: { id: studentId, school_id: currentSchoolId, unique_code: studentCode },
+      timestamp: Date.now()
+    });
+  } catch (localErr) {
+    console.warn("Local deletion notice:", localErr);
+  }
+
+  // 2. BACKGROUND SYNC TO SUPABASE IF ONLINE
+  if (navigator.onLine) {
+    try {
+      let query = supabase
+        .from('students')
+        .delete()
+        .eq('id', studentId)
+        .eq('school_id', currentSchoolId);
+
+      if (studentCode) query = query.eq('unique_code', studentCode);
+
+      const { error } = await query;
+      if (!error) {
+        // Clear from pending queue if remote delete succeeded
+        await db.pendingSyncQueue
+          .where('payload.id')
+          .equals(studentId)
+          .delete();
+      }
+    } catch (err) {
+      console.warn("Remote deletion delayed. Action queued in local storage.");
+    }
+  }
+
+  // 3. UPDATE LOCAL UI STATE IMMEDIATELY
+  setStudentsList((prev) => prev.filter((s) => s.id !== studentId));
+  setStudentToDelete(null);
+  setIsDeleting(false);
+};
   useEffect(() => {
     setCurrentTime(new Date());
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -2221,57 +2336,51 @@ if (sec.includes('commercial') && (!selectedTechnicalSubject || !COMMERCIAL_TRAD
 
     const studentCacheKey = `nsuh_students_${currentSchoolId}`;
 
-    // ⚡ OFFLINE FALLBACK: Save locally if network is down
-    if (!navigator.onLine) {
-     const pendingKey = `nsuh_pending_students_${currentSchoolId}`;
-      const pendingQueue = JSON.parse(localStorage.getItem(pendingKey) || '[]');
-      pendingQueue.push(newStudentRecord);
-      localStorage.setItem(pendingKey, JSON.stringify(pendingQueue));
-
-      setStudentsList((prev) => [newStudentRecord, ...prev]);
-      setSuccessPopup(uniqueStudentId);
-      const cachedStudents = JSON.parse(localStorage.getItem(studentCacheKey) || '[]');
-      localStorage.setItem(studentCacheKey, JSON.stringify([newStudentRecord, ...cachedStudents]));
-      setIsSubmitting(false);
-      setFullName(''); setPhone(''); setResidence(''); setPicturePreview(null); setAge('');
-      alert('Registered OFFLINE! Saved locally and will auto-sync when network restores.');
-      return;
+  // 1. INSTANT LOCAL SAVE TO DEXIE (IndexedDB)
+    try {
+      await db.students.put(newStudentRecord);
+      await db.pendingSyncQueue.add({
+        action_type: 'INSERT',
+        table_name: 'students',
+        payload: newStudentRecord,
+        timestamp: Date.now()
+      });
+    } catch (localErr) {
+      console.warn('Local student save notice:', localErr);
     }
 
-    // 1. Insert new student into Supabase database
-    const { error } = await supabase
-      .from('students')
-      .insert([newStudentRecord]);
-
-if (error) {
-      if (error.message?.includes('EXACT_DUPLICATE_RECORD') || error.code === '23505') {
-        alert(`Registration Error: Student "${fullName}" (${gender}, Age: ${age}, Class: ${classLevel}) has already been registered with these exact details.`);
+    // 2. BACKGROUND SYNC TO SUPABASE IF ONLINE
+    if (navigator.onLine) {
+      const { error } = await supabase.from('students').insert([newStudentRecord]);
+      if (error) {
+        if (error.message?.includes('EXACT_DUPLICATE_RECORD') || error.code === '23505') {
+          alert(`Registration Error: Student "${fullName}" (${gender}, Age: ${age}, Class: ${classLevel}) has already been registered.`);
+        } else {
+          console.warn('Supabase insert notice:', error);
+        }
       } else {
-        alert("Registration failed due to a system error. Please verify the student details and try again.");
+        // Remove from offline pending queue if successfully uploaded
+        await db.pendingSyncQueue.where('payload.unique_code').equals(uniqueStudentId).delete();
       }
-      setIsSubmitting(false);
-      return;
     }
 
-// 2. Update UI locally
-setStudentsList((prev) => [newStudentRecord, ...prev]);
-const cachedStudents = JSON.parse(localStorage.getItem(studentCacheKey) || '[]');
-    localStorage.setItem(studentCacheKey, JSON.stringify([newStudentRecord, ...cachedStudents]));
+    // 3. UPDATE UI & CLEAR FORM
+    setStudentsList((prev) => [newStudentRecord, ...prev]);
     setSuccessPopup(uniqueStudentId);
 
     setFullName('');
-      setPhone('');
-      setResidence('');
-      setPicturePreview(null);
-      setAge('');
-      setDob('');
-      setGender('Male');
-      setGuardianName('');
-      setGuardianPhone('');
-      setMedicalHistory('');
-      setSelectedSeries(''); 
-      setSelectedTechnicalSubject(''); // Reset technical trade selection
-      setIsSubmitting(false);           // Release submission lock
+    setPhone('');
+    setResidence('');
+    setPicturePreview(null);
+    setAge('');
+    setDob('');
+    setGender('Male');
+    setGuardianName('');
+    setGuardianPhone('');
+    setMedicalHistory('');
+    setSelectedSeries('');
+    setSelectedTechnicalSubject('');
+    setIsSubmitting(false);
   };
 
   // Other School Personnel Registration (Bursar, Supervisor, Discipline Master, Principal)
@@ -2346,40 +2455,64 @@ const newStaffRecord = {
   role: regRole
 };
 
-    // Insert directly into the school_personnel Supabase table
-    const { data, error } = await supabase
-      .from('school_personnel')
-      .insert([newStaffRecord])
-      .select();
-if (error) {
-    if (error.message.includes('Maximum number of administrators') || error.message.includes('enforce_admin_limit')) {
-        alert('Maximum number of administrators attained, a school can only have 4 administrators');
-        return;
+   // 1. INSTANT LOCAL SAVE TO DEXIE (INDEXEDDB)
+    try {
+      await db.school_personnel.put(newStaffRecord);
+      await db.pendingSyncQueue.add({
+        action_type: 'INSERT',
+        table_name: 'school_personnel',
+        payload: newStaffRecord,
+        timestamp: Date.now()
+      });
+    } catch (localErr) {
+      console.warn('Local personnel save notice:', localErr);
     }
-    console.error('Error saving personnel:', error.message);
-    alert('Error saving school personnel try again.');
-    return;
-}
 
-    if (data && data.length > 0) {
-  const savedPerson = {
-    ...data[0],
-    id: data[0].unique_id || data[0].id,
-    signupLink: data[0].signup_link
-  };
-  setPersonnelList((prev) => [savedPerson, ...prev]);
+    // 2. BACKGROUND SYNC TO SUPABASE IF ONLINE
+    if (navigator.onLine) {
+      try {
+        const { data, error } = await supabase
+          .from('school_personnel')
+          .insert([newStaffRecord])
+          .select();
 
-  setActivePersonnelResult({
-    ...savedPerson,
-    fullName: fullName,
-    uniqueStaffId: uniqueStaffId,
-    signupLink: savedPerson.signupLink
-  });
-}
-setFullName('');
-setPhone('');
-setStaffEmail('');
-setStaffResidence('');
+        if (error) {
+          if (error.message?.includes('Maximum number of administrators') || error.message?.includes('enforce_admin_limit')) {
+            alert('Maximum number of administrators attained, a school can only have 4 administrators');
+            return;
+          }
+          console.error('Error saving personnel:', error.message);
+        } else {
+          await db.pendingSyncQueue
+            .where('payload.unique_id')
+            .equals(uniqueStaffId)
+            .delete();
+        }
+      } catch (err) {
+        console.warn('Personnel cloud sync delayed. Record saved locally.');
+      }
+    }
+
+    // 3. UPDATE LOCAL UI & SHOW SUCCESS RESULT
+    const savedPerson = {
+      ...newStaffRecord,
+      id: uniqueStaffId,
+      signupLink: signupLink
+    };
+
+    setPersonnelList((prev) => [savedPerson, ...prev]);
+
+    setActivePersonnelResult({
+      ...savedPerson,
+      fullName: fullName,
+      uniqueStaffId: uniqueStaffId,
+      signupLink: signupLink
+    });
+
+    setFullName('');
+    setPhone('');
+    if (typeof setStaffEmail === 'function') setStaffEmail('');
+    if (typeof setStaffResidence === 'function') setStaffResidence('');
   };
 const handleUpdatePersonnel = async (e) => {
     e.preventDefault();
@@ -2429,33 +2562,59 @@ const handleUpdatePersonnel = async (e) => {
     setIsEditPersonnelModalOpen(false);
     setEditingPersonnel(null);
   };
-  const handleDeletePersonnel = async (person) => {
+ const handleDeletePersonnel = async (person) => {
     console.log("PERSON OBJECT PASSED TO DELETE:", person);
     const personId = typeof person === 'object' ? (person?.unique_id || person?.id || person?.person_id) : person;
     const personName = typeof person === 'object' ? (person?.fullName || person?.full_name || 'this personnel member') : 'this personnel member';
+    const currentSchoolId = activeSchool?.id || activeSchool?.school_id;
 
     if (!confirm(`Are you sure you want to delete ${personName}?`)) {
-        return;
+      return;
     }
 
-    const { error } = await supabase
-        .from('school_personnel')
-        .delete()
-        .eq('unique_id', personId);
+    // 1. INSTANT LOCAL DELETE FROM DEXIE (INDEXEDDB)
+    try {
+      await db.school_personnel.delete(personId);
 
-    if (error) {
-        console.error('Error deleting personnel from Supabase:', error.message);
-        alert('Failed to delete personnel. Please try again.');
-        return;
+      // Queue DELETE action for background sync if offline
+      await db.pendingSyncQueue.add({
+        action_type: 'DELETE',
+        table_name: 'school_personnel',
+        payload: { unique_id: personId, school_id: currentSchoolId },
+        timestamp: Date.now()
+      });
+    } catch (localErr) {
+      console.warn("Local personnel delete notice:", localErr);
     }
 
+    // 2. BACKGROUND SYNC TO SUPABASE IF ONLINE
+    if (navigator.onLine) {
+      try {
+        const { error } = await supabase
+          .from('school_personnel')
+          .delete()
+          .eq('unique_id', personId);
+
+        if (!error) {
+          // Clear queue item if remote delete succeeded
+          await db.pendingSyncQueue
+            .where('payload.unique_id')
+            .equals(personId)
+            .delete();
+        }
+      } catch (err) {
+        console.warn("Remote delete delayed. Action queued in local storage.");
+      }
+    }
+
+    // 3. UPDATE LOCAL UI STATE IMMEDIATELY
     setPersonnelList((prev) => prev.filter((p) => {
-        const pId = typeof p === 'object' ? (p?.unique_id || p?.id || p?.person_id) : p;
-        return pId !== personId;
+      const pId = typeof p === 'object' ? (p?.unique_id || p?.id || p?.person_id) : p;
+      return pId !== personId;
     }));
 
     alert(`${personName} deleted successfully!`);
-};
+  };
   
   const getAvailableSubjects = () => {
   const general = [...customSubjects, ...ALL_SUBJECTS_LIST.filter(s => s.category === "General Core Subjects").map(s => s.name)];
@@ -2490,49 +2649,57 @@ const handleUpdatePersonnel = async (e) => {
 
   return (
     <div className="min-h-screen bg-[#0b0f19] text-white font-sans">
-    {/* Modern International Header Presentation */}
-    <header className="w-full bg-[#0d1527] border-b border-slate-800 px-4 py-3 sm:px-6">
-      <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
+   {/* Modern International Header Presentation */}
+      <header className="w-full bg-[#0d1527] border-b border-slate-800 px-4 py-3 sm:px-6">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
 
-        {/* LEFT: School Logo */}
-        <div className="flex items-center shrink-0">
-          {schoolLogo && (schoolLogo.startsWith('http') || schoolLogo.startsWith('data:image')) ? (
-            <img
-              src={schoolLogo}
-              alt="School Logo"
-              className="h-10 sm:h-12 md:h-14 w-auto object-contain filter drop-shadow-md transition-all"
-            />
-          ) : (
-            <div className="h-9 w-9 sm:h-11 sm:w-11 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center">
-              <span className="text-[10px] sm:text-xs font-bold text-sky-400">LOGO</span>
+          {/* LEFT: School Logo */}
+          <div className="flex items-center shrink-0">
+            {schoolLogo && (schoolLogo.startsWith('http') || schoolLogo.startsWith('data:image')) ? (
+              <img
+                src={schoolLogo}
+                alt="School Logo"
+                className="h-8 sm:h-12 md:h-14 w-auto object-contain filter drop-shadow-md transition-all"
+              />
+            ) : (
+              <div className="h-8 w-8 sm:h-11 sm:w-11 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center">
+                <span className="text-[10px] sm:text-xs font-bold text-sky-400">LOGO</span>
+              </div>
+            )}
+          </div>
+
+          {/* CENTER: Centralized Title, Academic Year & Mobile Active Session Pill */}
+          <div className="text-center flex-1 min-w-0 px-2">
+            <h1 className="text-xs sm:text-base md:text-xl font-extrabold tracking-tight text-amber-100 uppercase truncate">
+              {hasMounted
+                ? (localStorage.getItem('active_school_name') || localStorage.getItem('activeSchoolName') || activeSchool?.name || 'ADMINISTRATOR PORTAL')
+                : 'LOADING...'}
+            </h1>
+            
+            <div className="flex items-center justify-center gap-2 flex-wrap mt-0.5">
+              <p className="text-[10px] sm:text-xs text-slate-400 font-medium">
+                Academic Year: <span className="text-amber-100 font-semibold">{getCurrentAcademicYear()}</span>
+                <span className="hidden sm:inline"> | Administrator Portal</span>
+              </p>
+
+              {/* Compact Mobile Active Session Badge */}
+              <span className="sm:hidden inline-flex items-center gap-1 text-[9px] font-bold bg-emerald-950/90 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/40 shrink-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                Active
+              </span>
             </div>
-          )}
-        </div>
+          </div>
 
-        {/* CENTER: Centralized Title & Academic Year */}
-        <div className="text-center flex-1 min-w-0 px-2">
-          <h1 className="text-sm sm:text-base md:text-xl font-extrabold tracking-tight text-amber-100 uppercase truncate">
-            {hasMounted 
-              ? (localStorage.getItem('active_school_name') || localStorage.getItem('activeSchoolName') || activeSchool?.name || activeSchool?.school_name || 'SCHOOL MANAGEMENT SYSTEM') 
-              : 'LOADING...'}
-          </h1>
-          <p className="text-[10px] sm:text-xs text-slate-400 font-medium mt-0.5">
-            Academic Year: <span className="text-amber-100 font-semibold">{getCurrentAcademicYear()}</span>
-            <span className="hidden sm:inline"> | Administrator Portal</span>
-          </p>
-        </div>
+          {/* RIGHT: Desktop Active Session Badge */}
+          <div className="hidden sm:flex items-center justify-end shrink-0">
+            <span className="text-xs font-semibold bg-emerald-950/90 text-emerald-400 border border-emerald-500/40 px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-sm">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              Active Session
+            </span>
+          </div>
 
-        {/* RIGHT: Active Session Badge */}
-        <div className="flex items-center justify-end shrink-0">
-          <span className="text-[10px] sm:text-xs font-semibold bg-emerald-950/90 text-emerald-400 border border-emerald-700/60 px-2.5 py-1 rounded-full inline-flex items-center gap-1.5 shadow-sm">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span className="hidden sm:inline">Active Session</span>
-            <span className="sm:hidden">Active</span>
-          </span>
         </div>
-
-      </div>
-    </header>
+      </header>
 
     {/* Responsive Horizontal Tab Navigation */}
     <nav className="w-full bg-[#080d1a] border-b border-slate-800/80 px-3 sm:px-6 overflow-x-auto whitespace-nowrap">
@@ -4175,22 +4342,119 @@ const handleUpdatePersonnel = async (e) => {
           </div>
         )}
 
-        {/* OTHER SCHOOL PERSONNEL TAB */}
-        {activeTab === 'personnel' && (
-          <div className="bg-[#111827] border border-gray-800 p-6 rounded-xl shadow-xl space-y-4">
-            <h2 className="text-lg font-bold text-white border-b border-gray-800 pb-3 flex justify-between items-center">
-              <span>Other School Personnel (Bursar, Supervisors, Discipline Masters, Principals)</span>
-              <span className="text-xs bg-blue-500/20 text-blue-400 px-3 py-1 rounded-full border border-blue-500/30 font-mono">
-                Total: {personnelList.length}
-              </span>
-            </h2>
+       {/* OTHER SCHOOL PERSONNEL TAB */}
+      {activeTab === 'personnel' && (
+        <div className="bg-[#111827] border border-gray-800 p-4 sm:p-6 rounded-xl shadow-xl space-y-4">
+          <h2 className="text-lg font-bold text-white border-b border-gray-800 pb-3 flex justify-between items-center flex-wrap gap-2">
+            <span>Other School Personnel (Bursar, Supervisors, Discipline Masters, Principals)</span>
+            <span className="text-xs bg-blue-500/20 text-blue-400 px-3 py-1 rounded-full border border-blue-500/30 font-medium">
+              Total: {personnelList.length}
+            </span>
+          </h2>
 
-            {personnelList.length === 0 ? (
-              <div className="text-center py-12 text-gray-500 text-sm">
-                No school personnel added yet. Use the "Register New Member" tab to add personnel.
+          {personnelList.length === 0 ? (
+            <div className="text-center py-12 text-gray-500 text-sm">
+              No school personnel added yet. Use the "Register New Member" tab to add personnel.
+            </div>
+          ) : (
+            <div>
+              {/* 1. MOBILE VIEW (< 768px): Mobile Cards Feed */}
+              <div className="md:hidden space-y-3">
+                {personnelList.map((person) => {
+                  const signupLink = person.signup_link || person.signupLink;
+
+                  return (
+                    <div
+                      key={person.id}
+                      className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 space-y-3 text-slate-200 shadow-sm"
+                    >
+                      {/* Top Row: Full Name & Role Badge */}
+                      <div className="flex items-start justify-between gap-2 border-b border-slate-800 pb-2.5">
+                        <div>
+                          <h3 className="font-bold text-sm text-white">{person.full_name}</h3>
+                          <span className="inline-block mt-1 text-[10px] font-extrabold text-amber-400 bg-amber-950/60 border border-amber-800/60 px-2 py-0.5 rounded-md uppercase">
+                            {person.role || person.title || person.position || 'Personnel'}
+                          </span>
+                        </div>
+
+                        {/* ID Copy Button */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(person.id);
+                            alert(`Personnel ID ${person.id} copied to clipboard!`);
+                          }}
+                          className="bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-[10px] font-mono px-2 py-1 rounded-lg flex items-center gap-1 shrink-0"
+                          title="Click to copy ID"
+                        >
+                          <span>{person.id}</span>
+                          <span>📋</span>
+                        </button>
+                      </div>
+
+                      {/* Contact Info */}
+                      <div className="text-xs space-y-1 text-slate-300">
+                        {person.phone && (
+                          <div className="flex items-center gap-1.5 font-mono">
+                            <span>📞</span>
+                            <span>{person.phone}</span>
+                          </div>
+                        )}
+                        {person.email && (
+                          <div className="flex items-center gap-1.5 text-slate-400">
+                            <span>✉️</span>
+                            <span className="truncate">{person.email}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Signup Link & Actions */}
+                      <div className="pt-2 border-t border-slate-800/80 flex flex-col gap-2">
+                        {signupLink ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const link = signupLink;
+                              navigator.clipboard.writeText(link);
+                              alert(`Signup Link copied: ${link}`);
+                            }}
+                            className="w-full bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-700/60 text-emerald-300 text-xs py-1.5 rounded-lg font-semibold flex items-center justify-center gap-1.5 transition"
+                          >
+                            <span>📋</span>
+                            <span>Copy Signup Portal Link</span>
+                          </button>
+                        ) : (
+                          <span className="text-[11px] text-slate-500 italic text-center">No signup link assigned</span>
+                        )}
+
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingPersonnel(person);
+                              setIsEditPersonnelModalOpen(true);
+                            }}
+                            className="flex-1 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs py-1.5 rounded-lg font-bold transition text-center"
+                          >
+                            ✏️ Edit
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDeletePersonnel(person.id)}
+                            className="flex-1 bg-red-950/60 hover:bg-red-900/60 border border-red-700/60 text-red-300 text-xs py-1.5 rounded-lg font-bold transition text-center"
+                          >
+                            🗑️ Delete
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            ) : (
-              <div className="overflow-x-auto">
+
+              {/* 2. DESKTOP VIEW (>= 768px): Original Table */}
+              <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-800">
                 <table className="w-full text-left text-xs text-gray-300 border border-gray-700">
                   <thead className="bg-[#1f2937] text-amber-400 uppercase font-semibold">
                     <tr>
@@ -4203,70 +4467,83 @@ const handleUpdatePersonnel = async (e) => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-800">
-                    {personnelList.map((person) => (
-                      <tr key={person.id} className="hover:bg-gray-800/40">
-                        <td className="py-3 px-4 border border-gray-700 font-bold text-amber-300 uppercase">{person.role ? person.role.replace('_', ' ') : ''}</td>
-<td className="py-3 px-4 border border-gray-700 font-semibold text-white">{person.full_name}</td>
-                        <td className="p-3 border border-gray-700 font-mono">
-                          <button 
-                            onClick={() => {
-                              navigator.clipboard.writeText(person.id);
-                              alert(`Personnel ID ${person.id} copied to clipboard!`);
-                            }}
-                            className="bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 px-2.5 py-1 rounded font-bold"
-                            title="Click to copy ID"
-                          >
-                            {person.id} 📋
-                          </button>
-                        </td>
-                        <td className="p-3 border border-gray-700">
-                          <div>{person.phone}</div>
-                          <div className="text-gray-400 text-[11px]">{person.email}</div>
-                        </td>
-                        <td className="p-3 border border-gray-700">
-              {person.signup_link || person.signupLink ? (
-                <button
-                  onClick={() => {
-                    const link = person.signup_link || person.signupLink;
-                    navigator.clipboard.writeText(link);
-                    alert(`Signup Link copied: ${link}`);
-                  }}
-                  className="px-2 py-1 bg-emerald-900/40 text-emerald-300 border border-emerald-700/60 rounded text-xs hover:bg-emerald-800/60 font-mono flex items-center gap-1 cursor-pointer transition-colors"
-                  title="Click to copy signup link"
-                >
-                  <span>📋</span> Copy Link
-                </button>
-              ) : (
-                <span className="text-gray-500 italic text-[11px]">N/A</span>
-              )}
-            </td>
-                      <td className="p-3 border border-gray-700 text-center">
-                  <div className="flex items-center justify-center gap-2">
-                    <button
-                      onClick={() => {
-                        setEditingPersonnel(person);
-                        setIsEditPersonnelModalOpen(true);
-                      }}
-                      className="bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 px-2.5 py-1 rounded text-xs transition"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => handleDeletePersonnel(person.id)}
-                      className="bg-red-900/40 hover:bg-red-900/70 border border-red-700/50 text-red-300 px-2.5 py-1 rounded text-xs transition"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </td>
-                      </tr>
-                    ))}
+                    {personnelList.map((person) => {
+                      const signupLink = person.signup_link || person.signupLink;
+
+                      return (
+                        <tr key={person.id} className="hover:bg-gray-800/40">
+                          <td className="py-3 px-4 border border-gray-700 font-bold text-amber-300 uppercase">
+                            {person.role || person.title || person.position || 'Personnel'}
+                          </td>
+                          <td className="py-3 px-4 border border-gray-700 font-semibold text-white">
+                            {person.full_name}
+                          </td>
+                          <td className="p-3 border border-gray-700 font-mono">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(person.id);
+                                alert(`Personnel ID ${person.id} copied to clipboard!`);
+                              }}
+                              className="bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs px-2 py-1 rounded"
+                              title="Click to copy ID"
+                            >
+                              {person.id} 📋
+                            </button>
+                          </td>
+                          <td className="p-3 border border-gray-700">
+                            <div>{person.phone}</div>
+                            <div className="text-gray-400 text-[11px]">{person.email}</div>
+                          </td>
+                          <td className="p-3 border border-gray-700">
+                            {signupLink ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const link = signupLink;
+                                  navigator.clipboard.writeText(link);
+                                  alert(`Signup Link copied: ${link}`);
+                                }}
+                                className="px-2 py-1 bg-emerald-900/40 text-emerald-300 border border-emerald-700/60 rounded text-xs font-semibold"
+                                title="Click to copy signup link"
+                              >
+                                📋 Copy Link
+                              </button>
+                            ) : (
+                              <span className="text-gray-500 italic text-[11px]">N/A</span>
+                            )}
+                          </td>
+                          <td className="p-3 border border-gray-700 text-center">
+                            <div className="flex items-center justify-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingPersonnel(person);
+                                  setIsEditPersonnelModalOpen(true);
+                                }}
+                                className="bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 px-2 py-1 rounded text-xs font-semibold"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeletePersonnel(person.id)}
+                                className="bg-red-900/40 hover:bg-red-900/70 border border-red-700/50 text-red-300 px-2 py-1 rounded text-xs font-semibold"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
-            )}
-          </div>
-        )}
+            </div>
+          )}
+        </div>
+      )}
 
         {/* SCHOOL DETAILS TAB */}
         {/* CLASS & COEFFICIENT SETTINGS TAB */}
@@ -4292,62 +4569,67 @@ const handleUpdatePersonnel = async (e) => {
     </div>
 
     {/* Section Selector Bar */}
-    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-gray-900/60 p-4 rounded-lg border border-gray-800">
-      <div>
-        <label className="block text-xs font-semibold text-gray-400 mb-1 uppercase">Section</label>
-        <select
-          value={masterSection}
-          onChange={(e) => setMasterSection(e.target.value)}
-          className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-xs text-white focus:outline-none"
-        >
-          <option value="General Education">General Education</option>
-          <option value="Technical Commercial (STT)">Technical Commercial (STT)</option>
-          <option value="Technical Industrial (IND)">Technical Industrial (IND)</option>
-        </select>
-      </div>
-      {/* Right Side: Preview & Print Action Button */}
-        <div className="md:col-span-3 flex items-end justify-end">
-      {/* DYNAMIC TRACK-SPECIFIC BULK PRINT BUTTON */}
-{(() => {
-  const sectionLower = (masterSection || '').toLowerCase();
-  
-  if (sectionLower.includes('commercial') || sectionLower.includes('stt')) {
-    return (
-      <button
-        type="button"
-        onClick={() => handleOpenBulkReportCards('commercial', 'First Year Commercial (Y1Com)', printTrade || 'ALL', 'Term 1')}
-        className="px-4 py-2.5 bg-[#1b4332] hover:bg-[#2d6a4f] text-amber-300 font-bold text-xs rounded-xl shadow-lg transition-all flex items-center gap-2 border border-[#d8f3dc]/30"
-      >
-        <span>🏢</span> Technical Commercial Preview & Bulk Printing
-      </button>
-    );
-  }
+    {/* Section Selector & Bulk Action Bar */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-900/80 p-3.5 sm:p-4 rounded-xl border border-slate-800 shadow-sm">
+            
+            {/* Section Dropdown */}
+            <div className="w-full sm:w-64">
+              <label className="block text-[11px] font-bold text-slate-400 mb-1 uppercase tracking-wider">
+                Section
+              </label>
+              <select
+                value={masterSection}
+                onChange={(e) => setMasterSection(e.target.value)}
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs font-semibold text-slate-100 focus:outline-none focus:border-emerald-500 transition"
+              >
+                <option value="General Education">General Education</option>
+                <option value="Technical Commercial (STT)">Technical Commercial (STT)</option>
+                <option value="Technical Industrial (IND)">Technical Industrial (IND)</option>
+              </select>
+            </div>
 
-  if (sectionLower.includes('industrial') || sectionLower.includes('ind')) {
-    return (
-      <button
-        type="button"
-        onClick={() => handleOpenBulkReportCards('industrial', 'First Year Industrial (Y1Ind)', printTrade || 'ALL', 'Term 1')}
-        className="px-4 py-2.5 bg-orange-900 hover:bg-orange-800 text-amber-300 font-bold text-xs rounded-xl shadow-lg transition-all flex items-center gap-2 border border-orange-700/50"
-      >
-        <span>⚙️</span> Technical Industrial Preview & Bulk Printing
-      </button>
-    );
-  }
+            {/* Dynamic Track-Specific Bulk Print Button */}
+            <div className="flex items-center justify-end w-full sm:w-auto mt-1 sm:mt-0">
+              {(() => {
+                const sectionLower = (masterSection || '').toLowerCase();
 
-  // Default Fallback: General Education
-  return (
-    <button
-      type="button"
-      onClick={() => handleOpenBulkReportCards('general', classLevel || 'Form 1', 'ALL', 'Term 1')}
-      className="px-4 py-2.5 bg-blue-700 hover:bg-blue-600 text-white font-bold text-xs rounded-xl shadow-lg transition-all flex items-center gap-2 border border-blue-500/30"
-    >
-      <span>📄</span> General Education Preview & Bulk Printing
-    </button>
-  );
-})()}
-        </div>
-    </div>
+                if (sectionLower.includes('commercial') || sectionLower.includes('stt')) {
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenBulkReportCards('commercial', 'First Year Commercial (Y1Com)', printTrade || 'ALL', printTerm || 'Term 1')}
+                      className="w-full sm:w-auto px-4 py-2 bg-[#1b4332] hover:bg-[#2d6a4f] text-amber-300 font-bold text-xs rounded-xl shadow-md transition active:scale-95 flex items-center justify-center gap-2 border border-emerald-600/50"
+                    >
+                      <span>🖨️</span> Technical Commercial Report Cards Preview & Bulk Printing
+                    </button>
+                  );
+                }
+
+                if (sectionLower.includes('industrial') || sectionLower.includes('ind')) {
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenBulkReportCards('industrial', 'First Year Industrial (Y1Ind)', printTrade || 'ALL', printTerm || 'Term 1')}
+                      className="w-full sm:w-auto px-4 py-2 bg-orange-900/90 hover:bg-orange-800 text-amber-300 font-bold text-xs rounded-xl shadow-md transition active:scale-95 flex items-center justify-center gap-2 border border-orange-600/50"
+                    >
+                      <span>⚙️</span> Technical Industrial Report Cards Preview & Bulk Printing
+                    </button>
+                  );
+                }
+
+                return (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenBulkReportCards('general', classLevel || 'Form 1', 'ALL', 'Term 1')}
+                    className="w-full sm:w-auto px-4 py-2 bg-blue-700 hover:bg-blue-600 text-white font-bold text-xs rounded-xl shadow-md transition active:scale-95 flex items-center justify-center gap-2 border border-blue-500/50"
+                  >
+                    <span>📘</span> General Education Report Cards Preview & Bulk Printing
+                  </button>
+                );
+              })()}
+            </div>
+
+          </div>
 
     {/* Render Section Specific Mark Sheet Component */}
     {masterSection?.includes('Commercial') ? (
@@ -5056,6 +5338,7 @@ const handleUpdatePersonnel = async (e) => {
     doc.text(`Teacher Timetable - ${teacherName}`, 14, 15);
     doc.setFontSize(10);
     doc.text(`School: ${school} | Academic Year: ${getCurrentAcademicYear()}`, 14, 22);
+    
 
     // 4. Construct Table Header & Body
     const head = [['SUBJECTS', ...dynamicClasses]];

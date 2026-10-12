@@ -5,6 +5,8 @@ import { supabase } from '../../lib/supabase';
 import { getCurrentAcademicYear } from '../../lib/academicYear';
 import { toast } from 'react-hot-toast';
 import { getTeacherLockStatus } from '../../lib/markLockService';
+import { db } from '../../lib/db';
+import { syncOfflineQueueToSupabase, downloadFullSchoolData } from '../../lib/offlineSync';
 
 import { 
   GENERAL_LOWER_CLASSES,
@@ -121,6 +123,16 @@ const RenderFormattedLogContent = ({ content, mediaUrls }) => {
   const [successBanner, setSuccessBanner] = useState(null);
   const [databaseTrades, setDatabaseTrades] = useState([]);
   const [isMarkEntryAuthorized, setIsMarkEntryAuthorized] = useState(true);
+
+  // Auto-sync pending offline attendance records when back online
+  useEffect(() => {
+    const handleOnline = async () => {
+      await syncOfflineQueueToSupabase();
+    };
+
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, []);
 
   // Priority Mission: Fetch unique enrolled trades/series directly from Supabase
   useEffect(() => {
@@ -367,6 +379,20 @@ const startDrawing = (e) => {
   ];
 
   // Dynamically assigned Teacher Profile with real-world assignment data (reset/empty states for new assignments)
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
   const [schoolName, setSchoolName] = useState('Loading School...');
   const [selectedTerm, setSelectedTerm] = useState('Term 1');
   const [selectedSection, setSelectedSection] = useState('General');
@@ -595,24 +621,42 @@ useEffect(() => {
     setSelectedClassForAction('');
   }
 }, [selectedSubjectForAction, teacherProfile?.schedules]);
- // 1. Define fetchClassLogs at the component level
-  const fetchClassLogs = async () => {
+
+ const fetchClassLogs = async () => {
     if (!selectedClassLog || !teacherProfile?.school_id) return;
     setIsLoadingLogs(true);
     try {
-      const { data, error } = await supabase
-        .from('lesson_logs')
-        .select('*')
-        .eq('school_id', teacherProfile.school_id)
-        .eq('classLevel', selectedClassLog.className)
-        .eq('subject', selectedClassLog.subject)
-        .order('logged_at', { ascending: false });
+      // 1. Read from Dexie local storage
+      const localLogs = await db.lesson_logs
+        .where({
+          school_id: teacherProfile.school_id,
+          classLevel: selectedClassLog.className,
+          subject: selectedClassLog.subject
+        })
+        .reverse()
+        .sortBy('logged_at');
 
-      if (error) throw error;
-      setLogsList(data || []);
+      if (localLogs && localLogs.length > 0) {
+        setLogsList(localLogs);
+      }
+
+      // 2. Fetch fresh logs from Supabase if online
+      if (navigator.onLine) {
+        const { data, error } = await supabase
+          .from('lesson_logs')
+          .select('*')
+          .eq('school_id', teacherProfile.school_id)
+          .eq('classLevel', selectedClassLog.className)
+          .eq('subject', selectedClassLog.subject)
+          .order('logged_at', { ascending: false });
+
+        if (!error && data) {
+          setLogsList(data);
+          await db.lesson_logs.bulkPut(data);
+        }
+      }
     } catch (err) {
       console.error('Error fetching logs:', err);
-      toast.error('Failed to load lesson logs');
     } finally {
       setIsLoadingLogs(false);
     }
@@ -622,55 +666,76 @@ useEffect(() => {
     fetchClassLogs();
   }, [selectedClassLog, teacherProfile?.school_id]);
 
-  const handleSaveLessonLog = async () => {
-  setIsSavingLog(true);
-  try {
-    const activeSchoolId = localStorage.getItem('active_school_id') || teacherProfile?.school_id;
-    if (!activeSchoolId || !selectedClassLog) return;
-
-    let error;
-
-    if (editingLogId) {
-      // Update existing record in place
-      const res = await supabase
-        .from('lesson_logs')
-        .update({ lesson_content: lessonText })
-        .eq('id', editingLogId);
-      error = res.error;
-    } else {
-      // Insert new record
-      const res = await supabase
-        .from('lesson_logs')
-        .insert([
-          {
-            school_id: activeSchoolId,
-            teacher_id: teacherProfile?.id || teacherProfile?.teacher_id || null,
-            teacher_name: teacherProfile?.name || teacherProfile?.full_name || '',
-            subject: selectedClassLog.subject,
-            classLevel: selectedClassLog.className,
-            lesson_content: lessonText,
-            status: 'SUBMITTED',
-            logged_at: new Date().toISOString(),
-            academic_year: typeof getCurrentAcademicYear === 'function' ? getCurrentAcademicYear() : null,
-            trades_series: selectedClassLog.trades_series || selectedClassLog.tradeSeries || null
-          }
-        ]);
-      error = res.error;
+ const handleSaveLessonLog = async () => {
+    if (!lessonText.trim() || !selectedClassLog) {
+      toast.error('Please enter lesson content before saving.');
+      return;
     }
 
-    if (error) throw error;
+    setIsSavingLog(true);
+    try {
+      const activeSchoolId = localStorage.getItem('active_school_id') || teacherProfile?.school_id;
+      const teacherId = teacherProfile?.id || teacherProfile?.teacher_id || localStorage.getItem('teacher_id') || 'UNKNOWN_TEACHER';
+      const teacherName = teacherProfile?.name || teacherProfile?.full_name || 'Teacher';
 
-    toast.success('Lesson log saved successfully!');
-    setLessonText('');
-    setEditingLogId(null); 
-    fetchClassLogs();
-  } catch (err) {
-    console.error('Error saving lesson log:', err);
-    toast.error('Failed to save log.');
-  } finally {
-    setIsSavingLog(false);
-  }
-};
+      const logPayload = {
+        id: editingLogId || `LOG_${Date.now()}`,
+        school_id: activeSchoolId,
+        teacher_id: teacherId,
+        teacher_name: teacherName,
+        subject: selectedClassLog.subject,
+        classLevel: selectedClassLog.className,
+        lesson_content: lessonText.trim(),
+        status: 'SUBMITTED',
+        logged_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        academic_year: typeof getCurrentAcademicYear === 'function' ? getCurrentAcademicYear() : null,
+        trades_series: selectedClassLog.trades_series || selectedClassLog.tradeSeries || null
+      };
+
+      // 1. INSTANT LOCAL SAVE TO DEXIE
+      try {
+        await db.lesson_logs.put(logPayload);
+        await db.pendingSyncQueue.add({
+          action_type: editingLogId ? 'UPDATE' : 'INSERT',
+          table_name: 'lesson_logs',
+          payload: logPayload,
+          timestamp: Date.now()
+        });
+      } catch (localErr) {
+        console.warn('Local lesson log save notice:', localErr);
+      }
+
+      // 2. BACKGROUND SYNC TO SUPABASE IF ONLINE
+      if (navigator.onLine) {
+        let syncRes;
+        if (editingLogId) {
+          syncRes = await supabase.from('lesson_logs').update({ lesson_content: lessonText.trim() }).eq('id', editingLogId);
+        } else {
+          syncRes = await supabase.from('lesson_logs').insert([logPayload]);
+        }
+
+        if (!syncRes.error) {
+          await db.pendingSyncQueue.where('payload.id').equals(logPayload.id).delete();
+        }
+      }
+
+      // 3. INSTANT LOCAL UI UPDATE
+      toast.success('Lesson log saved successfully!');
+      setLessonText('');
+      setEditingLogId(null);
+      
+      setLogsList((prev) => {
+        const filtered = prev.filter((item) => item.id !== logPayload.id);
+        return [logPayload, ...filtered];
+      });
+    } catch (err) {
+      console.error('Error saving lesson log:', err);
+      toast.error('Failed to save log.');
+    } finally {
+      setIsSavingLog(false);
+    }
+  };
 useEffect(() => {
     const fetchTeacherAndSchool = async () => {
       const savedSchoolId = localStorage.getItem('active_school_id') || localStorage.getItem('activeSchoolId');
@@ -689,7 +754,8 @@ useEffect(() => {
           setIsMarkEntryAuthorized(!teacherData.is_marks_locked);
         }
       }
-
+downloadFullSchoolData(savedSchoolId);
+      syncOfflineQueueToSupabase();
      const currentSchoolId = savedSchoolId || teacherProfile?.school_id;
 if (currentSchoolId) {
   const { data: schoolData } = await supabase
@@ -881,46 +947,60 @@ useEffect(() => {
         const lowerClass = cleanClass.toLowerCase();
         const isSixthFormOrTech = lowerClass.includes('sixth') || lowerClass.includes('l6') || lowerClass.includes('u6') || lowerClass.includes('tech') || lowerClass.includes('form 6');
 
-        // 1. Fetch Students
-        let studentQuery = supabase
-          .from('students')
-          .select('*')
-          .eq('school_id', activeSchoolId)
-          .eq('classLevel', cleanClass);
+       // 1. Fetch Students (Online via Supabase with Dexie Offline Fallback)
+    let fetchedStudents = [];
+    if (navigator.onLine) {
+      let studentQuery = supabase
+        .from('students')
+        .select('*')
+        .eq('school_id', activeSchoolId)
+        .eq('classLevel', cleanClass);
 
-        // ONLY filter by trade/series if it's a Sixth Form / Specialized class
-        if (isSixthFormOrTech && selectedTrade && selectedTrade !== 'ALL' && selectedTrade !== 'N/A') {
-          studentQuery = studentQuery.eq('trades_series', selectedTrade);
+      if (isSixthFormOrTech && selectedTrade && selectedTrade !== 'ALL' && selectedTrade !== 'N/A') {
+        studentQuery = studentQuery.eq('trades_series', selectedTrade);
+      }
+
+      const { data: students, error: studErr } = await studentQuery.order('fullName', { ascending: true });
+      if (studErr) throw studErr;
+      fetchedStudents = students || [];
+    } else {
+      // Offline fallback: load cached student list directly from Dexie
+      try {
+        if (db?.students) {
+          fetchedStudents = await db.students
+            .where({ school_id: activeSchoolId, classLevel: cleanClass })
+            .toArray();
         }
+      } catch (dexieErr) {
+        console.warn('Dexie offline student read warning:', dexieErr);
+      }
+    }
 
-        const { data: students, error: studErr } = await studentQuery.order('fullName', { ascending: true });
-        if (studErr) throw studErr;
+    if (isCancelled) return;
+    setClassStudents(fetchedStudents);
 
-        if (isCancelled) return;
-        const fetchedStudents = students || [];
-        setClassStudents(fetchedStudents);
+    // 2. Fetch Marks for those students
+    const studentIds = fetchedStudents.map((s) => s.id);
+    if (studentIds.length === 0) {
+      setMarksRecords({});
+      return;
+    }
 
-        // 2. Fetch Marks for those students
-        const studentIds = fetchedStudents.map(s => s.id);
-        if (studentIds.length === 0) {
-          setMarksRecords({});
-          return;
-        }
+    const normalizedTerm = selectedTerm.split(' ')[0] + ' ' + selectedTerm.split(' ')[1];
+    let marks = [];
 
-        const normalizedTerm = selectedTerm.split(' ')[0] + ' ' + selectedTerm.split(' ')[1];
+    if (navigator.onLine) {
+      const { data, error: markErr } = await supabase
+        .from('marks')
+        .select('*')
+        .eq('school_id', activeSchoolId)
+        .eq('academic_year', getCurrentAcademicYear())
+        .ilike('term', `${normalizedTerm.trim()}%`)
+        .in('student_id', studentIds);
 
-        const { data: marks, error: markErr } = await supabase
-          .from('marks')
-          .select('*')
-          .eq('school_id', activeSchoolId)
-          .eq('academic_year', getCurrentAcademicYear())
-          .ilike('term', `${normalizedTerm.trim()}%`)
-          .in('student_id', studentIds);
-
-        if (markErr) console.warn("Notice loading marks:", markErr.message);
-
-        if (isCancelled) return;
-
+      if (markErr) console.warn('Notice loading marks:', markErr.message);
+      marks = data || [];
+    }
         const loadedMarks = {};
         (marks || []).forEach(item => {
           if (!selectedSubjectForAction || item.subject_name?.trim().toLowerCase() === selectedSubjectForAction.trim().toLowerCase()) {
@@ -967,16 +1047,17 @@ if (!isMounted) {
     }
   };
   const submitAttendance = async () => {
+    console.log('🚀 Submit Attendance process started');
+
     const activeSchoolId = localStorage.getItem('active_school_id') || teacherProfile?.school_id;
     const teacherId = localStorage.getItem('teacher_id') || teacherProfile?.id;
 
     if (!activeSchoolId || !selectedClassForAction) {
-      toast.error('Missing school or class context');
+      alert('Missing school or class context');
       return;
     }
-
-    if (classStudents.length === 0) {
-      toast.error('No students found for this class');
+    if (!classStudents || classStudents.length === 0) {
+      alert('No students found for this class');
       return;
     }
 
@@ -986,32 +1067,66 @@ if (!isMounted) {
     const currentTimeStr = today.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     const recordsToInsert = classStudents.map((student) => ({
+      id: crypto.randomUUID ? crypto.randomUUID() : `ATT_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
       school_id: activeSchoolId,
       teacher_id: teacherId,
       student_id: student.id,
-      class_name: selectedClassForAction,
-      subject: selectedSubjectForAction,
+      unique_code: student.unique_code || student.matricule || null,
+      classLevel: selectedClassForAction,
+      subject_name: selectedSubjectForAction,
       status: attendanceRecords[student.id] || 'Present',
-      date: currentDateStr,
+      attendance_date: currentDateStr,
+      academic_year: typeof getCurrentAcademicYear === 'function' ? getCurrentAcademicYear() : '2026/2027',
       day_of_week: currentDayStr,
       time_recorded: currentTimeStr
     }));
 
-    const { error } = await supabase
-      .from('attendance')
-      .upsert(recordsToInsert, { onConflict: 'school_id,student_id,date,subject' });
-
-    if (!error) {
-      toast.success(`Attendance submitted for ${currentDayStr}, ${currentDateStr}!`);
-      setSubmissionStatus((prev) => ({
-        ...prev,
-        attendanceSubmitted: true,
-        lastUpdated: `${currentDayStr} at ${currentTimeStr}`
-      }));
-    } else {
-      console.error('Error submitting attendance:', error);
-      toast.error('Failed to submit attendance');
+    // 1. Instant local write to Dexie
+    try {
+      if (db?.attendance) {
+        await db.attendance.bulkPut(recordsToInsert);
+      }
+      if (db?.pendingSyncQueue) {
+        await db.pendingSyncQueue.add({
+          action_type: 'UPSERT',
+          table_name: 'attendance',
+          payload: recordsToInsert,
+          timestamp: Date.now()
+        });
+      }
+    } catch (localErr) {
+      console.warn('Local save warning:', localErr);
     }
+
+    // 2. Sync to Supabase when online
+    if (navigator.onLine) {
+      const { error } = await supabase
+        .from('attendance')
+        .upsert(recordsToInsert, { onConflict: 'school_id,student_id,attendance_date,subject_name' });
+
+      if (error) {
+        console.error('Supabase sync notice:', error.message || error);
+        alert('Failed to sync with online database: ' + (error.message || 'Error'));
+        return;
+      }
+
+      if (db?.pendingSyncQueue) {
+        await db.pendingSyncQueue.where('table_name').equals('attendance').delete();
+      }
+    }
+
+    // 3. Guaranteed Visual Alert
+    alert(`✅ Success! Attendance submitted for ${currentDayStr}, ${currentDateStr}`);
+    
+    if (typeof toast !== 'undefined' && toast.success) {
+      toast.success(`Attendance submitted for ${currentDayStr}, ${currentDateStr}!`);
+    }
+
+    setSubmissionStatus((prev) => ({
+      ...prev,
+      attendanceSubmitted: true,
+      lastUpdated: `${currentDayStr} at ${currentTimeStr}`
+    }));
   };
  const submitMarks = async () => {
   console.log("Submit marks clicked!");
@@ -1780,7 +1895,10 @@ if (!isMounted) {
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Select Subject</label>
                 <select 
                   value={selectedSubjectForAction}
-                  onChange={(e) => setSelectedSubjectForAction(e.target.value)}
+                  onChange={(e) => {
+  setClassStudents([]);
+  setSelectedSubjectForAction(e.target.value);
+}}
                   className="w-full bg-[#1f2937] bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm text-amber-300 font-bold"
                 >
                   {teacherProfile.subjects.map((sub, i) => (
@@ -1790,11 +1908,14 @@ if (!isMounted) {
               </div>
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Select Class / Form</label>
-                <select 
-                  value={selectedClassForAction}
-                  onChange={(e) => setSelectedClassForAction(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm text-white"
-                >
+             <select
+  value={selectedClassForAction}
+  onChange={(e) => {
+    setClassStudents([]);
+    setSelectedClassForAction(e.target.value);
+  }}
+  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm text-white"
+>
                  {assignedClassesForSubject && assignedClassesForSubject.length > 0 ? (
   assignedClassesForSubject.map((cls, i) => (
     <option key={i} value={cls}>{cls}</option>
@@ -1814,6 +1935,7 @@ if (!isMounted) {
                     <tr>
                       <th className="p-3 border border-gray-700">ID</th>
                       <th className="p-3 border border-gray-700">Student Name</th>
+                      <th className="p-3 border border-gray-700">Unique Code</th>
                       <th className="p-3 border border-gray-700 text-center">Attendance Status</th>
                     </tr>
                   </thead>
@@ -1824,6 +1946,7 @@ if (!isMounted) {
                         <tr key={stu.id} className="hover:bg-gray-800/40">
                           <td className="p-3 border border-gray-700 font-mono text-amber-400">{index + 1}</td>
                           <td className="p-3 border border-gray-700 font-semibold text-white">{stu.fullName}</td>
+                          <td className="p-3 border border-gray-700 font-mono text-xs text-amber-300">{stu.unique_code || stu.matricule || stu.id || '-'}</td>
                           <td className="p-3 border border-gray-700 text-center">
                             <div className="inline-flex rounded-lg overflow-hidden border border-gray-700">
                               {['Present', 'Absent', 'Late'].map((st) => (

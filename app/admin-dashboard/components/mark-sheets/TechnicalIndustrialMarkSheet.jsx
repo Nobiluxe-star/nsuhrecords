@@ -580,65 +580,86 @@ export default function TechnicalIndustrialMarkSheet({
   return (
     <div className="p-6 bg-[#0F172A] rounded-xl border border-gray-800 text-white space-y-4">
       {/* Header & Single-Source Controls */}
-      <div className="flex flex-wrap justify-between items-center gap-4">
+      {/* Header Block */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-800">
         <div>
-          <h2 className="text-xl font-bold text-[#10B981]">Technical Industrial Master Mark Sheet</h2>
-          <p className="text-xs text-gray-400">
-            Class: <span className="text-white font-medium">{currentClassLevel}</span> | Term: <span className="text-white font-medium">{currentTerm}</span> | Class Avg: <span className="text-[#10B981] font-bold">{classAvg}/20</span>
+          <h2 className="text-base sm:text-xl font-bold text-[#10B981]">Technical Industrial Master Mark Sheet</h2>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Class: <span className="text-white font-medium">{currentClassLevel}</span> | Term: <span className="text-white font-medium">{currentTerm}</span>
           </p>
         </div>
 
-        {/* Dynamic Academic Year Display */}
-        <div className="px-4 py-2 border-2 border-[#10B981] rounded-lg bg-emerald-950/30 text-[#10B981] font-semibold text-xs tracking-wide">
-          Academic Year: {academicYear}
-        </div>
+        {/* Top-Right Badge & Excel Download Button */}
+        <div className="flex flex-wrap items-center justify-between sm:justify-end gap-2 w-full sm:w-auto">
+          <div className="px-2.5 py-1 bg-emerald-950/80 border border-emerald-500/40 text-emerald-400 text-[11px] font-bold rounded-md shrink-0">
+            Academic Year: {academicYear}
+          </div>
 
-        <div className="flex items-center space-x-3">
-          <select
-            value={currentTerm}
-            onChange={(e) => setCurrentTerm(e.target.value)}
-            className="px-3 py-1.5 bg-gray-900 border border-gray-700 rounded-md text-xs text-white focus:border-[#10B981]"
+          <button
+            type="button"
+            onClick={downloadExcelSheet}
+            className="px-3.5 py-1.5 bg-[#10B981] hover:bg-emerald-600 text-slate-950 font-bold text-xs rounded-lg transition-colors flex items-center gap-1.5 shadow-sm shrink-0"
           >
-            <option value="Term 1">Term 1</option>
-            <option value="Term 2">Term 2</option>
-            <option value="Term 3">Term 3</option>
-          </select>
+            <span>📊</span> Download Excel
+          </button>
+        </div>
+      </div>
 
+      {/* Filter Controls Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 pt-2">
+        {/* Class Level Selector */}
+        <div>
+          <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Class Level</label>
           <select
             value={currentClassLevel}
             onChange={(e) => setCurrentClassLevel(e.target.value)}
-            className="px-3 py-1.5 bg-gray-900 border border-gray-700 rounded-md text-xs text-white focus:border-[#10B981]"
+            className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-xs text-white focus:border-[#10B981] focus:outline-none"
           >
             {TECHNICAL_INDUSTRIAL_CATALOG.map((cls) => (
               <option key={cls} value={cls}>{cls}</option>
             ))}
           </select>
+        </div>
 
+        {/* Term Selector */}
+        <div>
+          <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Term</label>
+          <select
+            value={currentTerm}
+            onChange={(e) => setCurrentTerm(e.target.value)}
+            className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-xs text-white focus:border-[#10B981] focus:outline-none"
+          >
+            <option value="Term 1">Term 1</option>
+            <option value="Term 2">Term 2</option>
+            <option value="Term 3">Term 3</option>
+          </select>
+        </div>
+
+        {/* Trade Selector */}
+        <div>
+          <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Trade / Specialty</label>
           <select
             value={currentTrade}
             onChange={(e) => setCurrentTrade(e.target.value)}
-            className="px-3 py-1.5 bg-gray-900 border border-gray-700 rounded-md text-xs text-white focus:border-[#10B981]"
+            className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-xs text-white focus:border-[#10B981] focus:outline-none"
           >
             <option value="ALL">All Industrial Trades</option>
             {INDUSTRIAL_TRADE_SERIES.map((trade) => (
               <option key={trade} value={trade}>{trade}</option>
             ))}
           </select>
+        </div>
 
+        {/* Search Input */}
+        <div>
+          <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Search Student</label>
           <input
             type="text"
             placeholder="Search student..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="px-3 py-1.5 bg-gray-900 border border-gray-700 rounded-md text-xs text-white focus:outline-none focus:border-[#10B981]"
+            className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-xs text-white focus:border-[#10B981] focus:outline-none"
           />
-
-          <button
-            onClick={downloadExcelSheet}
-            className="px-3 py-1.5 bg-[#10B981] hover:bg-emerald-600 text-slate-950 font-bold text-xs rounded-md transition-colors"
-          >
-            📊 Download Excel
-          </button>
         </div>
       </div>
 

@@ -1,5 +1,6 @@
 import { AcademicConfigsProvider } from './admin-dashboard/context/AcademicConfigsContext';
 import { Geist, Geist_Mono } from "next/font/google";
+import PWARegister from './components/PWARegister';
 import "./globals.css";
 
 const geistSans = Geist({
@@ -18,6 +19,7 @@ export const metadata = {
   keywords: ["ClassLogs", "NsuRecords", "MINSEC", "Cameroon School Portal", "Report Cards"],
   authors: [{ name: "NsuRecords" }],
   metadataBase: new URL("https://classlogs.cc"),
+  manifest: "/manifest.json",
   icons: {
     icon: "/favicon.ico",
     shortcut: "/favicon.ico",
@@ -55,6 +57,7 @@ export default function RootLayout({ children }) {
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        <PWARegister />
         <AcademicConfigsProvider>
           {children}
         </AcademicConfigsProvider>

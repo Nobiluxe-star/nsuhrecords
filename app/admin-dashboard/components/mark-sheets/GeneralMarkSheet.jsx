@@ -633,86 +633,96 @@ export default function GeneralMarkSheet({
   return (
     <div className="p-[#10B981] rounded-xl border border-gray-800 text-white space-y-4">
       {/* Top Header Block matching the exact design layout */}
-      <div className="flex flex-wrap justify-between items-start gap-4">
+      {/* Top Header Block */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-gray-800">
         <div>
-          <h2 className="text-xl font-bold text-[#10B981]">General Education Master Mark Sheet</h2>
-          <p className="text-xs text-gray-400 mt-1">
-            Class: <span className="text-white font-medium">{currentClassLevel}</span> | Term: <span className="text-white font-medium">{currentTerm}</span> | Class Avg: <span className="text-[#10B981] font-bold">{classAvg}/20</span>
+          <h2 className="text-base sm:text-xl font-bold text-[#10B981]">General Education Master Mark Sheet</h2>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Class: <span className="text-white font-medium">{currentClassLevel}</span> | Term: <span className="text-white font-medium">{currentTerm}</span>
           </p>
         </div>
 
-        {/* Top-Right Badge & Action Button aligned as requested */}
-        <div className="flex flex-col items-end gap-2">
+        {/* Top-Right Badge & Action Button */}
+        <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto">
           {/* Academic Year Badge */}
-          <div className="px-3 py-1 bg-[#062019] border border-[#10B981] text-[#10B981] text-xs font-semibold rounded-full">
+          <div className="px-2.5 py-1 bg-[#062019] border border-[#10B981] text-[#10B981] text-[11px] font-semibold rounded-md">
             Academic Year: {academicYear}
           </div>
 
-          {/* Download Excel Button matching exact styling */}
+          {/* Download Excel Button */}
           <button
+            type="button"
             onClick={exportToExcel}
-            className="px-4 py-1.5 bg-[#10B981] hover:bg-[#0ea5e9] text-black font-semibold text-xs rounded-lg transition-colors flex items-center gap-1.5 shadow-md"
+            className="px-3.5 py-1.5 bg-[#10B981] hover:bg-[#0ea5e9] text-black font-bold text-xs rounded-lg transition-colors flex items-center gap-1.5 shadow-sm shrink-0"
           >
-            📊 Download Excel
+            <span>📊</span> Download Excel
           </button>
         </div>
       </div>
 
-      {/* Filter Controls Row */}
-      <div className="flex items-center space-x-3 flex-wrap gap-y-2 pt-2">
+      {/* Filter Controls Grid (Mobile Responsive) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 pt-2">
         {/* Term Selector */}
-        <select
-          value={currentTerm}
-          onChange={(e) => setCurrentTerm(e.target.value)}
-          className="px-3 py-1.5 bg-gray-900 border border-gray-700 rounded-md text-xs text-white focus:border-[#10B981]"
-        >
-          <option value="Term 1">Term 1</option>
-          <option value="Term 2">Term 2</option>
-          <option value="Term 3">Term 3</option>
-        </select>
+        <div>
+          <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Term</label>
+          <select
+            value={currentTerm}
+            onChange={(e) => setCurrentTerm(e.target.value)}
+            className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-xs text-white focus:border-[#10B981] focus:outline-none"
+          >
+            <option value="Term 1">Term 1</option>
+            <option value="Term 2">Term 2</option>
+            <option value="Term 3">Term 3</option>
+          </select>
+        </div>
 
         {/* Class Selector */}
-        <select
-          value={currentClassLevel}
-          onChange={(e) => handleClassChange(e.target.value)}
-          className="px-3 py-1.5 bg-gray-900 border border-gray-700 rounded-md text-xs text-white focus:border-[#10B981]"
-        >
-          {GENERAL_CLASSES_CATALOG.map((cls) => (
-            <option key={cls} value={cls}>{cls}</option>
-          ))}
-        </select>
+        <div>
+          <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Class Level</label>
+          <select
+            value={currentClassLevel}
+            onChange={(e) => handleClassChange(e.target.value)}
+            className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-xs text-white focus:border-[#10B981] focus:outline-none"
+          >
+            {GENERAL_CLASSES_CATALOG.map((cls) => (
+              <option key={cls} value={cls}>{cls}</option>
+            ))}
+          </select>
+        </div>
 
         {/* Series Selector */}
-        <select
-          disabled={!isSixthForm}
-          value={currentSeries}
-          onChange={(e) => setCurrentSeries(e.target.value)}
-          className={`px-3 py-1.5 bg-gray-900 border text-xs rounded-md focus:border-[#10B981] ${
-            !isSixthForm 
-              ? 'opacity-50 border-gray-800 text-gray-500 cursor-not-allowed' 
-              : 'border-gray-700 text-white'
-          }`}
-        >
-          {!isSixthForm ? (
-            <option value="N/A">Series: N/A</option>
-          ) : (
-            <>
-              <option value="">-- Select Series (Required) --</option>
-              {seriesList.map((s) => (
-                <option key={s.code} value={s.code}>{s.code} - {s.name}</option>
-              ))}
-            </>
-          )}
-        </select>
+        <div>
+          <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Series</label>
+          <select
+            disabled={!isSixthForm}
+            value={currentSeries}
+            onChange={(e) => setCurrentSeries(e.target.value)}
+            className={`w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-xs text-white focus:border-[#10B981] focus:outline-none ${!isSixthForm ? 'opacity-60 cursor-not-allowed' : ''}`}
+          >
+            {!isSixthForm ? (
+              <option value="N/A">Series: N/A</option>
+            ) : (
+              <>
+                <option value="">-- Select Series (Required) --</option>
+                {seriesList.map((s) => (
+                  <option key={s.code} value={s.code}>{s.code} - {s.name}</option>
+                ))}
+              </>
+            )}
+          </select>
+        </div>
 
         {/* Search Input */}
-        <input
-          type="text"
-          placeholder="Search student..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="px-3 py-1.5 bg-gray-900 border border-gray-700 rounded-md text-xs text-white focus:outline-none focus:border-[#10B981]"
-        />
+        <div>
+          <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Search Student</label>
+          <input
+            type="text"
+            placeholder="Search student..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-xs text-white focus:border-[#10B981] focus:outline-none"
+          />
+        </div>
       </div>
 
       {isSixthForm && !currentSeries ? (

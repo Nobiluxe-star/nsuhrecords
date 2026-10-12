@@ -1,565 +1,362 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { Camera } from 'lucide-react';
+import { 
+  UserCheck, ShieldAlert, Search, Bell, Wifi, WifiOff, 
+  BookOpen, Factory, Briefcase, Camera, LogOut, CheckCircle2 
+} from 'lucide-react';
+import { db as supabase } from '../../lib/db';
+
+// Import Modular Components
+import GeneralAttendance from './components/GeneralAttendance';
+import CommercialAttendance from './components/CommercialAttendance';
+import IndustrialAttendance from './components/IndustrialAttendance';
+import SubjectTruancyFeed from './components/SubjectTruancyFeed';
+import IncidentRegistry from './components/IncidentRegistry';
+import GlobalStudentSearch from './components/GlobalStudentSearch';
 
 export default function DisciplineMasterDashboard() {
-  // School assigned by the master admin (editable via admin assignment if connected, blank/placeholder if unassigned)
+  const [activeTab, setActiveTab] = useState('general'); // 'general', 'commercial', 'industrial', 'truancy', 'incidents'
   const [assignedSchool, setAssignedSchool] = useState('');
-  
-  // Discipline master name assigned by the administrator (blank "No Name" by default until assigned)
-  const [assignedDisciplineMasterName, setAssignedDisciplineMasterName] = useState('No Name');
-  
-  const [academicYear] = useState('2026-2027');
-  
-  // Discipline Master Profile picture upload (blank by default)
-  const [disciplineMaster, setDisciplineMaster] = useState({
-    profilePic: ''
+  const [activeSchoolId, setActiveSchoolId] = useState(null);
+  const [isOnline, setIsOnline] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  // Discipline Master Personnel Details
+  const [dmProfile, setDmProfile] = useState({
+    name: 'Loading Staff...',
+    uniqueId: 'DT-PENDING',
+    profilePic: '',
+    phone: ''
   });
 
-  const [selectedSection, setSelectedSection] = useState('All');
-  const [searchQuery, setSearchQuery] = useState('');
+  // Global Student Search Modal State
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   
-  // Selected student for behaviour summary detail view
-  const [selectedStudent, setSelectedStudent] = useState(null);
+  // Real-time Notification Banner State
+  const [toastNotification, setToastNotification] = useState(null);
 
-  // Form states for Incident Registration
-  const [incidentForm, setIncidentForm] = useState({
-    studentId: '',
-    studentName: '',
-    class: 'Form 1',
-    section: 'General',
-    category: 'Late Coming',
-    customCategory: '',
-    location: '',
-    date: new Date().toISOString().split('T')[0],
-    time: '',
-    status: 'Pending',
-    notes: ''
-  });
+  // 1. Synthesized Audio Alert Engine (Web Audio API - 100% Offline & Reliable)
+  const playNotificationSound = () => {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5 Note
+      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15); // A5 Note
 
-  // Recent Incidents Data (Empty by default until registered, max 10 slots tracked dynamically)
-  const [incidents, setIncidents] = useState([]);
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
 
-  // Students requiring special attention / Behavior records
-  const [attentionList] = useState([]);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
 
-  const behaviorCategories = [
-    'Fighting / Physical Aggression',
-    'Bullying',
-    'Disrespect / Defiance',
-    'Classroom Disruption',
-    'Attendance / Truancy',
-    'Electronic Device Violation',
-    'Smoking / Substance Abuse',
-    'Property Damage',
-    'Theft',
-    'Late Coming',
-    'Prolonged Late Coming',
-    'Sexual Misconduct',
-    'Cheating in Examination',
-    'Using Mobile Phone in School',
-    'Sleeping During Class Lessons',
-    'Making Advances to Teacher',
-    'Organising Unwanted School Strikes',
-    'Absenteeism',
-    'Other'
-  ];
-
-  const handleProfilePicUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setDisciplineMaster({ ...disciplineMaster, profilePic: reader.result });
-      };
-      reader.readAsDataURL(file);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.4);
+    } catch (e) {
+      console.warn('Audio feedback context prevented by browser autoplay policy:', e);
     }
   };
 
-  const handleRegisterIncident = (e) => {
-    e.preventDefault();
-    if (!incidentForm.studentName || !incidentForm.studentId) {
-      alert('Please provide student name and identification.');
-      return;
+  // 2. Initial Setup, Personnel Hydration & Network Listeners
+  useEffect(() => {
+    // Track online/offline status
+    setIsOnline(navigator.onLine);
+    const handleOnline = () => { setIsOnline(true); flushOfflineQueue(); };
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    // Retrieve Active School Session
+    const storedSchoolName = localStorage.getItem('active_school_name') || 'Developper Test Institute';
+    const storedSchoolId = localStorage.getItem('active_school_id') || '';
+    setAssignedSchool(storedSchoolName);
+    setActiveSchoolId(storedSchoolId);
+
+    if (storedSchoolId) {
+      hydrateDisciplineMaster(storedSchoolId);
+      setupRealtimeAttendanceListener(storedSchoolId);
     }
 
-    const finalCategory = incidentForm.category === 'Other' && incidentForm.customCategory 
-      ? incidentForm.customCategory 
-      : incidentForm.category;
-
-    if (incidents.length >= 10) {
-      alert('Maximum recent incidents limit (10) reached for live tracking.');
-      return;
-    }
-
-    const newInc = {
-      id: incidents.length + 1,
-      date: incidentForm.date,
-      studentName: incidentForm.studentName,
-      studentId: incidentForm.studentId,
-      class: incidentForm.class,
-      location: incidentForm.location || 'Not Specified',
-      status: incidentForm.status,
-      category: finalCategory,
-      notes: incidentForm.notes
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
     };
+  }, []);
 
-    setIncidents([newInc, ...incidents]);
+  // 3. Hydrate Discipline Master Personnel Data
+  const hydrateDisciplineMaster = async (schoolId) => {
+    try {
+      if (navigator.onLine) {
+        const { data, error } = await supabase
+          .from('school_personnel')
+          .select('full_name, unique_id, profile_pic_url, phone_number')
+          .eq('school_id', schoolId)
+          .or('role.ilike.%discipline%,unique_id.ilike.DT-%')
+          .maybeSingle();
 
-    // Also update selected student behavior summary view if matched
-    setSelectedStudent({
-      name: incidentForm.studentName,
-      idCode: incidentForm.studentId,
-      class: incidentForm.class,
-      absences: incidentForm.category === 'Absenteeism' ? 1 : 0,
-      violationsCount: 1,
-      summary: incidentForm.notes || finalCategory
-    });
+        if (data) {
+          const profile = {
+            name: data.full_name || 'Assigned Discipline Master',
+            uniqueId: data.unique_id || 'DT-OFFICIAL',
+            profilePic: data.profile_pic_url || '',
+            phone: data.phone_number || ''
+          };
+          setDmProfile(profile);
+          localStorage.setItem(`dm_profile_${schoolId}`, JSON.stringify(profile));
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('Network issue fetching personnel, resorting to offline cache:', err);
+    }
 
-    alert('Incident successfully registered and synced with student profile.');
-    setIncidentForm({
-      studentId: '',
-      studentName: '',
-      class: 'Form 1',
-      section: 'General',
-      category: 'Late Coming',
-      customCategory: '',
-      location: '',
-      date: new Date().toISOString().split('T')[0],
-      time: '',
-      status: 'Pending',
-      notes: ''
-    });
+    // Offline Cache Fallback
+    const cachedProfile = localStorage.getItem(`dm_profile_${schoolId}`);
+    if (cachedProfile) {
+      setDmProfile(JSON.parse(cachedProfile));
+    } else {
+      setDmProfile({
+        name: 'Discipline Master',
+        uniqueId: 'DT-SESSION',
+        profilePic: '',
+        phone: ''
+      });
+    }
+  };
+
+  // 4. Real-time Attendance Listener from Teachers (public.attendance)
+  const setupRealtimeAttendanceListener = (schoolId) => {
+    if (!supabase || !supabase.channel) return;
+
+    const channel = supabase
+      .channel('attendance_notifications')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'attendance', filter: `school_id=eq.${schoolId}` },
+        (payload) => {
+          const newEntry = payload.new;
+          playNotificationSound();
+
+          setToastNotification({
+            id: Date.now(),
+            subject: newEntry.subject_name || 'Subject Lesson',
+            classLevel: newEntry.classLevel || 'Class',
+            teacherId: newEntry.teacher_id || 'Teacher',
+            time: newEntry.time_recorded || 'Just now'
+          });
+
+          // Auto hide toast banner after 6 seconds
+          setTimeout(() => {
+            setToastNotification(null);
+          }, 6000);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  };
+
+  // 5. Offline Queue Synchronization
+  const flushOfflineQueue = async () => {
+    const queue = JSON.parse(localStorage.getItem('offline_discipline_queue') || '[]');
+    if (queue.length === 0) return;
+
+    setIsSyncing(true);
+    try {
+      for (const item of queue) {
+        if (item.type === 'incident') {
+          await supabase.from('discipline_incidents').insert([item.payload]);
+        } else if (item.type === 'attendance') {
+          await supabase.from(item.table).upsert(item.payload);
+        }
+      }
+      localStorage.setItem('offline_discipline_queue', '[]');
+      console.log('⚡ Offline discipline queue successfully synced to Supabase!');
+    } catch (err) {
+      console.error('Queue sync error:', err);
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans pb-16">
+    <div className="min-h-screen bg-[#FDFBF7] text-slate-900 font-sans pb-16">
       
-      {/* Top Header Navigation */}
-      <header className="bg-blue-900 text-white shadow-md sticky top-0 z-50">
+      {/* Top Header Navigation Bar */}
+      <header className="bg-[#2D5A27] text-white shadow-lg sticky top-0 z-40 border-b border-emerald-800">
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col md:flex-row justify-between items-center gap-4">
+          
+          {/* School Brand Context */}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-white text-blue-900 flex items-center font-black text-xl justify-center shadow-inner">
-              NR
+            <div className="w-10 h-10 rounded-xl bg-amber-100 text-[#2D5A27] flex items-center font-black text-xl justify-center shadow-md border border-amber-200">
+              DM
             </div>
             <div>
-              <h1 className="text-lg font-bold tracking-wide uppercase">
-                {assignedSchool ? assignedSchool : 'No School Assigned Yet'}
+              <h1 className="text-lg font-black tracking-wide uppercase text-amber-100">
+                {assignedSchool}
               </h1>
-              <p className="text-xs text-blue-200">Discipline Master Dashboard | Academic Year: {academicYear}</p>
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-4">
-            <div className="relative">
-              <input 
-                type="text" 
-                placeholder="Search student ID or name..." 
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="bg-blue-800 text-white placeholder-blue-300 text-sm px-4 py-1.5 rounded-full border border-blue-700 focus:outline-none focus:ring-2 focus:ring-white w-64"
-              />
-            </div>
-            <Link href="/" className="bg-blue-700 hover:bg-blue-600 text-xs px-3 py-1.5 rounded font-semibold transition">
-              Home / Exit
-            </Link>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Container */}
-      <main className="max-w-7xl mx-auto px-4 mt-6 space-y-6">
-
-        {/* Profile & Quick Overview Row */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
-          {/* Discipline Master Info Card */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col justify-between">
-            <div className="flex items-center gap-4">
-              <div className="relative w-16 h-16 rounded-full bg-slate-100 border-2 border-dashed border-slate-300 flex items-center justify-center overflow-hidden group">
-                {disciplineMaster.profilePic ? (
-                  <img src={disciplineMaster.profilePic} alt="Discipline Master" className="w-full h-full object-cover" />
-                ) : (
-                  <Camera size={24} className="text-slate-400" />
-                )}
-                <input 
-                  type="file" 
-                  accept="image/*" 
-                  onChange={handleProfilePicUpload} 
-                  className="absolute inset-0 opacity-0 cursor-pointer" 
-                  title="Upload or capture picture"
-                />
-              </div>
-              <div>
-                <h2 className="text-lg font-black text-slate-800">{assignedDisciplineMasterName}</h2>
-                <p className="text-xs font-bold text-blue-600">Discipline Master</p>
-                <p className="text-xs text-slate-400 mt-1">Assigned by Administrator</p>
-              </div>
-            </div>
-            <div className="mt-4 pt-4 border-t border-slate-100 text-[11px] text-slate-400 italic">
-              Click avatar box above to upload or snap profile picture from device camera.
-            </div>
-          </div>
-
-          {/* Analytics Cards Summary (Zeroed out until records are made) */}
-          <div className="lg:col-span-2 grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-center">
-              <span className="text-xs font-bold text-slate-400 uppercase">Total Incidents</span>
-              <span className="text-2xl font-black text-blue-900 mt-1">{incidents.length}</span>
-              <span className="text-[10px] text-slate-400 mt-1">No recorded data yet</span>
-            </div>
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-center">
-              <span className="text-xs font-bold text-slate-400 uppercase">Pending Review</span>
-              <span className="text-2xl font-black text-amber-600 mt-1">
-                {incidents.filter(i => i.status === 'Pending').length}
-              </span>
-              <span className="text-[10px] text-slate-400 mt-1">Action required</span>
-            </div>
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-center">
-              <span className="text-xs font-bold text-slate-400 uppercase">Repeat Offenders</span>
-              <span className="text-2xl font-black text-rose-600 mt-1">{attentionList.length}</span>
-              <span className="text-[10px] text-slate-400 mt-1">No repeat cases</span>
-            </div>
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-center">
-              <span className="text-xs font-bold text-slate-400 uppercase">Resolved Cases</span>
-              <span className="text-2xl font-black text-emerald-600 mt-1">
-                {incidents.filter(i => i.status === 'Resolved').length}
-              </span>
-              <span className="text-[10px] text-slate-400 mt-1">0% resolution rate</span>
-            </div>
-          </div>
-
-        </div>
-
-        {/* Section Filter & Quick Actions Bar */}
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap justify-between items-center gap-4">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-slate-600 uppercase">Filter Section:</span>
-            {['All', 'General Section', 'Technical Section'].map((sec) => (
-              <button 
-                key={sec} 
-                onClick={() => setSelectedSection(sec)}
-                className={`text-xs px-3 py-1.5 rounded-lg font-bold transition ${selectedSection === sec ? 'bg-blue-900 text-white shadow' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-              >
-                {sec}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex gap-2">
-            <button 
-              onClick={() => window.print()}
-              className="bg-slate-800 hover:bg-slate-900 text-white text-xs px-4 py-2 rounded-lg font-bold shadow transition flex items-center gap-1.5"
-            >
-              📥 Download / Print General Report
-            </button>
-          </div>
-        </div>
-
-        {/* Main Content Grid: Register Incident & Recent Incidents (Max 10) */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
-          {/* Register Incident Form */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-            <h3 className="text-base font-black text-slate-800 mb-4 pb-2 border-b border-slate-100 flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
-              Register Student Incident
-            </h3>
-
-            <form onSubmit={handleRegisterIncident} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Student Unique ID *</label>
-                <input 
-                  type="text" 
-                  placeholder="e.g. GEF3NE100226" 
-                  value={incidentForm.studentId}
-                  onChange={(e) => setIncidentForm({...incidentForm, studentId: e.target.value})}
-                  className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none uppercase font-mono"
-                  required 
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Student Full Name *</label>
-                <input 
-                  type="text" 
-                  placeholder="e.g. Ngwa Emmanuel" 
-                  value={incidentForm.studentName}
-                  onChange={(e) => setIncidentForm({...incidentForm, studentName: e.target.value})}
-                  className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none font-semibold"
-                  required 
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Class</label>
-                  <select 
-                    value={incidentForm.class}
-                    onChange={(e) => setIncidentForm({...incidentForm, class: e.target.value})}
-                    className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                  >
-                    <option value="Form 1">Form 1</option>
-                    <option value="Form 2">Form 2</option>
-                    <option value="Form 3">Form 3</option>
-                    <option value="Form 4">Form 4</option>
-                    <option value="Form 5">Form 5</option>
-                    <option value="Lower Sixth">Lower Sixth</option>
-                    <option value="Upper Sixth">Upper Sixth</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Department</label>
-                  <select 
-                    value={incidentForm.section}
-                    onChange={(e) => setIncidentForm({...incidentForm, section: e.target.value})}
-                    className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                  >
-                    <option value="General">General Section</option>
-                    <option value="Technical">Technical Section</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Behavioral Incident Type *</label>
-                <select 
-                  value={incidentForm.category}
-                  onChange={(e) => setIncidentForm({...incidentForm, category: e.target.value})}
-                  className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none font-medium"
-                >
-                  {behaviorCategories.map((cat) => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Manual Specification field if 'Other' is selected */}
-              {incidentForm.category === 'Other' && (
-                <div>
-                  <label className="block text-xs font-bold text-rose-700 mb-1">Specify Violation Manually *</label>
-                  <input 
-                    type="text" 
-                    placeholder="Enter custom incident description..." 
-                    value={incidentForm.customCategory}
-                    onChange={(e) => setIncidentForm({...incidentForm, customCategory: e.target.value})}
-                    className="w-full bg-rose-50 border border-rose-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-rose-600 focus:outline-none font-semibold"
-                    required
-                  />
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Location</label>
-                  <input 
-                    type="text" 
-                    placeholder="e.g. School Gate" 
-                    value={incidentForm.location}
-                    onChange={(e) => setIncidentForm({...incidentForm, location: e.target.value})}
-                    className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Status</label>
-                  <select 
-                    value={incidentForm.status}
-                    onChange={(e) => setIncidentForm({...incidentForm, status: e.target.value})}
-                    className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none font-semibold text-blue-900"
-                  >
-                    <option value="Pending">Pending</option>
-                    <option value="Under review">Under Review</option>
-                    <option value="Resolved">Resolved</option>
-                    <option value="Referred">Referred</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Date</label>
-                  <input 
-                    type="date" 
-                    value={incidentForm.date}
-                    onChange={(e) => setIncidentForm({...incidentForm, date: e.target.value})}
-                    className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Time</label>
-                  <input 
-                    type="time" 
-                    value={incidentForm.time}
-                    onChange={(e) => setIncidentForm({...incidentForm, time: e.target.value})}
-                    className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Conduct Remark / Continuous Statement</label>
-                <textarea 
-                  rows="2"
-                  placeholder="Enter specific behavioral observation or continuous remark..."
-                  value={incidentForm.notes}
-                  onChange={(e) => setIncidentForm({...incidentForm, notes: e.target.value})}
-                  className="w-full bg-slate-50 border border-slate-300 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                ></textarea>
-              </div>
-
-              <button 
-                type="submit" 
-                className="w-full bg-blue-900 hover:bg-blue-800 text-white font-bold py-2.5 rounded-lg text-sm shadow transition"
-              >
-                Register & Sync to Student Dashboard 🚀
-              </button>
-            </form>
-          </div>
-
-          {/* Recent School Incidents Table (Max 10, blank unless records exist) */}
-          <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col justify-between">
-            <div>
-              <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-100">
-                <h3 className="text-base font-black text-slate-800 flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-600"></span>
-                  Recent School Incidents (Up to 10 Tracked)
-                </h3>
-                <span className="text-xs text-slate-400 font-medium">{incidents.length} / 10 Recorded</span>
-              </div>
-
-              <div className="overflow-x-auto">
-                {incidents.length === 0 ? (
-                  <div className="p-8 text-center bg-slate-50 rounded-lg border border-dashed border-slate-200 text-slate-400 text-xs italic">
-                    No school incidents have been registered yet. This section remains blank until an incident is added.
-                  </div>
-                ) : (
-                  <table className="w-full text-left border-collapse text-sm">
-                    <thead>
-                      <tr className="bg-slate-100 text-slate-700 font-bold text-xs uppercase tracking-wider">
-                        <th className="p-3">Date</th>
-                        <th className="p-3">Student Name</th>
-                        <th className="p-3">Class</th>
-                        <th className="p-3">Violation</th>
-                        <th className="p-3">Location</th>
-                        <th className="p-3">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 text-xs">
-                      {incidents.slice(0, 10).map((inc) => (
-                        <tr 
-                          key={inc.id} 
-                          onClick={() => setSelectedStudent({ name: inc.studentName, idCode: inc.studentId, class: inc.class, summary: inc.notes || inc.category })}
-                          className="hover:bg-blue-50/50 transition cursor-pointer"
-                        >
-                          <td className="p-3 font-mono text-slate-500">{inc.date}</td>
-                          <td className="p-3 font-bold text-blue-900 underline">{inc.studentName}</td>
-                          <td className="p-3 text-slate-700 font-medium">{inc.class}</td>
-                          <td className="p-3 text-slate-800 font-bold">{inc.category}</td>
-                          <td className="p-3 text-slate-600">{inc.location}</td>
-                          <td className="p-3">
-                            <span className={`px-2 py-0.5 rounded font-bold text-[10px] ${
-                              inc.status === 'Resolved' ? 'bg-emerald-100 text-emerald-800' :
-                              inc.status === 'Pending' ? 'bg-amber-100 text-amber-800' :
-                              inc.status === 'Under review' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'
-                            }`}>
-                              {inc.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </div>
-
-            {/* Students Requiring Attention Box (Blank unless records exist) */}
-            <div className="mt-6 pt-6 border-t border-slate-100">
-              <h4 className="text-sm font-black text-slate-800 mb-3 flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-rose-600"></span>
-                Students Requiring Immediate Attention (Repeated Offenders & Absentees)
-              </h4>
-              {attentionList.length === 0 ? (
-                <div className="p-4 text-center bg-slate-50 rounded-lg border border-dashed border-slate-200 text-slate-400 text-xs italic">
-                  No repeated offenders or critical absentees recorded yet.
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  {attentionList.map((stu) => (
-                    <div key={stu.id} className="bg-rose-50/60 border border-rose-200 rounded-lg p-3 flex flex-col justify-between">
-                      <div>
-                        <div className="flex justify-between items-start">
-                          <span className="font-bold text-rose-900 text-sm">{stu.name}</span>
-                          <span className="text-[10px] bg-rose-200 text-rose-900 font-black px-1.5 py-0.5 rounded">{stu.status}</span>
-                        </div>
-                        <p className="text-xs text-slate-600 font-mono mt-0.5">{stu.idCode} | {stu.class}</p>
-                      </div>
-                      <div className="mt-3 pt-2 border-t border-rose-200/60 flex justify-between text-xs font-bold text-rose-900">
-                        <span>Absences: {stu.absences}</span>
-                        <span>Violations: {stu.violationsCount}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-          </div>
-
-        </div>
-
-        {/* Selected Student Behavior Summary Outline Modal / Box (Appears when student clicked) */}
-        {selectedStudent && (
-          <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-6 shadow-md relative">
-            <button 
-              onClick={() => setSelectedStudent(null)} 
-              className="absolute top-4 right-4 text-xs bg-blue-900 text-white font-bold px-3 py-1 rounded hover:bg-blue-800 transition"
-            >
-              Close Outline ✕
-            </button>
-            <h3 className="text-base font-black text-blue-900 mb-2">
-              📋 Student Behaviour Summary Outline: {selectedStudent.name}
-            </h3>
-            <p className="text-xs text-slate-600 font-mono mb-4">Unique ID: {selectedStudent.idCode} | Class: {selectedStudent.class}</p>
-            <div className="bg-white p-4 rounded-lg border border-blue-100 text-sm text-slate-800">
-              <span className="font-bold text-slate-900 block mb-1">Continuous Conduct Remark:</span>
-              <p className="italic text-slate-700 bg-slate-50 p-3 rounded border border-slate-200">
-                "{selectedStudent.summary}"
+              <p className="text-xs text-emerald-200 flex items-center gap-2">
+                <span>Discipline Master Command Center</span>
+                <span className="text-amber-300 font-bold">• Academic Year 2026/2027</span>
               </p>
             </div>
           </div>
-        )}
 
-        {/* Discipline Analytics Section (Headings only until incidents are recorded) */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-          <h3 className="text-base font-black text-slate-800 mb-4 pb-2 border-b border-slate-100">
-            📊 Discipline Analytics & Behavioral Metrics
-          </h3>
-          {incidents.length === 0 ? (
-            <div className="p-8 text-center bg-slate-50 rounded-lg border border-dashed border-slate-200 text-slate-400 text-xs italic">
-              Analytics data will automatically populate here once discipline incidents are recorded.
+          {/* Network Status & Command Actions */}
+          <div className="flex items-center gap-3">
+            {/* Real-time Online / Offline PWA Badge */}
+            <div className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 border ${
+              isOnline ? 'bg-emerald-900/60 border-emerald-400 text-emerald-200' : 'bg-rose-900/60 border-rose-400 text-rose-200 animate-pulse'
+            }`}>
+              {isOnline ? <Wifi size={13} /> : <WifiOff size={13} />}
+              <span>{isOnline ? (isSyncing ? 'Syncing Queue...' : 'Online & Live') : 'Offline Mode (PWA)'}</span>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
-                <h4 className="text-xs font-black uppercase text-slate-500 mb-2">Incidents by Grade / Class</h4>
-                <p className="text-xs text-slate-600">Active distribution active.</p>
-              </div>
-              <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
-                <h4 className="text-xs font-black uppercase text-slate-500 mb-2">Incidents by Location</h4>
-                <p className="text-xs text-slate-600">Active distribution active.</p>
-              </div>
-              <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
-                <h4 className="text-xs font-black uppercase text-slate-500 mb-2">Most Common Violations</h4>
-                <p className="text-xs text-slate-600">Active distribution active.</p>
+
+            {/* Global Search Button */}
+            <button 
+              onClick={() => setIsSearchOpen(true)}
+              className="bg-emerald-800 hover:bg-emerald-700 text-amber-100 px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2 border border-emerald-600 shadow-sm"
+            >
+              <Search size={14} />
+              <span className="hidden sm:inline">Global School Search</span>
+            </button>
+
+            <Link 
+              href="/" 
+              className="bg-amber-500 hover:bg-amber-600 text-slate-950 px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+            >
+              <LogOut size={14} />
+              <span>Exit</span>
+            </Link>
+          </div>
+
+        </div>
+      </header>
+
+      {/* Real-time Toast Audio Notification Popup */}
+      {toastNotification && (
+        <div className="fixed bottom-5 right-5 z-50 bg-slate-900 text-white p-4 rounded-xl shadow-2xl border-2 border-amber-400 flex items-start gap-3 max-w-sm animate-bounce">
+          <div className="p-2 bg-amber-500 text-slate-950 rounded-lg font-black">
+            <Bell size={20} />
+          </div>
+          <div className="flex-1 text-xs">
+            <h4 className="font-black text-amber-300 text-sm">New Subject Roll Call Conducted!</h4>
+            <p className="mt-1 font-bold text-slate-200">
+              {toastNotification.subject} — <span className="text-amber-200">{toastNotification.classLevel}</span>
+            </p>
+            <p className="text-[10px] text-slate-400 mt-0.5">Submitted at {toastNotification.time}</p>
+          </div>
+          <button onClick={() => setToastNotification(null)} className="text-slate-400 hover:text-white font-bold text-xs">✕</button>
+        </div>
+      )}
+
+      {/* Main Body Dashboard Container */}
+      <main className="max-w-7xl mx-auto px-4 mt-6 space-y-6">
+
+        {/* Top Personnel Profile & Quick Navigation Bar */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 flex flex-col md:flex-row items-center justify-between gap-6">
+          
+          <div className="flex items-center gap-4 w-full md:w-auto">
+            <div className="w-16 h-16 rounded-2xl bg-slate-100 border-2 border-emerald-700/30 flex items-center justify-center overflow-hidden shadow-inner">
+              {dmProfile.profilePic ? (
+                <img src={dmProfile.profilePic} alt={dmProfile.name} className="w-full h-full object-cover" />
+              ) : (
+                <span className="font-black text-xl text-[#2D5A27]">
+                  {dmProfile.name.split(' ').map(n => n[0]).join('').slice(0,2)}
+                </span>
+              )}
+            </div>
+            <div>
+              <h2 className="text-lg font-black text-slate-900">{dmProfile.name}</h2>
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="bg-emerald-100 text-[#2D5A27] text-[10px] font-black px-2 py-0.5 rounded-md border border-emerald-200 uppercase">
+                  {dmProfile.uniqueId}
+                </span>
+                <span className="text-xs text-slate-500 font-semibold">Chief Discipline Master</span>
               </div>
             </div>
-          )}
+          </div>
+
+          {/* Navigation Tab Selector Bar */}
+          <div className="flex flex-wrap items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200 w-full md:w-auto justify-center">
+            
+            <button
+              onClick={() => setActiveTab('general')}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition ${
+                activeTab === 'general' ? 'bg-[#2D5A27] text-amber-100 shadow-md' : 'text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <BookOpen size={15} /> General Education
+            </button>
+
+            <button
+              onClick={() => setActiveTab('commercial')}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition ${
+                activeTab === 'commercial' ? 'bg-[#2D5A27] text-amber-100 shadow-md' : 'text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <Briefcase size={15} /> Commercial (STT)
+            </button>
+
+            <button
+              onClick={() => setActiveTab('industrial')}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition ${
+                activeTab === 'industrial' ? 'bg-[#2D5A27] text-amber-100 shadow-md' : 'text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <Factory size={15} /> Industrial (IND)
+            </button>
+
+            <button
+              onClick={() => setActiveTab('truancy')}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition ${
+                activeTab === 'truancy' ? 'bg-amber-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <Bell size={15} /> Live Subject Truancy
+            </button>
+
+            <button
+              onClick={() => setActiveTab('incidents')}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition ${
+                activeTab === 'incidents' ? 'bg-rose-700 text-white shadow-md' : 'text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <ShieldAlert size={15} /> Misconduct Registry
+            </button>
+
+          </div>
+
+        </div>
+
+        {/* Dynamic Tab Body Component Rendering */}
+        <div className="transition-all duration-200">
+          {activeTab === 'general' && <GeneralAttendance schoolId={activeSchoolId} dmName={dmProfile.name} />}
+          {activeTab === 'commercial' && <CommercialAttendance schoolId={activeSchoolId} dmName={dmProfile.name} />}
+          {activeTab === 'industrial' && <IndustrialAttendance schoolId={activeSchoolId} dmName={dmProfile.name} />}
+          {activeTab === 'truancy' && <SubjectTruancyFeed schoolId={activeSchoolId} />}
+          {activeTab === 'incidents' && <IncidentRegistry schoolId={activeSchoolId} dmName={dmProfile.name} />}
         </div>
 
       </main>
+
+      {/* Global Student Search Modal */}
+      {isSearchOpen && (
+        <GlobalStudentSearch 
+          schoolId={activeSchoolId} 
+          onClose={() => setIsSearchOpen(false)} 
+        />
+      )}
 
       {/* Footer Branding */}
       <footer className="mt-12 text-center text-slate-400 text-[10px] uppercase tracking-widest font-mono">
