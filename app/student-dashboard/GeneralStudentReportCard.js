@@ -163,7 +163,7 @@ function GeneralEducationReportContent(props) {
       const termString = `Term ${activeTerm}`;
 
       // =============================================================
-      // PARALLEL BATCH 2: Concurrently Fetch Enrolment, Coeffs, Teachers, Marks, Fees, Discipline & Remarks
+      // PARALLEL BATCH 2: Concurrently Fetch Enrolment, Coeffs, Teachers, Marks, Fees, Attendance/Discipline & Remarks
       // =============================================================
       let cQuery = supabase.from('students').select('*');
       if (effectiveSchoolId) cQuery = cQuery.eq('school_id', effectiveSchoolId);
@@ -174,6 +174,17 @@ function GeneralEducationReportContent(props) {
       let feesQ = supabase.from('school_fees').select('*').or(`student_id.eq."${activeStudentId}",unique_code.eq."${activeUniqueCode}"`);
       let discQ = supabase.from('student_term_summaries').select('*').or(`student_id.eq."${activeStudentId}",unique_code.eq."${activeUniqueCode}"`).or(`term.eq."${termString}",term.eq."${activeTerm}"`);
       let remQ = supabase.from('principal_notices').select('*').or(`student_id.eq."${activeStudentId}",unique_code.eq."${activeUniqueCode}"`).or(`term.eq."${termString}",term.eq."${activeTerm}"`);
+      
+      
+      // Direct Attendance query for accurate absences & tardiness counts
+      let attQ = supabase.from('attendance').select('*');
+      if (activeStudentId && activeUniqueCode) {
+        attQ = attQ.or(`student_id.eq.${activeStudentId},unique_code.eq.${activeUniqueCode}`);
+      } else if (activeUniqueCode) {
+        attQ = attQ.eq('unique_code', activeUniqueCode);
+      } else if (activeStudentId) {
+        attQ = attQ.eq('student_id', activeStudentId);
+      }
 
       if (effectiveSchoolId) {
         coeffQuery = coeffQuery.eq('school_id', effectiveSchoolId);
@@ -182,22 +193,26 @@ function GeneralEducationReportContent(props) {
         feesQ = feesQ.eq('school_id', effectiveSchoolId);
         discQ = discQ.eq('school_id', effectiveSchoolId);
         remQ = remQ.eq('school_id', effectiveSchoolId);
+        attQ = attQ.eq('school_id', effectiveSchoolId);
       }
 
-      const [cStudentsRes, subRes, teachersRes, marksRes, feesRes, disciplineRes, remarksRes] = await Promise.all([
+      const [cStudentsRes, subRes, teachersRes, marksRes, feesRes, disciplineRes, remarksRes, attRes] = await Promise.all([
         cQuery,
         coeffQuery,
         teacherQuery,
         marksQuery,
         feesQ.maybeSingle(),
         discQ.maybeSingle(),
-        remQ.maybeSingle()
+        remQ.maybeSingle(),
+        attQ
       ]);
 
       // --- 1. Class Enrolment & Sixth Form Series Filtering ---
       const activeClassLower = activeClass.toLowerCase();
-      const isLowerClass = GENERAL_LOWER_CLASSES.some(c => c.toLowerCase().trim() === activeClassLower || activeClassLower.includes(c.toLowerCase().trim()));
-      const isSixthFormClass = !isLowerClass || activeClassLower.includes('sixth') || activeClassLower.includes('lower 6') || activeClassLower.includes('upper 6') || activeClassLower.includes('l6') || activeClassLower.includes('u6');
+      
+      // Strict matching: Only identify as Sixth Form if explicitly Sixth Form or Upper/Lower 6, avoiding unwanted defaults
+      const isLowerClass = activeClassLower ? GENERAL_LOWER_CLASSES.some(c => c.toLowerCase().trim() === activeClassLower || activeClassLower.includes(c.toLowerCase().trim())) : true;
+      const isSixthFormClass = activeClassLower ? (!isLowerClass || activeClassLower.includes('sixth') || activeClassLower.includes('lower 6') || activeClassLower.includes('upper 6') || activeClassLower.includes('l6') || activeClassLower.includes('u6')) : false;
 
       let classStudents = [];
       if (Array.isArray(cStudentsRes.data)) {
@@ -228,11 +243,17 @@ function GeneralEducationReportContent(props) {
         return rowClass === activeClass.toLowerCase();
       });
 
+      // Updated: Filter teacher lookup strictly by classLevel as well as subject_name to eliminate cross-class teacher leaks
       const getTeacherForSubject = (subjectName) => {
         if (!subjectName) return 'N/A';
         const cleanSub = subjectName.toLowerCase().trim();
 
         const match = teachersData.find((t) => {
+          const tClass = (t.classLevel || t.class_level || t.class_name || t.class || '').toLowerCase().trim();
+          const matchesClass = !tClass || tClass === activeClassLower;
+
+          if (!matchesClass) return false;
+
           const rawSubs = t.subjects || t.subject || [];
           if (Array.isArray(rawSubs)) {
             return rawSubs.some((s) => typeof s === 'string' && s.toLowerCase().trim() === cleanSub);
@@ -373,7 +394,29 @@ function GeneralEducationReportContent(props) {
 
       // --- 5. Set Fees, Discipline & Remarks Records ---
       setFeesRecord(feesRes.data || null);
-      setDisciplineRecord(disciplineRes.data || null);
+      
+     // Calculate live attendance metrics if available, otherwise fall back to summary table
+      let liveAbsences = 0;
+      let liveTardiness = 0;
+
+      if (Array.isArray(attRes.data) && attRes.data.length > 0) {
+        attRes.data.forEach((rec) => {
+          const st = String(rec.status || '').toLowerCase().trim();
+          if (st === 'absent' || st === 'unjustified') liveAbsences += 1;
+          if (st === 'late' || st === 'tardy' || st === 'tardiness') liveTardiness += 1;
+        });
+      }
+
+      const mergedDiscipline = {
+        absences: liveAbsences > 0 ? liveAbsences : (disciplineRes.data?.absences || 0),
+        latecomings: liveTardiness > 0 ? liveTardiness : (disciplineRes.data?.latecomings || disciplineRes.data?.tardiness || 0),
+        remarks: disciplineRes.data?.remarks || null,
+        punishments: disciplineRes.data?.punishments || null
+      };
+
+      setDisciplineRecord(mergedDiscipline);
+
+      setDisciplineRecord(mergedDiscipline);
       setAdminRemarks(remarksRes.data || null);
 
       if (disciplineRes.data) {
@@ -399,8 +442,8 @@ function GeneralEducationReportContent(props) {
   };
 
   const activeClassName = (studentData?.display_class || '').toLowerCase().trim();
-  const isLowerClass = GENERAL_LOWER_CLASSES.some(c => c.toLowerCase().trim() === activeClassName || activeClassName.includes(c.toLowerCase().trim()));
-  const isSixthForm = !isLowerClass || activeClassName.includes('sixth') || activeClassName.includes('lower 6') || activeClassName.includes('upper 6') || activeClassName.includes('l6') || activeClassName.includes('u6');
+  const isLowerClass = activeClassName ? GENERAL_LOWER_CLASSES.some(c => c.toLowerCase().trim() === activeClassName || activeClassName.includes(c.toLowerCase().trim())) : true;
+  const isSixthForm = activeClassName ? (!isLowerClass || activeClassName.includes('sixth') || activeClassName.includes('lower 6') || activeClassName.includes('upper 6') || activeClassName.includes('l6') || activeClassName.includes('u6')) : false;
 
   let totalPoints = 0;
   let totalCoef = 0;
@@ -460,7 +503,7 @@ function GeneralEducationReportContent(props) {
       `}</style>
 
       <div className="max-w-4xl mx-auto space-y-4 print:space-y-0 print-container">
-        <div className="flex justify-between items-center no-print">
+        <div className="flex justify-between items-center no-print flex-wrap gap-2">
           <button onClick={() => router.push('/')} className="text-xs font-semibold text-blue-600 hover:underline">&larr; Back to Portal Login</button>
           <div className="flex space-x-2">
             <button onClick={() => window.print()} className="px-4 py-2 bg-slate-800 text-white rounded-xl text-xs font-bold hover:bg-slate-700 transition shadow">Print Report Card</button>
@@ -468,27 +511,27 @@ function GeneralEducationReportContent(props) {
           </div>
         </div>
 
-        <div className="bg-white border border-slate-300 rounded-3xl p-4 sm:p-8 shadow-xl space-y-4 print:space-y-3 print:rounded-none">
-          <div className="border border-slate-300 bg-blue-50/20 rounded-2xl p-3 shadow-sm flex flex-row items-center gap-4">
+        <div className="bg-white border border-slate-300 rounded-3xl p-3 sm:p-8 shadow-xl space-y-4 print:space-y-3 print:rounded-none">
+          <div className="border border-slate-300 bg-blue-50/20 rounded-2xl p-2 sm:p-3 shadow-sm flex flex-col sm:flex-row items-center gap-3 sm:gap-4">
             <div className="w-20 h-20 sm:w-24 sm:h-24 border border-slate-300 rounded-xl bg-white flex items-center justify-center shrink-0 overflow-hidden p-1">
               {schoolLogo ? <img src={schoolLogo} alt="School Logo" className="w-full h-full object-contain" /> : <span className="text-[9px] font-bold text-slate-400 text-center uppercase">LOGO</span>}
             </div>
-            <div className="flex-1 border border-slate-300 rounded-xl bg-white divide-y divide-slate-200 text-center">
+            <div className="flex-1 w-full border border-slate-300 rounded-xl bg-white divide-y divide-slate-200 text-center">
               {/* Line 1: School Name & Single Source of Truth Academic Year */}
               <div className="p-1.5">
-                <h1 className="text-base sm:text-xl font-black text-blue-800 uppercase tracking-tight">{schoolName || 'COLLEGE NAME'}</h1>
+                <h1 className="text-base sm:text-xl font-black text-blue-800 uppercase tracking-tight break-words">{schoolName || 'COLLEGE NAME'}</h1>
                 <p className="text-[10px] sm:text-xs font-semibold text-blue-600">Academic Year: {academicYear}</p>
               </div>
               {/* Line 2: Regional Delegation Title */}
               <div className="p-1 bg-blue-50/50">
-                <p className="text-[10px] sm:text-xs font-black text-blue-900 uppercase tracking-tight whitespace-nowrap">
+                <p className="text-[9px] sm:text-xs font-black text-blue-900 uppercase tracking-tight">
                   REGIONAL DELEGATION FOR SECONDARY EDUCATION
                   {schoolRegion && ` FOR THE ${schoolRegion.toUpperCase()}`}
                 </p>
               </div>
 
               {/* Line 3: Contact Metadata */}
-              <div className="p-1 flex justify-center items-center gap-x-4 text-[10px] sm:text-xs font-bold text-blue-900 flex-wrap whitespace-nowrap">
+              <div className="p-1 flex justify-center items-center gap-x-2 sm:gap-x-4 text-[9px] sm:text-xs font-bold text-blue-900 flex-wrap">
                 <span>Tel: {schoolPhone || '—'}</span>
                 <span>Email: {schoolEmail || '—'}</span>
                 {schoolAddress && <span>Location: {schoolAddress}</span>}
@@ -503,12 +546,12 @@ function GeneralEducationReportContent(props) {
           )}
 
           <div className="p-2 bg-blue-100/50 border border-blue-200 rounded-xl text-center">
-            <h2 className="text-sm sm:text-base font-serif font-black text-blue-950 tracking-wider uppercase">
+            <h2 className="text-xs sm:text-base font-serif font-black text-blue-950 tracking-wider uppercase">
               ACADEMIC PERFORMANCE RECORD — {getOrdinalTermWord(activeTerm).toUpperCase()}
             </h2>
           </div>
 
-          <div className="flex flex-row gap-4 items-center bg-slate-50 p-3 rounded-xl border border-slate-200">
+          <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 items-center bg-slate-50 p-3 rounded-xl border border-slate-200">
             <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-slate-200 border border-slate-300 flex items-center justify-center shrink-0 overflow-hidden">
               {studentData?.photo_url ? (
                 <img src={studentData.photo_url} alt={studentData?.display_name || "Student"} className="w-full h-full object-cover" />
@@ -519,28 +562,28 @@ function GeneralEducationReportContent(props) {
                 </div>
               )}
             </div>
-            <div className="flex-1 grid grid-cols-2 sm:grid-cols-4 gap-y-2 gap-x-4 text-[11px]">
+            <div className="flex-1 w-full grid grid-cols-2 sm:grid-cols-4 gap-y-2 gap-x-4 text-[11px]">
               <div><span className="text-slate-400 block text-[9px] uppercase font-bold">Student Name</span><strong className="text-slate-900 block truncate">{studentData?.display_name || '—'}</strong></div>
               <div><span className="text-slate-400 block text-[9px] uppercase font-bold">Class</span><strong className="text-slate-900 block">{studentData?.display_class || '—'}</strong></div>
               <div><span className="text-slate-400 block text-[9px] uppercase font-bold">Section</span><strong className="text-slate-900 block">{studentData?.display_section || 'General Education'}</strong></div>
               <div><span className="text-slate-400 block text-[9px] uppercase font-bold">Series / Option</span><strong className="text-slate-900 block">{studentData?.display_series || '—'}</strong></div>
               <div className="pt-1 border-t border-slate-200"><span className="text-slate-400 block text-[9px] uppercase font-bold">Matricule</span><strong className="text-blue-800 font-mono block">{studentData?.matricule || '—'}</strong></div>
               <div className="pt-1 border-t border-slate-200"><span className="text-slate-400 block text-[9px] uppercase font-bold">Enrolment</span><strong className="text-slate-900 block">{totalStudents !== null ? `${totalStudents} Students` : '—'}</strong></div>
-              <div className="pt-1 border-t border-slate-200 text-right"><span className="text-slate-400 block text-[9px] uppercase font-bold">Fees Paid</span><strong className="text-emerald-700 block">{displayPaid}</strong></div>
-              <div className="pt-1 border-t border-slate-200 text-right"><span className="text-slate-400 block text-[9px] uppercase font-bold">Fee Balance</span><strong className="text-red-600 block">{displayBalance}</strong></div>
+              <div className="pt-1 border-t border-slate-200 text-left sm:text-right"><span className="text-slate-400 block text-[9px] uppercase font-bold">Fees Paid</span><strong className="text-emerald-700 block">{displayPaid}</strong></div>
+              <div className="pt-1 border-t border-slate-200 text-left sm:text-right"><span className="text-slate-400 block text-[9px] uppercase font-bold">Fee Balance</span><strong className="text-red-600 block">{displayBalance}</strong></div>
             </div>
           </div>
 
-          <div className="flex justify-between items-center border-b border-slate-200 no-print">
+          <div className="flex justify-between items-center border-b border-slate-200 no-print overflow-x-auto">
             <div className="flex">
               {[1, 2, 3].map((term) => (
-                <button key={term} onClick={() => setActiveTerm(term)} className={`px-5 py-2 text-xs font-bold transition border-b-2 ${activeTerm === term ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>Term {term}</button>
+                <button key={term} onClick={() => setActiveTerm(term)} className={`px-4 sm:px-5 py-2 text-xs font-bold transition border-b-2 whitespace-nowrap ${activeTerm === term ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>Term {term}</button>
               ))}
             </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border border-slate-300 rounded-lg overflow-hidden print-compact-table">
+          <div className="overflow-x-auto -mx-1 sm:mx-0">
+            <table className="w-full text-left text-xs border border-slate-300 rounded-lg overflow-hidden min-w-[600px] sm:min-w-full print-compact-table">
               <thead className="bg-slate-900 text-white uppercase text-[9px] tracking-wider">
                 <tr>
                   <th className="p-2">Subject Name</th>
@@ -594,15 +637,15 @@ function GeneralEducationReportContent(props) {
             </table>
           </div>
 
-          <div className="grid grid-cols-5 gap-2 bg-blue-900 text-white p-3 rounded-xl text-center">
-            <div><span className="text-[9px] text-blue-200 uppercase block font-semibold">Total Points</span><strong className="text-sm sm:text-base">{hasAnyMarks ? `${totalPoints.toFixed(1)} / ${totalCoef * 20}` : '—'}</strong></div>
-            <div><span className="text-[9px] text-blue-200 uppercase block font-semibold">Term Average</span><strong className="text-base sm:text-lg font-black text-amber-300">{termAverage ? `${termAverage} / 20` : '—'}</strong></div>
-            <div><span className="text-[9px] text-blue-200 uppercase block font-semibold">Class Rank</span><strong className="text-sm sm:text-base">{studentRank ? getOrdinalSuffix(studentRank) : '—'}</strong></div>
-            <div><span className="text-[9px] text-blue-200 uppercase block font-semibold">Class Avg</span><strong className="text-sm sm:text-base">{classAverage ? `${classAverage} / 20` : '—'}</strong></div>
-            <div><span className="text-[9px] text-blue-200 uppercase block font-semibold">Status</span><strong className={`text-sm sm:text-base font-extrabold ${termStatus === 'Passed' ? 'text-emerald-400' : termStatus === 'Failed' ? 'text-red-400' : 'text-slate-300'}`}>{termStatus || '—'}</strong></div>
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 bg-blue-900 text-white p-2.5 sm:p-3 rounded-xl text-center">
+            <div><span className="text-[8px] sm:text-[9px] text-blue-200 uppercase block font-semibold">Total Points</span><strong className="text-xs sm:text-base">{hasAnyMarks ? `${totalPoints.toFixed(1)} / ${totalCoef * 20}` : '—'}</strong></div>
+            <div><span className="text-[8px] sm:text-[9px] text-blue-200 uppercase block font-semibold">Term Average</span><strong className="text-xs sm:text-lg font-black text-amber-300">{termAverage ? `${termAverage} / 20` : '—'}</strong></div>
+            <div><span className="text-[8px] sm:text-[9px] text-blue-200 uppercase block font-semibold">Class Rank</span><strong className="text-xs sm:text-base">{studentRank ? getOrdinalSuffix(studentRank) : '—'}</strong></div>
+            <div><span className="text-[8px] sm:text-[9px] text-blue-200 uppercase block font-semibold">Class Avg</span><strong className="text-xs sm:text-base">{classAverage ? `${classAverage} / 20` : '—'}</strong></div>
+            <div className="col-span-2 sm:col-span-1"><span className="text-[8px] sm:text-[9px] text-blue-200 uppercase block font-semibold">Status</span><strong className={`text-xs sm:text-base font-extrabold ${termStatus === 'Passed' ? 'text-emerald-400' : termStatus === 'Failed' ? 'text-red-400' : 'text-slate-300'}`}>{termStatus || '—'}</strong></div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
             <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
               <span className="font-extrabold text-slate-900 uppercase block text-[10px]">Discipline & Conduct</span>
               <p className="text-slate-600 text-[11px]">Unjustified Absences: <strong className="text-slate-900">{disciplineRecord?.absences ?? 0} hrs</strong></p>
@@ -617,15 +660,15 @@ function GeneralEducationReportContent(props) {
             </div>
           </div>
 
-          <div className="pt-4 border-t border-slate-300 grid grid-cols-2 gap-8 text-center text-xs">
-            <div className="space-y-8">
+          <div className="pt-4 border-t border-slate-300 grid grid-cols-2 gap-4 sm:gap-8 text-center text-xs">
+            <div className="space-y-6 sm:space-y-8">
               <p className="font-bold text-slate-800 uppercase text-[10px]">Vice-Principal / Senior Master</p>
-              <div className="border-b border-dashed border-slate-400 mx-6"></div>
+              <div className="border-b border-dashed border-slate-400 mx-2 sm:mx-6"></div>
               <p className="text-[9px] text-slate-400 italic">Signature & Stamp</p>
             </div>
-            <div className="space-y-8">
+            <div className="space-y-6 sm:space-y-8">
               <p className="font-bold text-slate-800 uppercase text-[10px]">The Principal</p>
-              <div className="border-b border-dashed border-slate-400 mx-6"></div>
+              <div className="border-b border-dashed border-slate-400 mx-2 sm:mx-6"></div>
               <p className="text-[9px] text-slate-400 italic">Signature & Stamp</p>
             </div>
           </div>

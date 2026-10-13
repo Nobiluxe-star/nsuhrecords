@@ -37,6 +37,72 @@ function normalizeClass(cls) {
   return cls.toLowerCase().replace(/\(.*?\)/g, '').trim();
 }
 
+// ==============================================================================
+// INDEXEDDB HELPERS FOR FULL INDUSTRIAL OFFLINE CACHING
+// ==============================================================================
+const openIndustrialReportsDB = () => {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined' || !('indexedDB' in window)) {
+      resolve(null);
+      return;
+    }
+    const request = window.indexedDB.open('ClassLogsBulkIndustrialDB', 1);
+    request.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains('industrial_reports')) {
+        db.createObjectStore('industrial_reports');
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => resolve(null);
+  });
+};
+
+const getIDBCache = async (key) => {
+  try {
+    const db = await openIndustrialReportsDB();
+    if (!db) return null;
+    return new Promise((resolve) => {
+      const tx = db.transaction('industrial_reports', 'readonly');
+      const store = tx.objectStore('industrial_reports');
+      const request = store.get(key);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => resolve(null);
+    });
+  } catch (e) {
+    return null;
+  }
+};
+
+const setIDBCache = async (key, val) => {
+  try {
+    const db = await openIndustrialReportsDB();
+    if (!db) return;
+    const tx = db.transaction('industrial_reports', 'readwrite');
+    const store = tx.objectStore('industrial_reports');
+    store.put(val, key);
+  } catch (e) {
+    // Silent catch
+  }
+};
+
+// Image to Base64 converter for Vector PDF Logo Support
+const getBase64ImageFromUrl = async (imageUrl) => {
+  if (!imageUrl) return null;
+  try {
+    const res = await fetch(imageUrl, { mode: 'cors' });
+    const blob = await res.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch (e) {
+    return null;
+  }
+};
+
 export default function BulkTechnicalIndustrialReportCard({
   isOpen,
   onClose,
@@ -47,8 +113,12 @@ export default function BulkTechnicalIndustrialReportCard({
   onTrackChange = () => {}
 }) {
   const [selectedClass, setSelectedClass] = useState(activeClass || 'First Year Industrial (Y1Ind)');
-  const [selectedTrade, setSelectedTrade] = useState(activeTrade || 'ALL');
-  const [selectedTerm, setSelectedTerm] = useState(activeTerm || 'Term 1');
+  const [selectedTrade, setSelectedTrade] = useState(
+    activeTrade && !activeTrade.startsWith('Term') ? activeTrade : 'ALL'
+  );
+  const [selectedTerm, setSelectedTerm] = useState(
+    activeTrade && activeTrade.startsWith('Term') ? activeTrade : (activeTerm || 'Term 1')
+  );
   const [selectedTrack, setSelectedTrack] = useState('industrial');
   const [viewMode, setViewMode] = useState('all');
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -75,8 +145,13 @@ export default function BulkTechnicalIndustrialReportCard({
   useEffect(() => {
     if (isOpen) {
       if (activeClass) setSelectedClass(activeClass);
-      if (activeTrade) setSelectedTrade(activeTrade);
+      if (activeTrade && !activeTrade.startsWith('Term')) {
+        setSelectedTrade(activeTrade);
+      } else {
+        setSelectedTrade('ALL');
+      }
       if (activeTerm) setSelectedTerm(activeTerm);
+      else if (activeTrade && activeTrade.startsWith('Term')) setSelectedTerm(activeTrade);
       setCurrentIndex(0);
     }
   }, [isOpen, activeClass, activeTrade, activeTerm]);
@@ -84,6 +159,13 @@ export default function BulkTechnicalIndustrialReportCard({
   const availableTrades = useMemo(() => {
     return ['ALL', ...(INDUSTRIAL_TRADE_SERIES || [])];
   }, []);
+
+  const handleTrackSelect = (newTrack) => {
+    setSelectedTrack(newTrack);
+    if (onTrackChange) {
+      onTrackChange(newTrack);
+    }
+  };
 
   // ==============================================================================
   // HIGH-SPEED TRADE-PRIORITIZED MASTER FETCH & CALCULATION ENGINE
@@ -94,10 +176,13 @@ export default function BulkTechnicalIndustrialReportCard({
     const cacheKey = `bi_cache_${effectiveSchoolId}_${normalizeClass(selectedClass)}_${selectedTrade}_${selectedTerm}`;
 
     if (typeof window !== 'undefined') {
-      const cachedData = localStorage.getItem(cacheKey);
+      let cachedData = localStorage.getItem(cacheKey);
+      if (!cachedData) {
+        cachedData = await getIDBCache(cacheKey);
+      }
       if (cachedData) {
         try {
-          const parsed = JSON.parse(cachedData);
+          const parsed = typeof cachedData === 'string' ? JSON.parse(cachedData) : cachedData;
           setSchoolData(parsed.schoolData || {});
           setStudentsList(parsed.studentsList || []);
           setSubjectsList(parsed.subjectsList || []);
@@ -194,13 +279,16 @@ export default function BulkTechnicalIndustrialReportCard({
         if (!subjectName) return '—';
 
         const cleanSub = subjectName.toLowerCase().trim();
-        const cleanClass = selectedClass.toLowerCase().trim();
         const cleanTrade = selectedTrade && selectedTrade !== 'ALL' ? selectedTrade.toLowerCase().trim() : null;
 
         const matchedTeacher = teachersData.find((t) => {
+          const tClass = (t.classLevel || t.class_level || t.class_name || t.class || '').trim().toLowerCase();
+          const matchesClass = !tClass || tClass === targetClassClean;
+
+          if (!matchesClass) return false;
+
           const assignments = t.assignments || t.class_assignments || t.assigned_classes || [];
 
-          // Case 1: Array of Structured Assignment Objects
           if (Array.isArray(assignments) && assignments.length > 0) {
             return assignments.some((item) => {
               const itemSub = String(item.subject || item.subject_name || '').toLowerCase().trim();
@@ -208,14 +296,13 @@ export default function BulkTechnicalIndustrialReportCard({
               const itemTrade = String(item.trade || item.trades_series || item.specialty || '').toLowerCase().trim();
 
               const subMatch = itemSub === cleanSub;
-              const classMatch = !itemClass || itemClass === cleanClass;
+              const classMatch = !itemClass || itemClass === targetClassClean;
               const tradeMatch = !cleanTrade || !itemTrade || itemTrade === cleanTrade;
 
               return subMatch && classMatch && tradeMatch;
             });
           }
 
-          // Case 2: Separate Array Properties
           const teacherSubjects = Array.isArray(t.subjects)
             ? t.subjects.map((s) => String(s).toLowerCase().trim())
             : typeof t.subjects === 'string'
@@ -231,7 +318,7 @@ export default function BulkTechnicalIndustrialReportCard({
             : [];
 
           const subMatch = teacherSubjects.includes(cleanSub);
-          const classMatch = teacherClasses.length === 0 || teacherClasses.includes(cleanClass);
+          const classMatch = teacherClasses.length === 0 || teacherClasses.includes(targetClassClean);
           const tradeMatch = !cleanTrade || teacherTrades.length === 0 || teacherTrades.includes(cleanTrade);
 
           return subMatch && classMatch && tradeMatch;
@@ -292,11 +379,18 @@ export default function BulkTechnicalIndustrialReportCard({
         .eq('school_id', effectiveSchoolId)
         .in('student_id', studentIds);
 
-      const [marksRes, feesRes, discRes, remRes] = await Promise.all([
+      let attQuery = supabase
+        .from('attendance')
+        .select('*')
+        .eq('school_id', effectiveSchoolId)
+        .in('student_id', studentIds);
+
+      const [marksRes, feesRes, discRes, remRes, attRes] = await Promise.all([
         marksQuery,
         feesQuery,
         discQuery,
-        remQuery
+        remQuery,
+        attQuery
       ]);
 
       const classMarksList = (marksRes.data || []).filter((m) => {
@@ -343,9 +437,30 @@ export default function BulkTechnicalIndustrialReportCard({
           studentAverages.push({ studentId: sId, avg: termAvg });
         }
 
-        const feeRec = (feesRes.data || []).find((f) => String(f.student_id) === String(sId));
-        const discRec = (discRes.data || []).find((d) => String(d.student_id) === String(sId));
-        const remRec = (remRes.data || []).find((r) => String(r.student_id) === String(sId));
+        const feeRec = (feesRes.data || []).find((f) => String(f.student_id) === String(sId) || (sCode && f.unique_code === sCode));
+        const discRec = (discRes.data || []).find((d) => String(d.student_id) === String(sId) || (sCode && d.unique_code === sCode));
+        const remRec = (remRes.data || []).find((r) => String(r.student_id) === String(sId) || (sCode && r.unique_code === sCode));
+
+        let liveAbsences = 0;
+        let liveTardiness = 0;
+
+        const studentAttLogs = (attRes.data || []).filter((a) => 
+          (sId && String(a.student_id) === String(sId)) || 
+          (sCode && (a.unique_code === sCode || a.code === sCode))
+        );
+
+        studentAttLogs.forEach((rec) => {
+          const st = String(rec.status || '').toLowerCase().trim();
+          if (st === 'absent' || st === 'unjustified') liveAbsences += 1;
+          if (st === 'late' || st === 'tardy' || st === 'tardiness') liveTardiness += 1;
+        });
+
+        const mergedDiscipline = {
+          absences: liveAbsences > 0 ? liveAbsences : (discRec?.absences ?? 0),
+          latecomings: liveTardiness > 0 ? liveTardiness : (discRec?.latecomings || discRec?.tardiness || 0),
+          remarks: discRec?.remarks || null,
+          punishments: discRec?.punishments || null
+        };
 
         studentMap[sId] = {
           marksMap: scoreMap,
@@ -354,7 +469,7 @@ export default function BulkTechnicalIndustrialReportCard({
           termAverage: termAvg !== null ? termAvg.toFixed(2) : null,
           termStatus: termAvg !== null ? (termAvg >= 10 ? 'Passed' : 'Failed') : null,
           feesRecord: feeRec || null,
-          disciplineRecord: discRec || null,
+          disciplineRecord: mergedDiscipline,
           adminRemarks: remRec || null
         };
       });
@@ -398,17 +513,16 @@ export default function BulkTechnicalIndustrialReportCard({
       setProcessedDataMap(studentMap);
 
       if (typeof window !== 'undefined') {
+        const payload = {
+          schoolData: fetchedSchoolData,
+          studentsList: filteredStudents,
+          subjectsList: loadedSubjects,
+          processedDataMap: studentMap,
+          classAverage: calculatedAvg
+        };
+
         try {
-          localStorage.setItem(
-            cacheKey,
-            JSON.stringify({
-              schoolData: fetchedSchoolData,
-              studentsList: filteredStudents,
-              subjectsList: loadedSubjects,
-              processedDataMap: studentMap,
-              classAverage: calculatedAvg
-            })
-          );
+          localStorage.setItem(cacheKey, JSON.stringify(payload));
         } catch (err) {
           if (err.name === 'QuotaExceededError' || err.code === 22) {
             console.warn('LocalStorage quota exceeded. Pruning stale report card caches...');
@@ -418,21 +532,14 @@ export default function BulkTechnicalIndustrialReportCard({
               }
             });
             try {
-              localStorage.setItem(
-                cacheKey,
-                JSON.stringify({
-                  schoolData: fetchedSchoolData,
-                  studentsList: filteredStudents,
-                  subjectsList: loadedSubjects,
-                  processedDataMap: studentMap,
-                  classAverage: calculatedAvg
-                })
-              );
+              localStorage.setItem(cacheKey, JSON.stringify(payload));
             } catch (retryErr) {
               console.warn('Could not cache payload to localStorage:', retryErr);
             }
           }
         }
+
+        setIDBCache(cacheKey, payload);
       }
 
     } catch (err) {
@@ -465,11 +572,12 @@ export default function BulkTechnicalIndustrialReportCard({
         format: 'a4'
       });
 
+      const logoUrl = schoolData.logo_url || schoolData.logo || schoolData.school_logo || schoolData.badge_url || schoolData.image_url || schoolInfo?.logo_url || schoolInfo?.logo || null;
+      const base64Logo = logoUrl ? await getBase64ImageFromUrl(logoUrl) : null;
+
       const schoolTitle = (schoolData.name || schoolData.institution_name || schoolInfo?.name || 'COLLEGE NAME').toUpperCase();
       const regionText = schoolData.region ? `REGIONAL DELEGATION FOR SECONDARY EDUCATION FOR THE ${schoolData.region.toUpperCase()}` : 'REGIONAL DELEGATION FOR SECONDARY EDUCATION';
       const mottoText = schoolData.motto || schoolInfo?.motto ? `Motto: "${schoolData.motto || schoolInfo?.motto}"` : '';
-      
-      const logoUrl = schoolData.logo_url || schoolData.logo || schoolData.school_logo || schoolData.badge_url || schoolInfo?.logo_url || null;
 
       studentsList.forEach((student, index) => {
         if (index > 0) pdf.addPage('a4', 'portrait');
@@ -493,36 +601,33 @@ export default function BulkTechnicalIndustrialReportCard({
         pdf.setFillColor(255, 247, 237);
         pdf.roundedRect(10, 8, 190, 26, 3, 3, 'FD');
 
-        if (logoUrl) {
+        if (base64Logo) {
           try {
-            const format = logoUrl.includes('png') ? 'PNG' : 'JPEG';
-            pdf.addImage(logoUrl, format, 13, 10, 20, 22);
+            pdf.addImage(base64Logo, 'PNG', 13, 10, 20, 22);
           } catch (imgErr) {
             console.warn('Could not embed logo image into PDF:', imgErr);
           }
         }
 
-        const textCenterX = logoUrl ? 112 : 105;
-
         pdf.setFont('helvetica', 'bold');
         pdf.setFontSize(13);
         pdf.setTextColor(67, 20, 7);
-        pdf.text(schoolTitle, textCenterX, 14, { align: 'center' });
+        pdf.text(schoolTitle, 105, 14, { align: 'center' });
 
         pdf.setFontSize(8.5);
         pdf.setFont('helvetica', 'normal');
         pdf.setTextColor(194, 65, 12);
-        pdf.text(`Academic Year: ${schoolData.academic_year || '2026/2027'}`, textCenterX, 18.5, { align: 'center' });
+        pdf.text(`Academic Year: ${schoolData.academic_year || '2026/2027'}`, 105, 18.5, { align: 'center' });
 
         pdf.setFont('helvetica', 'bold');
         pdf.setFontSize(8);
         pdf.setTextColor(67, 20, 7);
-        pdf.text(regionText, textCenterX, 22.5, { align: 'center' });
+        pdf.text(regionText, 105, 22.5, { align: 'center' });
 
         pdf.setFont('helvetica', 'bold');
         pdf.setFontSize(7.5);
         pdf.setTextColor(124, 45, 18);
-        pdf.text(`Phone: ${schoolData.contact_line || schoolData.phone || schoolInfo?.phone || '—'}  |  Email: ${schoolData.official_email || schoolData.email || schoolInfo?.email || '—'}  |  Location: ${schoolData.address_location || schoolInfo?.address || '—'}`, textCenterX, 28, { align: 'center' });
+        pdf.text(`Phone: ${schoolData.contact_line || schoolData.phone || schoolInfo?.phone || '—'}  |  Email: ${schoolData.official_email || schoolData.email || schoolInfo?.email || '—'}  |  Location: ${schoolData.address_location || schoolInfo?.address || '—'}`, 105, 28, { align: 'center' });
 
         if (mottoText) {
           pdf.setFillColor(255, 237, 213);
@@ -667,7 +772,7 @@ export default function BulkTechnicalIndustrialReportCard({
           body: [
             [
               {
-                content: `DISCIPLINE & CONDUCT\nUnjustified Absences: ${stData.disciplineRecord?.absences ?? 0} hrs\nTardiness: ${stData.disciplineRecord?.latecomings || stData.disciplineRecord?.tardiness || 0} times\nRemark: ${stData.disciplineRecord?.remarks ? `"${stData.disciplineRecord.remarks}"` : ''}\n `,
+                content: `DISCIPLINE & CONDUCT\nUnjustified Absences: ${stData.disciplineRecord?.absences ?? 0} times\nTardiness: ${stData.disciplineRecord?.latecomings || stData.disciplineRecord?.tardiness || 0} times\nRemark: ${stData.disciplineRecord?.remarks ? `"${stData.disciplineRecord.remarks}"` : ''}\n `,
                 styles: { cellWidth: 93 }
               },
               {
@@ -737,10 +842,10 @@ export default function BulkTechnicalIndustrialReportCard({
     return (
       <div
         key={sId || index}
-        className="bulk-student-a4-page bg-white text-slate-800 p-4 sm:p-5 rounded-2xl shadow-xl border border-orange-200 max-w-4xl w-full mx-auto space-y-2.5 text-xs print:p-0 print:border-none print:shadow-none print:rounded-none print:space-y-2.5 print:max-w-full print:bg-white mb-6"
+        className="bulk-student-a4-page bg-white text-slate-800 p-3 sm:p-5 rounded-2xl shadow-xl border border-orange-200 max-w-4xl w-full mx-auto space-y-2.5 text-xs print:p-0 print:border-none print:shadow-none print:rounded-none print:space-y-2.5 print:max-w-full print:bg-white mb-6"
       >
         {/* HEADER BRANDING */}
-        <div className="border border-orange-200 bg-orange-50/40 rounded-xl p-2.5 flex flex-row items-center gap-3">
+        <div className="border border-orange-200 bg-orange-50/40 rounded-xl p-2.5 flex flex-col sm:flex-row items-center gap-3">
           <div className="w-20 h-20 border-2 border-orange-950/20 rounded-xl bg-white flex items-center justify-center shrink-0 overflow-hidden p-1 shadow-inner">
             {logoSrc ? (
               <img
@@ -762,9 +867,9 @@ export default function BulkTechnicalIndustrialReportCard({
             </div>
           </div>
 
-          <div className="flex-1 border border-orange-200 rounded-lg bg-white divide-y divide-orange-200 text-center">
+          <div className="flex-1 w-full border border-orange-200 rounded-lg bg-white divide-y divide-orange-200 text-center">
             <div className="p-1">
-              <h1 className="text-base sm:text-xl font-black text-orange-950 uppercase tracking-tight">
+              <h1 className="text-base sm:text-xl font-black text-orange-950 uppercase tracking-tight break-words">
                 {schoolData.name || schoolData.institution_name || schoolInfo?.name || 'COLLEGE NAME'}
               </h1>
               <p className="text-[10px] sm:text-xs font-semibold text-orange-700">
@@ -773,13 +878,13 @@ export default function BulkTechnicalIndustrialReportCard({
             </div>
 
             <div className="p-0.5 bg-orange-50/50">
-              <p className="text-[10px] sm:text-xs font-black text-orange-950 uppercase tracking-tight whitespace-nowrap">
+              <p className="text-[9px] sm:text-xs font-black text-orange-950 uppercase tracking-tight whitespace-nowrap">
                 REGIONAL DELEGATION FOR SECONDARY EDUCATION
                 {schoolData.region && ` FOR THE ${schoolData.region.toUpperCase()}`}
               </p>
             </div>
 
-            <div className="p-1 flex justify-center items-center gap-x-4 text-xs sm:text-sm font-bold text-orange-900 flex-wrap whitespace-nowrap">
+            <div className="p-1 flex justify-center items-center gap-x-2 sm:gap-x-4 text-[10px] sm:text-sm font-bold text-orange-900 flex-wrap">
               <span>Phone: {schoolData.contact_line || schoolData.phone || schoolInfo?.phone || '—'}</span>
               <span>Email: {schoolData.official_email || schoolData.email || schoolInfo?.email || '—'}</span>
               {(schoolData.address_location || schoolInfo?.address) && (
@@ -806,7 +911,7 @@ export default function BulkTechnicalIndustrialReportCard({
         </div>
 
         {/* STUDENT PROFILE & FINANCIAL OVERVIEW */}
-        <div className="flex flex-row gap-4 items-center bg-orange-50/20 p-2.5 rounded-xl border border-orange-200 text-[11px]">
+        <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 items-center bg-orange-50/20 p-2.5 rounded-xl border border-orange-200 text-[11px]">
           <div className="w-16 h-16 rounded-xl bg-orange-100/50 border border-orange-200 flex items-center justify-center shrink-0 overflow-hidden shadow-inner">
             {photoSrc ? (
               <img
@@ -825,7 +930,7 @@ export default function BulkTechnicalIndustrialReportCard({
             </div>
           </div>
 
-          <div className="flex-1 grid grid-cols-4 gap-2">
+          <div className="flex-1 w-full grid grid-cols-2 sm:grid-cols-4 gap-2">
             <div>
               <span className="text-slate-400 block text-[9px] uppercase font-bold">Full Name</span>
               <strong className="text-slate-900 block truncate">{sName}</strong>
@@ -851,11 +956,11 @@ export default function BulkTechnicalIndustrialReportCard({
               <span className="text-slate-400 block text-[9px] uppercase font-bold">Class Enrolment</span>
               <strong className="text-slate-900 block">{studentsList.length} Students</strong>
             </div>
-            <div className="border-t border-orange-100 pt-1 text-right">
+            <div className="border-t border-orange-100 pt-1 text-left sm:text-right">
               <span className="text-slate-400 block text-[9px] uppercase font-bold">Fees Paid</span>
               <strong className="text-emerald-700 block">{displayPaid}</strong>
             </div>
-            <div className="border-t border-orange-100 pt-1 text-right">
+            <div className="border-t border-orange-100 pt-1 text-left sm:text-right">
               <span className="text-slate-400 block text-[9px] uppercase font-bold">Fee Balance</span>
               <strong className="text-red-600 font-bold block">{displayBalance}</strong>
             </div>
@@ -863,8 +968,8 @@ export default function BulkTechnicalIndustrialReportCard({
         </div>
 
         {/* DYNAMIC MARKS TABLE */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-[11px] border border-orange-200 rounded-lg overflow-hidden">
+        <div className="overflow-x-auto -mx-1 sm:mx-0">
+          <table className="w-full text-left text-[11px] border border-orange-200 rounded-lg overflow-hidden min-w-[620px] sm:min-w-full">
             <thead className="bg-orange-950 text-white uppercase text-[9px]">
               <tr>
                 <th className="p-1.5">Subject Name</th>
@@ -920,25 +1025,25 @@ export default function BulkTechnicalIndustrialReportCard({
         </div>
 
         {/* PERFORMANCE SUMMARY BAR */}
-        <div className="grid grid-cols-5 gap-2 bg-orange-950 text-white p-2.5 rounded-xl text-center">
+        <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 bg-orange-950 text-white p-2.5 rounded-xl text-center">
           <div>
-            <span className="text-[9px] text-orange-200 uppercase block font-semibold">Total Points</span>
+            <span className="text-[8px] sm:text-[9px] text-orange-200 uppercase block font-semibold">Total Points</span>
             <strong className="text-xs sm:text-sm">{stData.totalCoef > 0 ? `${stData.totalPoints?.toFixed(1)} / ${stData.totalCoef * 20}` : '—'}</strong>
           </div>
           <div>
-            <span className="text-[9px] text-orange-200 uppercase block font-semibold">Student Average</span>
-            <strong className="text-sm sm:text-base font-black text-amber-300">{stData.termAverage ? `${stData.termAverage} / 20` : '—'}</strong>
+            <span className="text-[8px] sm:text-[9px] text-orange-200 uppercase block font-semibold">Student Average</span>
+            <strong className="text-xs sm:text-base font-black text-amber-300">{stData.termAverage ? `${stData.termAverage} / 20` : '—'}</strong>
           </div>
           <div>
-            <span className="text-[9px] text-orange-200 uppercase block font-semibold">Class Rank</span>
+            <span className="text-[8px] sm:text-[9px] text-orange-200 uppercase block font-semibold">Class Rank</span>
             <strong className="text-xs sm:text-sm">{stData.rank ? getOrdinalSuffix(stData.rank) : '—'}</strong>
           </div>
           <div>
-            <span className="text-[9px] text-orange-200 uppercase block font-semibold">Class Average</span>
+            <span className="text-[8px] sm:text-[9px] text-orange-200 uppercase block font-semibold">Class Average</span>
             <strong className="text-xs sm:text-sm">{classAverage ? `${classAverage} / 20` : '—'}</strong>
           </div>
-          <div>
-            <span className="text-[9px] text-orange-200 uppercase block font-semibold">Status</span>
+          <div className="col-span-2 sm:col-span-1">
+            <span className="text-[8px] sm:text-[9px] text-orange-200 uppercase block font-semibold">Status</span>
             <strong className={`text-xs sm:text-sm font-bold ${stData.termStatus === 'Passed' ? 'text-emerald-300' : stData.termStatus === 'Failed' ? 'text-red-300' : 'text-slate-300'}`}>
               {stData.termStatus || '—'}
             </strong>
@@ -946,10 +1051,10 @@ export default function BulkTechnicalIndustrialReportCard({
         </div>
 
         {/* EXPANDED DISCIPLINE & PRINCIPAL REMARKS GRID */}
-        <div className="grid grid-cols-2 gap-3 text-[11px]">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px]">
           <div className="p-3 bg-orange-50/20 border border-orange-200 rounded-xl space-y-1 min-h-[65px]">
             <span className="font-extrabold text-orange-950 uppercase block text-[10px]">Discipline & Conduct</span>
-            <p className="text-slate-600">Unjustified Absences: <strong className="text-slate-900">{stData.disciplineRecord?.absences ?? 0} hrs</strong></p>
+            <p className="text-slate-600">Unjustified Absences: <strong className="text-slate-900">{stData.disciplineRecord?.absences ?? 0} times</strong></p>
             <p className="text-slate-600">Tardiness: <strong className="text-slate-900">{stData.disciplineRecord?.latecomings || stData.disciplineRecord?.tardiness || 0} times</strong></p>
             <p className="text-slate-700 italic text-[10px] truncate">{stData.disciplineRecord?.remarks ? `"${stData.disciplineRecord.remarks}"` : ''}</p>
           </div>
@@ -962,15 +1067,15 @@ export default function BulkTechnicalIndustrialReportCard({
         </div>
 
         {/* SIGNATURES & ENDORSEMENT SECTION */}
-        <div className="pt-3 border-t border-orange-200 grid grid-cols-2 gap-8 text-[11px] text-center">
+        <div className="pt-3 border-t border-orange-200 grid grid-cols-2 gap-4 sm:gap-8 text-[11px] text-center">
           <div className="space-y-5">
             <p className="font-bold text-orange-950 uppercase text-[10px]">Head of Industrial Department</p>
-            <div className="border-b border-dashed border-orange-300 mx-6"></div>
+            <div className="border-b border-dashed border-orange-300 mx-2 sm:mx-6"></div>
             <p className="text-[9px] text-slate-400 italic">Signature & Stamp</p>
           </div>
           <div className="space-y-5">
             <p className="font-bold text-orange-950 uppercase text-[10px]">The Principal</p>
-            <div className="border-b border-dashed border-orange-300 mx-6"></div>
+            <div className="border-b border-dashed border-orange-300 mx-2 sm:mx-6"></div>
             <p className="text-[9px] text-slate-400 italic">Signature & Stamp</p>
           </div>
         </div>
@@ -982,9 +1087,9 @@ export default function BulkTechnicalIndustrialReportCard({
     <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-start overflow-y-auto p-2 sm:p-4 print:p-0 print:bg-white print:fixed print:inset-0 print:z-[9999]">
       
       {/* TOOLBAR CONTROLS */}
-      <div className="w-full max-w-5xl bg-orange-950 border border-orange-800 rounded-2xl p-4 mb-4 flex flex-wrap items-center justify-between gap-4 text-white print:hidden sticky top-2 z-10 shadow-2xl">
+      <div className="w-full max-w-5xl bg-orange-950 border border-orange-800 rounded-2xl p-3 sm:p-4 mb-4 flex flex-wrap items-center justify-between gap-3 sm:gap-4 text-white print:hidden sticky top-2 z-10 shadow-2xl">
         <div>
-          <h2 className="text-lg font-bold text-amber-300 flex items-center gap-2">
+          <h2 className="text-base sm:text-lg font-bold text-amber-300 flex items-center gap-2">
             ⚙️ Technical Industrial (IND) — <span className="text-white">{selectedClass}</span>
           </h2>
           <p className="text-xs text-orange-200 mt-0.5">
@@ -994,14 +1099,16 @@ export default function BulkTechnicalIndustrialReportCard({
 
         <div className="flex items-center gap-2 flex-wrap text-xs">
 
-          {/* LOCKED EDUCATION TRACK SWITCHER */}
+          {/* INTERNAL TRACK SWITCHER */}
           <div className="flex flex-col gap-0.5">
             <label className="text-[10px] text-orange-200 font-medium">Education Track</label>
             <select
               value={selectedTrack}
-              disabled
-              className="bg-orange-900 border border-orange-700 rounded-lg px-2.5 py-1.5 text-white font-bold opacity-90 cursor-not-allowed max-w-[170px] truncate"
+              onChange={(e) => handleTrackSelect(e.target.value)}
+              className="bg-orange-900 border border-orange-700 rounded-lg px-2.5 py-1.5 text-white font-medium focus:border-amber-300 focus:outline-none max-w-[140px] sm:max-w-[170px] truncate"
             >
+              <option value="general">General Education</option>
+              <option value="commercial">Technical Commercial (STT)</option>
               <option value="industrial">Technical Industrial (IND)</option>
             </select>
           </div>
@@ -1012,7 +1119,7 @@ export default function BulkTechnicalIndustrialReportCard({
             <select
               value={selectedClass}
               onChange={(e) => { setSelectedClass(e.target.value); setCurrentIndex(0); }}
-              className="bg-orange-900 border border-orange-700 rounded-lg px-2.5 py-1.5 text-white font-medium focus:border-amber-300 focus:outline-none max-w-[170px] truncate"
+              className="bg-orange-900 border border-orange-700 rounded-lg px-2.5 py-1.5 text-white font-medium focus:border-amber-300 focus:outline-none max-w-[140px] sm:max-w-[170px] truncate"
             >
               {(TECHNICAL_INDUSTRIAL_CATALOG || []).map((cls) => (
                 <option key={cls} value={cls}>{cls}</option>
@@ -1026,7 +1133,7 @@ export default function BulkTechnicalIndustrialReportCard({
             <select
               value={selectedTrade}
               onChange={(e) => { setSelectedTrade(e.target.value); setCurrentIndex(0); }}
-              className="bg-orange-900 border border-orange-700 rounded-lg px-2.5 py-1.5 text-white font-medium focus:border-amber-300 focus:outline-none max-w-[160px] truncate"
+              className="bg-orange-900 border border-orange-700 rounded-lg px-2.5 py-1.5 text-white font-medium focus:border-amber-300 focus:outline-none max-w-[130px] sm:max-w-[160px] truncate"
             >
               {availableTrades.map((tr) => (
                 <option key={tr} value={tr}>{tr === 'ALL' ? 'All Industrial Trades' : tr}</option>
@@ -1053,7 +1160,7 @@ export default function BulkTechnicalIndustrialReportCard({
             <button
               type="button"
               onClick={() => setViewMode('single')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+              className={`px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
                 viewMode === 'single' ? 'bg-amber-400 text-slate-950 font-bold' : 'text-orange-200 hover:text-white'
               }`}
             >
@@ -1062,7 +1169,7 @@ export default function BulkTechnicalIndustrialReportCard({
             <button
               type="button"
               onClick={() => setViewMode('all')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+              className={`px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
                 viewMode === 'all' ? 'bg-amber-400 text-slate-950 font-bold' : 'text-orange-200 hover:text-white'
               }`}
             >
@@ -1097,21 +1204,22 @@ export default function BulkTechnicalIndustrialReportCard({
 
           {/* PRINT & DOWNLOAD PDF BUTTONS */}
           <div className="flex items-center gap-2 self-end">
-           <button
-  type="button"
-  disabled={isDownloading || studentsList.length === 0}
-  onClick={handleDownloadPDF}
-  className="px-2 sm:px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow transition-all flex items-center gap-1 shrink-0 disabled:opacity-50"
-  title="Download Vector PDF"
->
-  <span className="text-sm">📥</span>
-  <span className="hidden sm:inline">
-    {isDownloading ? statusMessage || 'Exporting...' : 'Download Vector PDF'}
-  </span>
-  <span className="inline sm:hidden">
-    {isDownloading ? '...' : 'PDF'}
-  </span>
-</button>
+            <button
+              type="button"
+              disabled={isDownloading || studentsList.length === 0}
+              onClick={handleDownloadPDF}
+              className="px-2 sm:px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow transition-all flex items-center gap-1 shrink-0 disabled:opacity-50"
+              title="Download Vector PDF"
+            >
+              <span className="text-sm">📥</span>
+              <span className="hidden sm:inline">
+                {isDownloading ? statusMessage || 'Exporting...' : 'Download Vector PDF'}
+              </span>
+              <span className="inline sm:hidden">
+                {isDownloading ? '...' : 'PDF'}
+              </span>
+            </button>
+
             <button
               type="button"
               onClick={() => window.print()}

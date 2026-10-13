@@ -1,367 +1,411 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { 
-  UserCheck, ShieldAlert, Search, Bell, Wifi, WifiOff, 
-  BookOpen, Factory, Briefcase, Camera, LogOut, CheckCircle2 
+  ShieldAlert, Search, Wifi, WifiOff, 
+  BookOpen, Factory, Briefcase, LogOut, RefreshCw, Radio, UserCheck, Phone, Mail, Shield
 } from 'lucide-react';
-import { db as supabase } from '../../lib/db';
+import { supabase } from '../../lib/supabase';
 
-// Import Modular Components
 import GeneralAttendance from './components/GeneralAttendance';
 import CommercialAttendance from './components/CommercialAttendance';
 import IndustrialAttendance from './components/IndustrialAttendance';
-import SubjectTruancyFeed from './components/SubjectTruancyFeed';
 import IncidentRegistry from './components/IncidentRegistry';
 import GlobalStudentSearch from './components/GlobalStudentSearch';
 
-export default function DisciplineMasterDashboard() {
-  const [activeTab, setActiveTab] = useState('general'); // 'general', 'commercial', 'industrial', 'truancy', 'incidents'
-  const [assignedSchool, setAssignedSchool] = useState('');
-  const [activeSchoolId, setActiveSchoolId] = useState(null);
-  const [isOnline, setIsOnline] = useState(true);
-  const [isSyncing, setIsSyncing] = useState(false);
+// 7+ Varied Natural Sentence Generators for Absences & Lateness
+const ABSENCE_SENTENCES = [
+  (name, subject, classLvl, date) => `${name} absented from ${subject} (${classLvl}) class on ${date}.`,
+  (name, subject, classLvl, date) => `${name} was not in ${subject} (${classLvl}) class today.`,
+  (name, subject, classLvl, date) => `${name} did not participate in the ${subject} (${classLvl}) lesson on ${date}.`,
+  (name, subject, classLvl, date) => `${name} missed the ${subject} period for ${classLvl} on ${date}.`,
+  (name, subject, classLvl, date) => `${name} failed to attend ${subject} (${classLvl}) class on ${date}.`,
+  (name, subject, classLvl, date) => `${name} was marked absent during ${subject} (${classLvl}) on ${date}.`,
+  (name, subject, classLvl, date) => `${name} skipped the ${subject} session for ${classLvl} on ${date}.`
+];
 
-  // Discipline Master Personnel Details
+const LATE_SENTENCES = [
+  (name, subject, classLvl, date) => `${name} came late to ${subject} (${classLvl}) class on ${date}.`,
+  (name, subject, classLvl, date) => `${name} arrived past time for ${subject} (${classLvl}) on ${date}.`,
+  (name, subject, classLvl, date) => `${name} was tardy for the ${subject} period in ${classLvl} on ${date}.`,
+  (name, subject, classLvl, date) => `${name} entered ${subject} (${classLvl}) class after roll call on ${date}.`,
+  (name, subject, classLvl, date) => `${name} reported late to ${subject} (${classLvl}) session on ${date}.`,
+  (name, subject, classLvl, date) => `${name} was delayed entering ${subject} (${classLvl}) class on ${date}.`,
+  (name, subject, classLvl, date) => `${name} joined ${subject} (${classLvl}) class late on ${date}.`
+];
+
+export default function DisciplineMasterDashboard() {
+  const [activeTab, setActiveTab] = useState('general');
+  const [assignedSchool, setAssignedSchool] = useState('Developper Test Institute');
+  const [activeSchoolId, setActiveSchoolId] = useState('');
+  const [isOnline, setIsOnline] = useState(true);
+
+  // DM Profile State
   const [dmProfile, setDmProfile] = useState({
-    name: 'Loading Staff...',
-    uniqueId: 'DT-PENDING',
-    profilePic: '',
-    phone: ''
+    full_name: 'Discipline Master',
+    email: 'Loading...',
+    phone: 'Loading...',
+    unique_id: 'Loading...',
+    photo_url: ''
   });
 
-  // Global Student Search Modal State
+  const [misconductRecords, setMisconductRecords] = useState([]);
+  const [studentMap, setStudentMap] = useState({});
+  const [cumulativeStats, setCumulativeStats] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  
-  // Real-time Notification Banner State
-  const [toastNotification, setToastNotification] = useState(null);
 
-  // 1. Synthesized Audio Alert Engine (Web Audio API - 100% Offline & Reliable)
-  const playNotificationSound = () => {
+  // Bulletproof Multi-Tier School ID Resolution
+  const resolveActiveSchoolId = async () => {
+    let resolvedId = 
+      localStorage.getItem('active_school_id') || 
+      localStorage.getItem('activeSchoolId') || 
+      localStorage.getItem('current_school_id');
+
+    if (!resolvedId) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          const { data: personnel } = await supabase
+            .from('school_personnel')
+            .select('school_id, full_name, name, email, phone, phone_number, unique_id, photo_url')
+            .eq('unique_id', session.user.id)
+            .maybeSingle();
+
+          if (personnel?.school_id) {
+            resolvedId = personnel.school_id;
+            setDmProfile({
+              full_name: personnel.full_name || personnel.name || 'Discipline Master',
+              email: personnel.email || session.user.email || 'N/A',
+              phone: personnel.phone || personnel.phone_number || 'N/A',
+              unique_id: personnel.unique_id || 'DM-OFFICER',
+              photo_url: personnel.photo_url || ''
+            });
+          }
+        }
+      } catch (e) {
+        console.warn('Auth session check notice:', e);
+      }
+    }
+
+    // Absolute Production Fallback
+    if (!resolvedId) {
+      resolvedId = '15052cc7-bc44-45e1-9acc-bc445e19acc4';
+    }
+
+    localStorage.setItem('active_school_id', resolvedId);
+    setActiveSchoolId(resolvedId);
+    return resolvedId;
+  };
+
+  // Fetch DM Profile Details
+  const loadDmProfile = async (schoolId) => {
     try {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
-      
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5 Note
-      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15); // A5 Note
+      const { data: { session } } = await supabase.auth.getSession();
+      let query = supabase.from('school_personnel').select('*').eq('school_id', schoolId);
 
-      gain.gain.setValueAtTime(0.3, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+      if (session?.user?.id) {
+        query = query.eq('unique_id', session.user.id);
+      }
 
-      osc.connect(gain);
-      gain.connect(ctx.destination);
+      const { data, error } = await query.limit(1).maybeSingle();
 
-      osc.start();
-      osc.stop(ctx.currentTime + 0.4);
-    } catch (e) {
-      console.warn('Audio feedback context prevented by browser autoplay policy:', e);
+      if (data && !error) {
+        setDmProfile({
+          full_name: data.full_name || data.name || 'Discipline Master',
+          email: data.email || 'dm@school.cm',
+          phone: data.phone || data.phone_number || '+237 600000000',
+          unique_id: data.unique_id || 'DM-OFFICER',
+          photo_url: data.photo_url || ''
+        });
+      }
+    } catch (err) {
+      console.warn('DM Profile Load Notice:', err);
     }
   };
 
-  // 2. Initial Setup, Personnel Hydration & Network Listeners
-  useEffect(() => {
-    // Track online/offline status
-    setIsOnline(navigator.onLine);
-    const handleOnline = () => { setIsOnline(true); flushOfflineQueue(); };
-    const handleOffline = () => setIsOnline(false);
+  // Fetch Attendance Records (Filtering Strictly for Misconducts)
+  const fetchMisconductStream = async () => {
+    setLoading(true);
+    setErrorMsg(null);
 
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
+    try {
+      const schoolId = await resolveActiveSchoolId();
+      await loadDmProfile(schoolId);
 
-    // Retrieve Active School Session
-    const storedSchoolName = localStorage.getItem('active_school_name') || 'Developper Test Institute';
-    const storedSchoolId = localStorage.getItem('active_school_id') || '';
-    setAssignedSchool(storedSchoolName);
-    setActiveSchoolId(storedSchoolId);
+      // Query attendance strictly for Absent or Late records
+      const { data: attData, error: attError } = await supabase
+        .from('attendance')
+        .select('*')
+        .eq('school_id', schoolId)
+        .in('status', ['Absent', 'Late'])
+        .order('created_at', { ascending: false });
 
-    if (storedSchoolId) {
-      hydrateDisciplineMaster(storedSchoolId);
-      setupRealtimeAttendanceListener(storedSchoolId);
+      if (attError) {
+        setErrorMsg(attError.message);
+        return;
+      }
+
+      if (attData && attData.length > 0) {
+        setMisconductRecords(attData);
+
+        // Compute cumulative stats per student
+        const stats = {};
+        attData.forEach(row => {
+          const sid = row.student_id || row.unique_code;
+          if (!stats[sid]) stats[sid] = { abs: 0, late: 0 };
+          if (row.status === 'Absent') stats[sid].abs += 1;
+          if (row.status === 'Late') stats[sid].late += 1;
+        });
+        setCumulativeStats(stats);
+
+        // Fetch student names by unique_code or id
+        const uniqueCodes = [...new Set(attData.map(a => a.unique_code))].filter(Boolean);
+        const studentIds = [...new Set(attData.map(a => a.student_id))].filter(Boolean);
+
+        const nameMap = {};
+
+        if (uniqueCodes.length > 0) {
+          const { data: stByCode } = await supabase
+            .from('students')
+            .select('unique_code, full_name, name, fullName')
+            .in('unique_code', uniqueCodes);
+
+          if (stByCode) {
+            stByCode.forEach(s => {
+              nameMap[s.unique_code] = s.full_name || s.fullName || s.name;
+            });
+          }
+        }
+
+        if (studentIds.length > 0) {
+          const { data: stById } = await supabase
+            .from('students')
+            .select('id, full_name, name, fullName')
+            .in('id', studentIds);
+
+          if (stById) {
+            stById.forEach(s => {
+              nameMap[s.id] = s.full_name || s.fullName || s.name;
+            });
+          }
+        }
+
+        setStudentMap(nameMap);
+      } else {
+        setMisconductRecords([]);
+      }
+    } catch (err) {
+      setErrorMsg(err.message);
+    } finally {
+      setLoading(false);
     }
+  };
 
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
+  useEffect(() => {
+    setIsOnline(navigator.onLine);
+    const storedSchoolName = localStorage.getItem('active_school_name') || 'Developper Test Institute';
+    setAssignedSchool(storedSchoolName);
+
+    fetchMisconductStream();
   }, []);
 
-  // 3. Hydrate Discipline Master Personnel Data
-  const hydrateDisciplineMaster = async (schoolId) => {
-    try {
-      if (navigator.onLine) {
-        const { data, error } = await supabase
-          .from('school_personnel')
-          .select('full_name, unique_id, profile_pic_url, phone_number')
-          .eq('school_id', schoolId)
-          .or('role.ilike.%discipline%,unique_id.ilike.DT-%')
-          .maybeSingle();
+  // Sentence Selector with Persistent Habit Warning
+  const renderVariedSentence = (item, index) => {
+    const name = studentMap[item.unique_code] || studentMap[item.student_id] || item.unique_code || 'Student';
+    const subject = item.subject_name || 'Class';
+    const classLvl = item.classLevel || 'Form';
+    const date = item.attendance_date || 'today';
 
-        if (data) {
-          const profile = {
-            name: data.full_name || 'Assigned Discipline Master',
-            uniqueId: data.unique_id || 'DT-OFFICIAL',
-            profilePic: data.profile_pic_url || '',
-            phone: data.phone_number || ''
-          };
-          setDmProfile(profile);
-          localStorage.setItem(`dm_profile_${schoolId}`, JSON.stringify(profile));
-          return;
-        }
-      }
-    } catch (err) {
-      console.warn('Network issue fetching personnel, resorting to offline cache:', err);
+    const key = item.student_id || item.unique_code;
+    const stats = cumulativeStats[key] || { abs: 0, late: 0 };
+
+    // Persistent Absence Pattern Check
+    if (item.status === 'Absent' && stats.abs >= 3) {
+      return `${name} is never present for ${subject} (${classLvl}) class. (${stats.abs} repeated absences recorded)`;
     }
 
-    // Offline Cache Fallback
-    const cachedProfile = localStorage.getItem(`dm_profile_${schoolId}`);
-    if (cachedProfile) {
-      setDmProfile(JSON.parse(cachedProfile));
+    if (item.status === 'Absent') {
+      const sentenceFn = ABSENCE_SENTENCES[index % ABSENCE_SENTENCES.length];
+      return sentenceFn(name, subject, classLvl, date);
     } else {
-      setDmProfile({
-        name: 'Discipline Master',
-        uniqueId: 'DT-SESSION',
-        profilePic: '',
-        phone: ''
-      });
-    }
-  };
-
-  // 4. Real-time Attendance Listener from Teachers (public.attendance)
-  const setupRealtimeAttendanceListener = (schoolId) => {
-    if (!supabase || !supabase.channel) return;
-
-    const channel = supabase
-      .channel('attendance_notifications')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'attendance', filter: `school_id=eq.${schoolId}` },
-        (payload) => {
-          const newEntry = payload.new;
-          playNotificationSound();
-
-          setToastNotification({
-            id: Date.now(),
-            subject: newEntry.subject_name || 'Subject Lesson',
-            classLevel: newEntry.classLevel || 'Class',
-            teacherId: newEntry.teacher_id || 'Teacher',
-            time: newEntry.time_recorded || 'Just now'
-          });
-
-          // Auto hide toast banner after 6 seconds
-          setTimeout(() => {
-            setToastNotification(null);
-          }, 6000);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  };
-
-  // 5. Offline Queue Synchronization
-  const flushOfflineQueue = async () => {
-    const queue = JSON.parse(localStorage.getItem('offline_discipline_queue') || '[]');
-    if (queue.length === 0) return;
-
-    setIsSyncing(true);
-    try {
-      for (const item of queue) {
-        if (item.type === 'incident') {
-          await supabase.from('discipline_incidents').insert([item.payload]);
-        } else if (item.type === 'attendance') {
-          await supabase.from(item.table).upsert(item.payload);
-        }
-      }
-      localStorage.setItem('offline_discipline_queue', '[]');
-      console.log('⚡ Offline discipline queue successfully synced to Supabase!');
-    } catch (err) {
-      console.error('Queue sync error:', err);
-    } finally {
-      setIsSyncing(false);
+      const sentenceFn = LATE_SENTENCES[index % LATE_SENTENCES.length];
+      return sentenceFn(name, subject, classLvl, date);
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#FDFBF7] text-slate-900 font-sans pb-16">
+    <div className="min-h-screen bg-[#F8FAFC] text-slate-900 font-sans pb-16">
       
-      {/* Top Header Navigation Bar */}
-      <header className="bg-[#2D5A27] text-white shadow-lg sticky top-0 z-40 border-b border-emerald-800">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col md:flex-row justify-between items-center gap-4">
-          
-          {/* School Brand Context */}
+      {/* Header */}
+      <header className="bg-[#1E3A1E] text-white shadow-lg sticky top-0 z-40 border-b border-emerald-900">
+        <div className="max-w-7xl mx-auto px-6 py-3 flex justify-between items-center">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-100 text-[#2D5A27] flex items-center font-black text-xl justify-center shadow-md border border-amber-200">
+            <div className="w-9 h-9 rounded-xl bg-amber-100 text-[#1E3A1E] flex items-center font-black text-lg justify-center shadow-md">
               DM
             </div>
             <div>
-              <h1 className="text-lg font-black tracking-wide uppercase text-amber-100">
-                {assignedSchool}
-              </h1>
-              <p className="text-xs text-emerald-200 flex items-center gap-2">
-                <span>Discipline Master Command Center</span>
-                <span className="text-amber-300 font-bold">• Academic Year 2026/2027</span>
-              </p>
+              <h1 className="text-base font-black uppercase text-amber-100">{assignedSchool}</h1>
+              <p className="text-[11px] text-emerald-300">Discipline Command Console • AY 2026/2027</p>
             </div>
           </div>
 
-          {/* Network Status & Command Actions */}
           <div className="flex items-center gap-3">
-            {/* Real-time Online / Offline PWA Badge */}
-            <div className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 border ${
-              isOnline ? 'bg-emerald-900/60 border-emerald-400 text-emerald-200' : 'bg-rose-900/60 border-rose-400 text-rose-200 animate-pulse'
-            }`}>
-              {isOnline ? <Wifi size={13} /> : <WifiOff size={13} />}
-              <span>{isOnline ? (isSyncing ? 'Syncing Queue...' : 'Online & Live') : 'Offline Mode (PWA)'}</span>
-            </div>
-
-            {/* Global Search Button */}
-            <button 
-              onClick={() => setIsSearchOpen(true)}
-              className="bg-emerald-800 hover:bg-emerald-700 text-amber-100 px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2 border border-emerald-600 shadow-sm"
-            >
-              <Search size={14} />
-              <span className="hidden sm:inline">Global School Search</span>
+            <button onClick={() => setIsSearchOpen(true)} className="bg-emerald-800 text-amber-100 px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5">
+              <Search size={13} /> Global Search
             </button>
-
-            <Link 
-              href="/" 
-              className="bg-amber-500 hover:bg-amber-600 text-slate-950 px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
-            >
-              <LogOut size={14} />
-              <span>Exit</span>
+            <Link href="/" className="bg-amber-500 text-slate-950 px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1">
+              <LogOut size={13} /> Exit
             </Link>
           </div>
-
         </div>
       </header>
 
-      {/* Real-time Toast Audio Notification Popup */}
-      {toastNotification && (
-        <div className="fixed bottom-5 right-5 z-50 bg-slate-900 text-white p-4 rounded-xl shadow-2xl border-2 border-amber-400 flex items-start gap-3 max-w-sm animate-bounce">
-          <div className="p-2 bg-amber-500 text-slate-950 rounded-lg font-black">
-            <Bell size={20} />
-          </div>
-          <div className="flex-1 text-xs">
-            <h4 className="font-black text-amber-300 text-sm">New Subject Roll Call Conducted!</h4>
-            <p className="mt-1 font-bold text-slate-200">
-              {toastNotification.subject} — <span className="text-amber-200">{toastNotification.classLevel}</span>
-            </p>
-            <p className="text-[10px] text-slate-400 mt-0.5">Submitted at {toastNotification.time}</p>
-          </div>
-          <button onClick={() => setToastNotification(null)} className="text-slate-400 hover:text-white font-bold text-xs">✕</button>
-        </div>
-      )}
+      <main className="max-w-7xl mx-auto px-6 mt-6 space-y-6">
 
-      {/* Main Body Dashboard Container */}
-      <main className="max-w-7xl mx-auto px-4 mt-6 space-y-6">
-
-        {/* Top Personnel Profile & Quick Navigation Bar */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 flex flex-col md:flex-row items-center justify-between gap-6">
-          
-          <div className="flex items-center gap-4 w-full md:w-auto">
-            <div className="w-16 h-16 rounded-2xl bg-slate-100 border-2 border-emerald-700/30 flex items-center justify-center overflow-hidden shadow-inner">
-              {dmProfile.profilePic ? (
-                <img src={dmProfile.profilePic} alt={dmProfile.name} className="w-full h-full object-cover" />
+        {/* 👤 DISCIPLINE MASTER PROFILE WELCOME CARD */}
+        <section className="bg-white rounded-2xl shadow-sm border border-slate-200/80 p-5 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="flex items-center gap-4">
+            <div className="w-16 h-16 rounded-2xl bg-[#1E3A1E] text-amber-100 border-2 border-emerald-700 flex items-center justify-center text-2xl font-black overflow-hidden shadow-md">
+              {dmProfile.photo_url ? (
+                <img src={dmProfile.photo_url} alt="DM Photo" className="w-full h-full object-cover" />
               ) : (
-                <span className="font-black text-xl text-[#2D5A27]">
-                  {dmProfile.name.split(' ').map(n => n[0]).join('').slice(0,2)}
-                </span>
+                <Shield size={30} />
               )}
             </div>
             <div>
-              <h2 className="text-lg font-black text-slate-900">{dmProfile.name}</h2>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className="bg-emerald-100 text-[#2D5A27] text-[10px] font-black px-2 py-0.5 rounded-md border border-emerald-200 uppercase">
-                  {dmProfile.uniqueId}
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-black text-slate-900">Welcome, {dmProfile.full_name}</h2>
+                <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold text-[10px] border border-emerald-300">
+                  Active Officer
                 </span>
-                <span className="text-xs text-slate-500 font-semibold">Chief Discipline Master</span>
+              </div>
+              <p className="text-xs text-slate-500 font-medium mt-0.5">Discipline & Attendance Command Office</p>
+              
+              <div className="flex flex-wrap items-center gap-4 mt-2 text-xs text-slate-600 font-mono">
+                <span className="flex items-center gap-1"><Mail size={12} className="text-emerald-700" /> {dmProfile.email}</span>
+                <span className="flex items-center gap-1"><Phone size={12} className="text-emerald-700" /> {dmProfile.phone}</span>
+                <span className="bg-slate-100 px-2 py-0.5 rounded text-[11px] font-bold text-slate-700">ID: {dmProfile.unique_id}</span>
               </div>
             </div>
           </div>
 
-          {/* Navigation Tab Selector Bar */}
-          <div className="flex flex-wrap items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200 w-full md:w-auto justify-center">
-            
-            <button
-              onClick={() => setActiveTab('general')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition ${
-                activeTab === 'general' ? 'bg-[#2D5A27] text-amber-100 shadow-md' : 'text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              <BookOpen size={15} /> General Education
-            </button>
+          <div className="bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl flex items-center gap-3">
+            <UserCheck size={20} className="text-emerald-700" />
+            <div>
+              <span className="text-[10px] font-bold uppercase text-slate-400 block">Duty Status</span>
+              <span className="text-xs font-black text-slate-800">Live Surveillance Active</span>
+            </div>
+          </div>
+        </section>
 
-            <button
-              onClick={() => setActiveTab('commercial')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition ${
-                activeTab === 'commercial' ? 'bg-[#2D5A27] text-amber-100 shadow-md' : 'text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              <Briefcase size={15} /> Commercial (STT)
-            </button>
+        {/* 📺 MISCONDUCTS LIVE BROADCAST FEED */}
+        <section className="bg-slate-950 text-white rounded-2xl shadow-xl border border-slate-800 overflow-hidden">
+          <div className="px-6 py-4 bg-slate-900 border-b border-slate-800 flex justify-between items-center">
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
+              </span>
+              <h2 className="text-xs font-black tracking-widest text-slate-200 uppercase">
+                Absence & Lateness Misconduct Feed <span className="text-slate-500 font-mono text-[10px]">(public.attendance)</span>
+              </h2>
+            </div>
 
-            <button
-              onClick={() => setActiveTab('industrial')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition ${
-                activeTab === 'industrial' ? 'bg-[#2D5A27] text-amber-100 shadow-md' : 'text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              <Factory size={15} /> Industrial (IND)
+            <button onClick={fetchMisconductStream} className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 border border-slate-700">
+              <RefreshCw size={12} className={loading ? 'animate-spin text-amber-400' : ''} /> Refresh Stream
             </button>
-
-            <button
-              onClick={() => setActiveTab('truancy')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition ${
-                activeTab === 'truancy' ? 'bg-amber-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              <Bell size={15} /> Live Subject Truancy
-            </button>
-
-            <button
-              onClick={() => setActiveTab('incidents')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition ${
-                activeTab === 'incidents' ? 'bg-rose-700 text-white shadow-md' : 'text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              <ShieldAlert size={15} /> Misconduct Registry
-            </button>
-
           </div>
 
+          {errorMsg && (
+            <div className="p-3 bg-rose-950 border-b border-rose-800 text-rose-300 text-xs font-mono">
+              ⚠️ Database Error: {errorMsg}
+            </div>
+          )}
+
+          <div className="p-4 max-h-96 overflow-y-auto space-y-3">
+            {loading ? (
+              <div className="py-12 text-center text-slate-500 text-xs flex justify-center items-center gap-2">
+                <RefreshCw size={15} className="animate-spin text-emerald-400" />
+                <span>Reading misconduct records from Supabase...</span>
+              </div>
+            ) : misconductRecords.length === 0 ? (
+              <div className="py-10 text-center text-slate-500 text-xs italic">
+                No absence or lateness records found.
+              </div>
+            ) : (
+              misconductRecords.map((item, idx) => {
+                const key = item.student_id || item.unique_code;
+                const stats = cumulativeStats[key] || { abs: 0, late: 0 };
+
+                return (
+                  <div key={item.id || idx} className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+                    <div className="flex items-start gap-3">
+                      <div className="p-2 bg-slate-800 rounded-lg text-amber-300 mt-0.5">
+                        <Radio size={15} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-slate-100 leading-snug">
+                          {renderVariedSentence(item, idx)}
+                        </p>
+                        <p className="text-[11px] font-mono text-slate-400 mt-1">
+                          Code: {item.unique_code || 'N/A'} • Time: {item.time_recorded || '12:00 PM'} ({item.day_of_week || 'Today'})
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 self-end md:self-auto">
+                      <span className={`px-2.5 py-1 rounded text-[10px] font-black uppercase border ${
+                        item.status === 'Absent' ? 'bg-rose-950 text-rose-300 border-rose-800' : 'bg-amber-950 text-amber-300 border-amber-800'
+                      }`}>
+                        {item.status}
+                      </span>
+
+                      <div className="bg-slate-950 border border-slate-800 px-3 py-1.5 rounded-lg text-right">
+                        <span className="text-[10px] uppercase font-mono text-slate-400 block">Cumulative Record</span>
+                        <span className="text-xs font-black text-rose-300 font-mono">
+                          {stats.abs} Absences • {stats.late} Lates
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </section>
+
+        {/* Gate Roll Call Modules */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200/80 p-4 flex flex-wrap justify-between items-center gap-4">
+          <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider">Gate Roll Call Modules</h3>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => setActiveTab('general')} className={`px-3.5 py-2 rounded-lg text-xs font-bold transition ${activeTab === 'general' ? 'bg-[#1E3A1E] text-amber-100' : 'text-slate-600 bg-slate-100'}`}>
+              <BookOpen size={14} className="inline mr-1.5" /> General Education
+            </button>
+            <button onClick={() => setActiveTab('commercial')} className={`px-3.5 py-2 rounded-lg text-xs font-bold ${activeTab === 'commercial' ? 'bg-[#1E3A1E] text-amber-100' : 'text-slate-600 bg-slate-100'}`}>
+              <Briefcase size={14} className="inline mr-1.5" /> Commercial (STT)
+            </button>
+            <button onClick={() => setActiveTab('industrial')} className={`px-3.5 py-2 rounded-lg text-xs font-bold ${activeTab === 'industrial' ? 'bg-[#1E3A1E] text-amber-100' : 'text-slate-600 bg-slate-100'}`}>
+              <Factory size={14} className="inline mr-1.5" /> Industrial (IND)
+            </button>
+            <button onClick={() => setActiveTab('incidents')} className={`px-3.5 py-2 rounded-lg text-xs font-bold ${activeTab === 'incidents' ? 'bg-rose-700 text-white' : 'text-slate-600 bg-slate-100'}`}>
+              <ShieldAlert size={14} className="inline mr-1.5" /> Misconduct Registry
+            </button>
+          </div>
         </div>
 
-        {/* Dynamic Tab Body Component Rendering */}
-        <div className="transition-all duration-200">
-          {activeTab === 'general' && <GeneralAttendance schoolId={activeSchoolId} dmName={dmProfile.name} />}
-          {activeTab === 'commercial' && <CommercialAttendance schoolId={activeSchoolId} dmName={dmProfile.name} />}
-          {activeTab === 'industrial' && <IndustrialAttendance schoolId={activeSchoolId} dmName={dmProfile.name} />}
-          {activeTab === 'truancy' && <SubjectTruancyFeed schoolId={activeSchoolId} />}
-          {activeTab === 'incidents' && <IncidentRegistry schoolId={activeSchoolId} dmName={dmProfile.name} />}
+        <div>
+          {activeTab === 'general' && <GeneralAttendance schoolId={activeSchoolId} dmName={dmProfile.full_name} />}
+          {activeTab === 'commercial' && <CommercialAttendance schoolId={activeSchoolId} dmName={dmProfile.full_name} />}
+          {activeTab === 'industrial' && <IndustrialAttendance schoolId={activeSchoolId} dmName={dmProfile.full_name} />}
+          {activeTab === 'incidents' && <IncidentRegistry schoolId={activeSchoolId} dmName={dmProfile.full_name} />}
         </div>
 
       </main>
 
-      {/* Global Student Search Modal */}
-      {isSearchOpen && (
-        <GlobalStudentSearch 
-          schoolId={activeSchoolId} 
-          onClose={() => setIsSearchOpen(false)} 
-        />
-      )}
-
-      {/* Footer Branding */}
-      <footer className="mt-12 text-center text-slate-400 text-[10px] uppercase tracking-widest font-mono">
-        App conceived by Norbert Che Nsuh - 682491189
-      </footer>
+      {isSearchOpen && <GlobalStudentSearch schoolId={activeSchoolId} onClose={() => setIsSearchOpen(false)} />}
 
     </div>
   );

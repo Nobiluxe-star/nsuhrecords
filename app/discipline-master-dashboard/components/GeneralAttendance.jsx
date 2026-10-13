@@ -1,242 +1,226 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { UserCheck, Save, RefreshCw, Calendar, Check, AlertCircle } from 'lucide-react';
-import { db as supabase } from '../../../lib/db';
-import { GENERAL_CLASSES_CATALOG } from '../../admin-dashboard/page.js';
+import { supabase } from '../../../lib/supabase';
+import { Check, X, Clock, Save, RefreshCw, AlertCircle } from 'lucide-react';
+
+const STATIC_CLASSES = [
+  "Form 1A (F1A)", "Form 1B (F1B)", "Form 2A (F2A)", "Form 2B (F2B)",
+  "Form 3A (F3A)", "Form 3B (F3B)", "Form 4A (F4A)", "Form 4B (F4B)",
+  "Form 5A (F5A)", "Form 5B (F5B)", "Lower Sixth Arts (LSA)", "Upper Sixth Arts (USA)"
+];
 
 export default function GeneralAttendance({ schoolId, dmName }) {
-  const [selectedClass, setSelectedClass] = useState(GENERAL_CLASSES_CATALOG[0] || 'Form 1A (F1A)');
-  const [attendanceDate, setAttendanceDate] = useState(new Date().toISOString().split('T')[0]);
-  
+  const [selectedClass, setSelectedClass] = useState("Form 1A (F1A)");
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [students, setStudents] = useState([]);
-  const [rosterStatus, setRosterStatus] = useState({}); // { [studentId]: 'Present' | 'Late' | 'Absent Unexcused' | 'Absent Excused' }
-  const [isLoading, setIsLoading] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [attendanceState, setAttendanceState] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [statusMsg, setStatusMsg] = useState(null);
 
-  // 1. Fetch Students for Selected Class
-  useEffect(() => {
-    if (!schoolId) return;
+  const activeSchoolId = schoolId || (typeof window !== 'undefined' ? localStorage.getItem('active_school_id') : null) || '15052cc7-bc44-45e1-9acc-bc445e19acc4';
 
-    const fetchClassStudents = async () => {
-      setIsLoading(true);
-      try {
-        if (navigator.onLine) {
-          const { data, error } = await supabase
-            .from('students')
-            .select('*')
-            .eq('school_id', schoolId)
-            .or(`classLevel.eq."${selectedClass}",class_name.eq."${selectedClass}"`);
+  const fetchStudents = async () => {
+    setLoading(true);
+    setStatusMsg(null);
 
-          if (data && data.length > 0) {
-            setStudents(data);
-            localStorage.setItem(`gen_students_${schoolId}_${selectedClass}`, JSON.stringify(data));
-          } else {
-            // Fallback to offline cache
-            const cached = localStorage.getItem(`gen_students_${schoolId}_${selectedClass}`);
-            if (cached) setStudents(JSON.parse(cached));
-            else setStudents([]);
-          }
-        } else {
-          const cached = localStorage.getItem(`gen_students_${schoolId}_${selectedClass}`);
-          if (cached) setStudents(JSON.parse(cached));
-          else setStudents([]);
-        }
-      } catch (err) {
-        console.warn('Error fetching students, checking offline store:', err);
-        const cached = localStorage.getItem(`gen_students_${schoolId}_${selectedClass}`);
-        if (cached) setStudents(JSON.parse(cached));
-      } finally {
-        setIsLoading(false);
+    try {
+      // Query students for the active school
+      const { data: allStudents, error } = await supabase
+        .from('students')
+        .select('*')
+        .eq('school_id', activeSchoolId);
+
+      if (error) {
+        setStatusMsg({ type: 'error', text: `Database error: ${error.message}` });
+        setStudents([]);
+        return;
       }
-    };
 
-    fetchClassStudents();
-  }, [schoolId, selectedClass]);
+      // Flexible string matching for "Form 1A (F1A)"
+      const cleanTarget = selectedClass.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const matched = (allStudents || []).filter(s => {
+        const studentClass = (s.classLevel || s.class_level || s.class_form || s.class || '').toString().toLowerCase().replace(/[^a-z0-9]/g, '');
+        return studentClass.includes(cleanTarget) || cleanTarget.includes(studentClass);
+      });
 
-  // 2. Initialize Roster to 'Present' by default
-  useEffect(() => {
-    const initialRoster = {};
-    students.forEach((st) => {
-      const id = st.id || st.student_id;
-      initialRoster[id] = 'Present';
-    });
-    setRosterStatus(initialRoster);
-  }, [students]);
+      setStudents(matched);
 
-  // 3. Status Change Handler
-  const handleStatusChange = (studentId, newStatus) => {
-    setRosterStatus((prev) => ({
-      ...prev,
-      [studentId]: newStatus
-    }));
+      // Fetch existing attendance records
+      const { data: existingAtt } = await supabase
+        .from('attendance')
+        .select('*')
+        .eq('school_id', activeSchoolId)
+        .eq('attendance_date', selectedDate);
+
+      const initialMap = {};
+      matched.forEach(st => {
+        const match = existingAtt?.find(a => a.student_id === st.id || a.unique_code === st.unique_code);
+        initialMap[st.id] = match ? match.status : 'Present';
+      });
+
+      setAttendanceState(initialMap);
+    } catch (err) {
+      setStatusMsg({ type: 'error', text: err.message });
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // 4. Save General Roll Call to Supabase & Offline Queue
-  const handleSaveRollCall = async () => {
-    if (students.length === 0) {
-      alert('No students available in this class roster to save.');
-      return;
-    }
+  useEffect(() => {
+    fetchStudents();
+  }, [selectedClass, selectedDate, activeSchoolId]);
 
-    setIsSaving(true);
-    setSaveSuccess(false);
+  const handleStatusChange = (studentId, status) => {
+    setAttendanceState(prev => ({ ...prev, [studentId]: status }));
+  };
 
-    const payload = students.map((st) => {
-      const id = st.id || st.student_id;
-      const status = rosterStatus[id] || 'Present';
-      return {
-        school_id: schoolId,
-        student_id: id,
-        student_name: st.full_name || st.name,
+  const handleSaveAttendance = async () => {
+    if (students.length === 0) return;
+    setSaving(true);
+    setStatusMsg(null);
+
+    try {
+      const recordsToInsert = students.map(st => ({
+        school_id: activeSchoolId,
+        student_id: st.id,
+        unique_code: st.unique_code || st.student_code || st.roll_number,
         classLevel: selectedClass,
-        section: 'General Education',
-        date: attendanceDate,
-        status: status,
-        unexcused_hours: status === 'Absent Unexcused' ? 2 : status === 'Late' ? 1 : 0,
+        subject_name: 'Gate Roll Call',
+        attendance_date: selectedDate,
+        status: attendanceState[st.id] || 'Present',
         recorded_by: dmName || 'Discipline Master',
         created_at: new Date().toISOString()
-      };
-    });
+      }));
 
-    if (navigator.onLine) {
-      try {
-        const { error } = await supabase
-          .from('general_education_attendance')
-          .upsert(payload, { onConflict: 'school_id,student_id,date' });
+      const { error } = await supabase.from('attendance').upsert(recordsToInsert);
 
-        if (error) {
-          console.warn('Supabase upsert error, queuing locally:', error.message);
-          queueOfflineRecord(payload);
-        } else {
-          setSaveSuccess(true);
-        }
-      } catch (err) {
-        queueOfflineRecord(payload);
+      if (error) {
+        await supabase.from('attendance').insert(recordsToInsert);
       }
-    } else {
-      queueOfflineRecord(payload);
+
+      setStatusMsg({ type: 'success', text: `Saved attendance for ${students.length} students!` });
+    } catch (err) {
+      setStatusMsg({ type: 'error', text: `Save failed: ${err.message}` });
+    } finally {
+      setSaving(false);
     }
-
-    setIsSaving(false);
-    setTimeout(() => setSaveSuccess(false), 4000);
-  };
-
-  const queueOfflineRecord = (payload) => {
-    const queue = JSON.parse(localStorage.getItem('offline_discipline_queue') || '[]');
-    queue.push({ type: 'attendance', table: 'general_education_attendance', payload });
-    localStorage.setItem('offline_discipline_queue', JSON.stringify(queue));
-    setSaveSuccess(true);
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-6">
-      
-      {/* Header & Controls Bar */}
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-200/80 p-6 space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-4 border-b border-slate-100">
         <div>
-          <h3 className="text-base font-black text-[#2D5A27] flex items-center gap-2">
-            <UserCheck className="text-[#2D5A27]" size={20} />
-            General Education Department — Daily Roll Call
-          </h3>
-          <p className="text-xs text-slate-500 mt-0.5">Select class level to conduct official daily gate & assembly attendance.</p>
+          <h2 className="text-base font-black text-slate-900">General Education Department — Daily Roll Call</h2>
+          <p className="text-xs text-slate-500 font-medium">Select class level to conduct official daily gate & assembly attendance.</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-          {/* Class Level Selector Dropdown */}
-          <div className="flex items-center gap-2 bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5">
-            <span className="text-xs font-bold text-slate-600 uppercase">Class:</span>
-            <select
-              value={selectedClass}
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl">
+            <span className="text-[11px] font-black text-slate-500 uppercase">Class:</span>
+            <select 
+              value={selectedClass} 
               onChange={(e) => setSelectedClass(e.target.value)}
-              className="bg-transparent text-xs font-black text-[#2D5A27] focus:outline-none"
+              className="bg-transparent text-xs font-black text-slate-800 outline-none cursor-pointer"
             >
-              {GENERAL_CLASSES_CATALOG.map((cls) => (
-                <option key={cls} value={cls}>{cls}</option>
-              ))}
+              {STATIC_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
 
-          {/* Date Picker */}
-          <div className="flex items-center gap-2 bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5">
-            <Calendar size={14} className="text-slate-500" />
-            <input
-              type="date"
-              value={attendanceDate}
-              onChange={(e) => setAttendanceDate(e.target.value)}
-              className="bg-transparent text-xs font-bold text-slate-800 focus:outline-none"
-            />
-          </div>
+          <input 
+            type="date" 
+            value={selectedDate} 
+            onChange={(e) => setSelectedDate(e.target.value)}
+            className="bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl text-xs font-black text-slate-800 outline-none"
+          />
 
-          {/* Save Button */}
-          <button
-            onClick={handleSaveRollCall}
-            disabled={isSaving}
-            className="bg-[#2D5A27] hover:bg-emerald-800 text-amber-100 px-4 py-2 rounded-xl text-xs font-bold transition shadow flex items-center gap-1.5 disabled:opacity-50"
+          <button 
+            onClick={handleSaveAttendance} 
+            disabled={saving || students.length === 0}
+            className="bg-[#1E3A1E] hover:bg-emerald-900 text-amber-100 px-4 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md disabled:opacity-50"
           >
-            {isSaving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
-            <span>{isSaving ? 'Saving...' : 'Save General Attendance'}</span>
+            {saving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+            Save Attendance
           </button>
         </div>
       </div>
 
-      {saveSuccess && (
-        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-bold flex items-center gap-2 animate-fade-in">
-          <Check size={16} className="text-emerald-600" />
-          <span>General Education roll call saved successfully for {selectedClass}!</span>
+      {statusMsg && (
+        <div className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 ${
+          statusMsg.type === 'success' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'
+        }`}>
+          <AlertCircle size={15} />
+          {statusMsg.text}
         </div>
       )}
 
-      {/* Roster Table */}
-      <div className="overflow-x-auto">
-        {isLoading ? (
-          <div className="py-12 text-center text-slate-400 text-xs flex justify-center items-center gap-2">
-            <RefreshCw size={16} className="animate-spin text-[#2D5A27]" />
-            <span>Loading {selectedClass} student roster...</span>
-          </div>
-        ) : students.length === 0 ? (
-          <div className="p-8 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200 text-slate-400 text-xs italic">
-            No students registered under <span className="font-bold text-slate-600">{selectedClass}</span> yet.
-          </div>
-        ) : (
-          <table className="w-full text-left border-collapse text-sm">
+      {loading ? (
+        <div className="py-16 text-center text-slate-400 text-xs font-medium flex justify-center items-center gap-2">
+          <RefreshCw size={16} className="animate-spin text-emerald-700" />
+          Loading student roster for {selectedClass}...
+        </div>
+      ) : students.length === 0 ? (
+        <div className="py-16 text-center text-slate-400 text-xs font-medium bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+          No students registered under <strong className="text-slate-700">{selectedClass}</strong> yet.
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
             <thead>
-              <tr className="bg-slate-100 text-slate-700 font-bold text-xs uppercase tracking-wider">
-                <th className="p-3 rounded-l-lg">Student Name</th>
-                <th className="p-3">Matricule / ID</th>
-                <th className="p-3 text-center">Attendance Status Selection</th>
+              <tr className="bg-slate-50 text-slate-500 uppercase font-black text-[10px] tracking-wider border-b border-slate-200">
+                <th className="py-3 px-4">#</th>
+                <th className="py-3 px-4">Student Name</th>
+                <th className="py-3 px-4">Student Code</th>
+                <th className="py-3 px-4 text-center">Attendance Status</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 text-xs">
-              {students.map((st) => {
-                const id = st.id || st.student_id;
-                const currentStatus = rosterStatus[id] || 'Present';
+            <tbody className="divide-y divide-slate-100">
+              {students.map((st, idx) => {
+                const currentStatus = attendanceState[st.id] || 'Present';
                 return (
-                  <tr key={id} className="hover:bg-slate-50/80 transition">
-                    <td className="p-3 font-black text-slate-800">{st.full_name || st.name}</td>
-                    <td className="p-3 font-mono text-slate-500">{st.student_id || st.unique_id || 'ID Pending'}</td>
-                    <td className="p-3">
-                      <div className="flex justify-center gap-1.5">
-                        {[
-                          { label: 'Present', color: 'bg-emerald-600 text-white' },
-                          { label: 'Late', color: 'bg-amber-500 text-white' },
-                          { label: 'Absent Unexcused', color: 'bg-rose-600 text-white' },
-                          { label: 'Absent Excused', color: 'bg-blue-600 text-white' }
-                        ].map((opt) => (
-                          <button
-                            key={opt.label}
-                            type="button"
-                            onClick={() => handleStatusChange(id, opt.label)}
-                            className={`px-3 py-1.5 rounded-lg font-bold text-[11px] transition shadow-sm ${
-                              currentStatus === opt.label
-                                ? opt.color
-                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                            }`}
-                          >
-                            {opt.label}
-                          </button>
-                        ))}
+                  <tr key={st.id || idx} className="hover:bg-slate-50/80 transition">
+                    <td className="py-3 px-4 font-mono font-bold text-slate-400">{idx + 1}</td>
+                    <td className="py-3 px-4 font-black text-slate-800">
+                      {st.full_name || st.fullName || st.name || 'Unnamed Student'}
+                    </td>
+                    <td className="py-3 px-4 font-mono text-slate-500">
+                      {st.unique_code || st.student_code || st.roll_number || 'N/A'}
+                    </td>
+                    <td className="py-3 px-4">
+                      <div className="flex justify-center items-center gap-1.5">
+                        <button
+                          onClick={() => handleStatusChange(st.id, 'Present')}
+                          className={`px-3 py-1.5 rounded-lg text-[11px] font-black flex items-center gap-1 border transition ${
+                            currentStatus === 'Present' 
+                              ? 'bg-emerald-600 text-white border-emerald-700 shadow-sm' 
+                              : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
+                          }`}
+                        >
+                          <Check size={12} /> Present
+                        </button>
+
+                        <button
+                          onClick={() => handleStatusChange(st.id, 'Late')}
+                          className={`px-3 py-1.5 rounded-lg text-[11px] font-black flex items-center gap-1 border transition ${
+                            currentStatus === 'Late' 
+                              ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-sm' 
+                              : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
+                          }`}
+                        >
+                          <Clock size={12} /> Late
+                        </button>
+
+                        <button
+                          onClick={() => handleStatusChange(st.id, 'Absent')}
+                          className={`px-3 py-1.5 rounded-lg text-[11px] font-black flex items-center gap-1 border transition ${
+                            currentStatus === 'Absent' 
+                              ? 'bg-rose-600 text-white border-rose-700 shadow-sm' 
+                              : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
+                          }`}
+                        >
+                          <X size={12} /> Absent
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -244,9 +228,8 @@ export default function GeneralAttendance({ schoolId, dmName }) {
               })}
             </tbody>
           </table>
-        )}
-      </div>
-
+        </div>
+      )}
     </div>
   );
 }

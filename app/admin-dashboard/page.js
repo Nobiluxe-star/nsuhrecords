@@ -13,6 +13,7 @@ import SubjectCoefficientsManager from './components/SubjectCoefficientsManager'
 import TeacherAssignment from './components/TeacherAssignment';
 import SchoolSettings from './components/SchoolSettings';
 import { downloadFullSchoolData, syncOfflineQueueToSupabase } from '../../lib/offlineSync';
+import { db } from '../../lib/db'; 
 
 import BulkGeneralReportCard from '../student-dashboard/components/BulkGeneralReportCard';
 import BulkTechnicalCommercialReportCard from '../student-dashboard/components/BulkTechnicalCommercialReportCard';
@@ -358,6 +359,22 @@ const getFilteredSubjects = (section) => {
   return ALL_SUBJECTS_LIST.filter(s => s.category === "General Core Subjects");
 };
 
+const DAYS_LIST = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, '0'));
+const MONTHS_LIST = [
+  { value: '01', label: 'Jan' },
+  { value: '02', label: 'Feb' },
+  { value: '03', label: 'Mar' },
+  { value: '04', label: 'Apr' },
+  { value: '05', label: 'May' },
+  { value: '06', label: 'Jun' },
+  { value: '07', label: 'Jul' },
+  { value: '08', label: 'Aug' },
+  { value: '09', label: 'Sep' },
+  { value: '10', label: 'Oct' },
+  { value: '11', label: 'Nov' },
+  { value: '12', label: 'Dec' },
+];
+const YEARS_LIST = Array.from({ length: 21 }, (_, i) => String(2020 - i));
 export default function AdminDashboardPage() {
   const [activeSchool, setActiveSchool] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
@@ -383,6 +400,7 @@ export default function AdminDashboardPage() {
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [registrationMode, setRegistrationMode] = useState('single'); // 'single' or 'bulk'
   const [teacherSubTab, setTeacherSubTab] = useState('assigned');
+  const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
   
 // --- MEMBER REGISTRATION INITIAL DRAFT RECOVERY ---
   const getInitialDraft = () => {
@@ -1933,10 +1951,15 @@ const handleExportPDF = async (exportType = 'all') => {
     }
 
     // Stop execution and alert if school name is missing
-    if (!tenantSchoolName) {
-      alert("Can't find active school name. Check your internet connection or active school selection.");
-      return;
-    }
+    // AFTER: Safe fallback chain that prevents blocking PDF generation
+const schoolDisplayName = 
+  tenantSchoolName || 
+  activeSchool?.name || 
+  activeSchool?.school_name || 
+  schoolName || 
+  (typeof window !== 'undefined' ? localStorage.getItem('activeSchoolName') : null) || 
+  'ClassLogs Academic Institution';
+
 // Calculate dynamic academic year using system utility/state
     const activeAcademicYear = 
       (typeof getAcademicYear === 'function' && getCurrentAcademicYear()) ||
@@ -1948,16 +1971,16 @@ const handleExportPDF = async (exportType = 'all') => {
     // 3. Official Header Metadata
     let currentY = 13;
 
-    // 1. Evaluate Academic Year Safely
-    const academicYearVal = typeof getCurrentAcademicYear === 'function' 
-      ? getCurrentAcademicYear() 
-      : (typeof currentAcademicYear !== 'undefined' ? currentAcademicYear : "2026/2027");
+   // Dynamic Academic Year strictly from state/utility
+const academicYearVal = typeof getCurrentAcademicYear === 'function' 
+  ? getCurrentAcademicYear() 
+  : (typeof getAcademicYear === 'function' ? getAcademicYear() : currentAcademicYear);
 
     // 2. Main Institution Header
     doc.setFont("helvetica", "bold");
     doc.setFontSize(16);
     doc.setTextColor(4, 80, 42); // Forest Green
-    doc.text(String(tenantSchoolName || activeSchool?.name || 'INSTITUTION').toUpperCase(), 105, currentY);
+    doc.text(String(schoolDisplayName).toUpperCase(), 105, currentY, { align: "center" });
     currentY += 5;
 
     // Decorative Accent Line
@@ -2358,9 +2381,16 @@ if (sec.includes('commercial') && (!selectedTechnicalSubject || !COMMERCIAL_TRAD
         } else {
           console.warn('Supabase insert notice:', error);
         }
-      } else {
-        // Remove from offline pending queue if successfully uploaded
-        await db.pendingSyncQueue.where('payload.unique_code').equals(uniqueStudentId).delete();
+     // Remove from offline pending queue if successfully uploaded
+if (typeof db !== 'undefined' && db?.pendingSyncQueue) {
+  try {
+    await db.pendingSyncQueue
+      .filter((item) => item?.payload?.unique_code === uniqueStudentId)
+      .delete();
+  } catch (syncErr) {
+    console.warn('Sync queue cleanup notice:', syncErr);
+  }
+}
       }
     }
 
@@ -3389,26 +3419,68 @@ const handleUpdatePersonnel = async (e) => {
             />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold uppercase tracking-wider text-amber-400 mb-1">Date of Birth</label>
-                 <input
-              type="date"
-              value={dob}
-              min="1995-01-01"
-              max={`${currentYear}-12-31`}
-              onChange={(e) => {
-                const selectedDob = e.target.value;
-                setDob(selectedDob);
-                if (selectedDob) {
-                  const birthYear = new Date(selectedDob).getFullYear();
-                  const currentYearNow = new Date().getFullYear();
-                  const calculatedAge = currentYearNow - birthYear;
-                  if (calculatedAge >= 0) setAge(calculatedAge);
-                }
-              }}
-              required
-              className="w-full bg-[#1f2937] border border-amber-500/50 rounded-lg px-4 py-2.5 text-sm text-white"
-            />
-                  </div>
+  <label className="block text-xs font-semibold uppercase tracking-wider text-amber-400 mb-1">
+    Date of Birth
+  </label>
+  <div className="grid grid-cols-3 gap-2">
+    {/* DAY DROPDOWN */}
+    <select
+      value={dob ? dob.split('-')[2] || '' : ''}
+      onChange={(e) => {
+        const day = e.target.value;
+        const [, month = '01', year = '2010'] = (dob || '').split('-');
+        const newDob = `${year}-${month}-${day}`;
+        setDob(newDob);
+        const calculatedAge = new Date().getFullYear() - parseInt(year, 10);
+        if (calculatedAge >= 5 && calculatedAge <= 30) setAge(calculatedAge);
+      }}
+      className="bg-[#1f2937] border border-gray-700 rounded-lg px-2 py-2.5 text-xs text-white focus:border-amber-400 focus:outline-none"
+    >
+      <option value="">Day</option>
+      {DAYS_LIST.map((d) => (
+        <option key={d} value={d}>{d}</option>
+      ))}
+    </select>
+
+    {/* MONTH DROPDOWN */}
+    <select
+      value={dob ? dob.split('-')[1] || '' : ''}
+      onChange={(e) => {
+        const month = e.target.value;
+        const [year = '2010', , day = '01'] = (dob || '').split('-');
+        const newDob = `${year}-${month}-${day}`;
+        setDob(newDob);
+        const calculatedAge = new Date().getFullYear() - parseInt(year, 10);
+        if (calculatedAge >= 5 && calculatedAge <= 30) setAge(calculatedAge);
+      }}
+      className="bg-[#1f2937] border border-gray-700 rounded-lg px-2 py-2.5 text-xs text-white focus:border-amber-400 focus:outline-none"
+    >
+      <option value="">Month</option>
+      {MONTHS_LIST.map((m) => (
+        <option key={m.value} value={m.value}>{m.label}</option>
+      ))}
+    </select>
+
+    {/* YEAR DROPDOWN */}
+    <select
+      value={dob ? dob.split('-')[0] || '' : ''}
+      onChange={(e) => {
+        const year = e.target.value;
+        const [, month = '01', day = '01'] = (dob || '').split('-');
+        const newDob = `${year}-${month}-${day}`;
+        setDob(newDob);
+        const calculatedAge = new Date().getFullYear() - parseInt(year, 10);
+        if (calculatedAge >= 5 && calculatedAge <= 30) setAge(calculatedAge);
+      }}
+      className="bg-[#1f2937] border border-gray-700 rounded-lg px-2 py-2.5 text-xs text-white focus:border-amber-400 focus:outline-none"
+    >
+      <option value="">Year</option>
+      {YEARS_LIST.map((y) => (
+        <option key={y} value={y}>{y}</option>
+      ))}
+    </select>
+  </div>
+</div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -3681,208 +3753,216 @@ const handleUpdatePersonnel = async (e) => {
         ✕
       </button>
     )}
-  </div>
-{/* Export & Print Action Bar */}
-<div className="flex flex-col sm:flex-row gap-3 mb-4 justify-between items-start sm:items-center bg-gray-800/80 p-3 rounded-lg border border-gray-700">
-  <h3 className="text-lg font-bold text-white">Student Directory Actions</h3>
-  
-  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
-    <div className="flex flex-wrap items-center gap-2">
-          {/* Section Selector */}
-          <select
+  {/* International Command & Action Hub */}
+      <div className="bg-[#0f172a] border border-slate-800 p-4 rounded-2xl shadow-2xl mb-6 space-y-4">
+        {/* Top Title & Filter Badge Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+          <div className="flex items-center gap-2">
+            <span className="p-2 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-400 text-sm">
+              📂
+            </span>
+            <div>
+              <h3 className="text-sm sm:text-base font-bold text-white tracking-wide">
+                Student Directory Control Panel
+              </h3>
+              <p className="text-[11px] text-slate-400">
+                Filter catalog or trigger batch print and exports
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="bg-amber-500/20 text-amber-400 border border-amber-500/40 px-3 py-1 rounded-full text-xs font-bold font-mono">
+              Filtered: {studentsList.filter((stu) => {
+                if (printSection !== 'All' && printSection !== 'All Sections') {
+                  const pSec = printSection.toLowerCase();
+                  const sSec = String(stu.section || stu.education_type || stu.educationType || stu.school_type || '').toLowerCase();
+                  const sClass = String(stu.classLevel || stu.class_level || stu.className || stu.class || '').toLowerCase();
+                  let secMatch = sSec === pSec || sSec.includes(pSec) || pSec.includes(sSec);
+                  if (!secMatch) {
+                    if (pSec.includes('commercial') || pSec.includes('stt')) {
+                      secMatch = sSec.includes('commercial') || sSec.includes('stt') || sSec === 'te' || sSec.includes('technical');
+                    } else if (pSec.includes('industrial') || pSec.includes('ind')) {
+                      secMatch = sSec.includes('industrial') || sSec.includes('ind') || sSec === 'te' || sSec.includes('technical');
+                    } else if (pSec.includes('general')) {
+                      secMatch = sSec.includes('general') || sClass.includes('gen');
+                    }
+                  }
+                  if (!secMatch) return false;
+                }
+
+                if (printClass !== 'All' && printClass !== 'All Classes') {
+                  const pClass = printClass.toLowerCase();
+                  const sClass = String(stu.classLevel || stu.class_level || stu.className || stu.class || '').toLowerCase();
+                  const codeInParen = pClass.match(/\(([^)]+)\)/)?.[1] || '';
+                  const classMatch = sClass === pClass || sClass.includes(pClass) || pClass.includes(sClass) || (codeInParen && sClass.includes(codeInParen.toLowerCase()));
+                  if (!classMatch) return false;
+                }
+
+                if (printTrade !== 'All' && printTrade !== 'All Trades / Series' && printTrade !== '') {
+                  const pTrade = printTrade.toLowerCase();
+                  const sTrade = String(stu.trades_series || stu.trade_series || stu.trade || stu.series || stu.specialty || '').toLowerCase();
+                  if (sTrade && !sTrade.includes(pTrade) && !pTrade.includes(sTrade)) return false;
+                }
+
+                if (searchQuery.trim() !== '') {
+                  const q = searchQuery.toLowerCase().trim();
+                  const name = (stu.fullName || stu.fullname || stu.full_name || '').toLowerCase();
+                  const id = (stu.unique_code || stu.id || stu.student_id || '').toLowerCase();
+                  const cls = (stu.classLevel || stu.class_level || '').toLowerCase();
+                  const sec = (stu.section || '').toLowerCase();
+                  const trd = (stu.trades_series || stu.trade_series || stu.trade || stu.series || stu.specialty || '').toLowerCase();
+                  if (!name.includes(q) && !id.includes(q) && !cls.includes(q) && !sec.includes(q) && !trd.includes(q)) return false;
+                }
+
+                return true;
+              }).length}
+            </span>
+          </div>
+        </div>
+
+        {/* Filter Dropdowns Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* Section Filter */}
+          <div className="space-y-1">
+            <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">
+              Section
+            </label>
+            <select
               value={printSection}
               onChange={(e) => {
                 setPrintSection(e.target.value);
                 setPrintClass('All');
                 setPrintTrade('All');
               }}
-              className="bg-gray-800 text-white text-xs px-2 py-1.5 rounded border border-gray-700 focus:outline-none"
+              className="w-full bg-[#1e293b] text-white text-xs px-3 py-2.5 rounded-xl border border-slate-700 focus:border-amber-400 focus:outline-none transition-colors"
             >
-             <option value="All">All Sections</option>
-            <option value="General Education">General Education</option>
-            <option value="Technical Commercial (STT)">Technical Commercial (STT)</option>
-            <option value="Technical Industrial (IND)">Technical Industrial (IND)</option>
-          </select>
+              <option value="All">All Sections</option>
+              <option value="General Education">General Education</option>
+              <option value="Technical Commercial (STT)">Technical Commercial (STT)</option>
+              <option value="Technical Industrial (IND)">Technical Industrial (IND)</option>
+            </select>
+          </div>
 
-          {/* Class Selector */}
-          <select
-            value={printClass}
-            onChange={(e) => setPrintClass(e.target.value)}
-            className="bg-gray-800 text-white text-xs px-2 py-1.5 rounded border border-gray-700 focus:outline-none"
+          {/* Class Filter */}
+          <div className="space-y-1">
+            <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">
+              Class
+            </label>
+            <select
+              value={printClass}
+              onChange={(e) => setPrintClass(e.target.value)}
+              className="w-full bg-[#1e293b] text-white text-xs px-3 py-2.5 rounded-xl border border-slate-700 focus:border-amber-400 focus:outline-none transition-colors"
+            >
+              <option value="All">All Classes</option>
+
+              {printSection === 'General Education' &&
+                GENERAL_CLASSES_CATALOG.map((cls) => (
+                  <option key={cls} value={cls}>{cls}</option>
+                ))}
+
+              {printSection === 'Technical Commercial (STT)' &&
+                TECHNICAL_COMMERCIAL_CATALOG.map((cls) => (
+                  <option key={cls} value={cls}>{cls}</option>
+                ))}
+
+              {printSection === 'Technical Industrial (IND)' &&
+                TECHNICAL_INDUSTRIAL_CATALOG.map((cls) => (
+                  <option key={cls} value={cls}>{cls}</option>
+                ))}
+
+              {printSection === 'All' &&
+                [...GENERAL_CLASSES_CATALOG, ...TECHNICAL_COMMERCIAL_CATALOG, ...TECHNICAL_INDUSTRIAL_CATALOG].map((cls) => (
+                  <option key={cls} value={cls}>{cls}</option>
+                ))}
+            </select>
+          </div>
+
+          {/* Trade / Series Filter */}
+          <div className="space-y-1">
+            <label className="text-[10px] uppercase font-bold tracking-wider text-amber-400 block">
+              Trade / Series
+            </label>
+            <select
+              value={printTrade}
+              onChange={(e) => setPrintTrade(e.target.value)}
+              className="w-full bg-[#1e293b] text-amber-400 border border-slate-700 text-xs px-3 py-2.5 rounded-xl focus:border-amber-400 focus:outline-none transition-colors"
+            >
+              <option value="All">
+                {printSection === 'General Education' ? 'All Series' : 'All Trades / Series'}
+              </option>
+
+              {(printSection === 'General Education' || printSection === 'All') &&
+                (printClass.includes('Arts') || printClass === 'All') &&
+                GENERAL_SERIES_CATALOG.ARTS.map((s) => (
+                  <option key={s} value={s}>Series {s}</option>
+                ))}
+
+              {(printSection === 'General Education' || printSection === 'All') &&
+                (printClass.includes('Science') || printClass === 'All') &&
+                GENERAL_SERIES_CATALOG.SCIENCE.map((s) => (
+                  <option key={s} value={s}>Series {s}</option>
+                ))}
+
+              {(printSection === 'Technical Commercial (STT)' || printSection === 'All') &&
+                COMMERCIAL_TRADE_SERIES.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+
+              {(printSection === 'Technical Industrial (IND)' || printSection === 'All') &&
+                INDUSTRIAL_TRADE_SERIES.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Clean Action Buttons Strip */}
+        <div className="pt-3 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* PRINT LIST */}
+          <button
+            type="button"
+            onClick={handlePrint}
+            className="w-full bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold py-3 px-4 rounded-xl border border-slate-700 flex items-center justify-center gap-2 active:scale-[0.98] transition-all shadow-md"
           >
-            <option value="All">All Classes</option>
-           {/* General Catalog */}
-            {printSection === 'General Education' &&
-              GENERAL_CLASSES_CATALOG.map((cls) => (
-                <option key={cls} value={cls}>
-                  {cls}
-                </option>
-              ))}
+            <span className="text-sm">🖨️</span>
+            <span>Print List</span>
+          </button>
 
-            {/* Technical Commercial Catalog */}
-            {printSection === 'Technical Commercial (STT)' &&
-              TECHNICAL_COMMERCIAL_CATALOG.map((cls) => (
-                <option key={cls} value={cls}>
-                  {cls}
-                </option>
-              ))}
+          {/* EXPORT TO EXCEL WITH EXACT ORIGINAL TOOLTIP */}
+          <div className="relative group w-full">
+            <button
+              type="button"
+              onClick={handleExportExcel}
+              className="w-full bg-emerald-800/90 hover:bg-emerald-700 text-white text-xs font-bold py-3 px-4 rounded-xl border border-emerald-600/80 flex items-center justify-center gap-2 active:scale-[0.98] transition-all shadow-md"
+              title="Export to Excel"
+            >
+              <span className="text-sm">📊</span>
+              <span>Export to Excel</span>
+            </button>
 
-            {/* Technical Industrial Catalog */}
-            {printSection === 'Technical Industrial (IND)' &&
-              TECHNICAL_INDUSTRIAL_CATALOG.map((cls) => (
-                <option key={cls} value={cls}>
-                  {cls}
-                </option>
-              ))}
+            {/* Custom Tooltip */}
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2.5 hidden group-hover:flex group-active:flex flex-col items-center z-50 pointer-events-none w-64">
+              <div className="bg-slate-900 border border-slate-700 text-slate-200 text-[11px] p-2.5 rounded-xl shadow-2xl text-center leading-snug font-normal">
+                Export student list to Excel. Easily re-enroll these students for the next academic year with a single click
+              </div>
+              <div className="w-2.5 h-2.5 bg-slate-900 border-r border-b border-slate-700 rotate-45 -mb-1.5 -mt-1"></div>
+            </div>
+          </div>
 
-            {/* All Sections Selected - Combined List */}
-            {printSection === 'All' &&
-              [
-                ...GENERAL_CLASSES_CATALOG,
-                ...TECHNICAL_COMMERCIAL_CATALOG,
-                ...TECHNICAL_INDUSTRIAL_CATALOG,
-              ].map((cls) => (
-                <option key={cls} value={cls}>
-                  {cls}
-                </option>
-              ))}
-          </select>
-{/* Trade Selector */}
-        <select
-            value={printTrade}
-            onChange={(e) => setPrintTrade(e.target.value)}
-            className="bg-gray-800 text-amber-400 text-xs px-2 py-1.5 rounded border border-gray-700 focus:outline-none"
+          {/* DOWNLOAD PDF */}
+          <button
+            type="button"
+            onClick={() => setShowPdfModal(true)}
+            className="w-full bg-rose-800/90 hover:bg-rose-700 text-white text-xs font-bold py-3 px-4 rounded-xl border border-rose-600/80 flex items-center justify-center gap-2 active:scale-[0.98] transition-all shadow-md"
+            title="Download PDF"
           >
-            <option value="All">
-              {printSection === 'General Education' ? 'All Series' : 'All Trades / Series'}
-            </option>
+            <span className="text-sm">📄</span>
+            <span>Download PDF</span>
+          </button>
+        </div>
+      </div>
 
-            {/* General Arts Series */}
-            {(printSection === 'General Education' || printSection === 'All') &&
-              (printClass.includes('Arts') || printClass === 'All') &&
-              GENERAL_SERIES_CATALOG.ARTS.map((s) => (
-                <option key={s} value={s}>
-                  Series {s}
-                </option>
-              ))}
-
-            {/* General Science Series */}
-            {(printSection === 'General Education' || printSection === 'All') &&
-              (printClass.includes('Science') || printClass === 'All') &&
-              GENERAL_SERIES_CATALOG.SCIENCE.map((s) => (
-                <option key={s} value={s}>
-                  Series {s}
-                </option>
-              ))}
-
-            {/* Technical Commercial Trade Series */}
-            {(printSection === 'Technical Commercial (STT)' || printSection === 'All') &&
-              COMMERCIAL_TRADE_SERIES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-
-              ))}
-
-            {/* Technical Industrial Trade Series */}
-            {(printSection === 'Technical Industrial (IND)' || printSection === 'All') &&
-              INDUSTRIAL_TRADE_SERIES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-          </select>
-          {/* Print Trigger Button */}
-        <button
-  type="button"
-  onClick={handlePrint}
-  className="hidden sm:flex w-full sm:w-auto px-3 py-1.5 bg-gray-700 hover:bg-gray-600 active:scale-95 transition-transform text-white font-medium rounded text-xs items-center justify-center gap-2"
->
-  🖨️ Print List
-</button>
-  <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 w-full my-3">
-    <span className="w-full sm:w-auto px-2.5 py-1.5 bg-amber-500/10 border border-amber-500/30 rounded text-amber-400 font-semibold text-xs text-center sm:text-left">
-    Filtered: {studentsList.filter((stu) => {
-      // 1. Flexible Section Filter (STT = Commercial, IND = Industrial, TE = Technical)
-      if (printSection !== 'All' && printSection !== 'All Sections') {
-        const pSec = printSection.toLowerCase();
-        const sSec = String(stu.section || stu.education_type || stu.educationType || stu.school_type || '').toLowerCase();
-        const sClass = String(stu.classLevel || stu.class_level || stu.className || stu.class || '').toLowerCase();
-        
-        let secMatch = sSec === pSec || sSec.includes(pSec) || pSec.includes(sSec);
-        if (!secMatch) {
-          if (pSec.includes('commercial') || pSec.includes('stt')) {
-            secMatch = sSec.includes('commercial') || sSec.includes('stt') || sSec === 'te' || sSec.includes('technical') || sClass.includes('com') || sClass.includes('stt');
-          } else if (pSec.includes('industrial') || pSec.includes('ind')) {
-            secMatch = sSec.includes('industrial') || sSec.includes('ind') || sSec === 'te' || sSec.includes('technical') || sClass.includes('ind');
-          } else if (pSec.includes('general')) {
-            secMatch = sSec.includes('general') || sClass.includes('gen');
-          }
-        }
-        if (!secMatch) return false;
-      }
-
-      // 2. Flexible Class Filter (Extracts short codes like 'Y1Com' or 'Y1Ind')
-      if (printClass !== 'All' && printClass !== 'All Classes') {
-        const pClass = printClass.toLowerCase();
-        const sClass = String(stu.classLevel || stu.class_level || stu.className || stu.class || '').toLowerCase();
-        const codeInParen = pClass.match(/\(([^)]+)\)/)?.[1] || '';
-        const classMatch = sClass === pClass || sClass.includes(pClass) || pClass.includes(sClass) || (codeInParen !== '' && sClass.includes(codeInParen.toLowerCase()));
-        if (!classMatch) return false;
-      }
-     if (printTrade !== 'All' && printTrade !== 'All Trades / Series' && printTrade !== '') {
-        const pTrade = printTrade.toLowerCase();
-        const sTrade = String(stu.trades_series || stu.trade_series || stu.trade || stu.series || stu.specialty || '').toLowerCase();
-        if (sTrade && !sTrade.includes(pTrade) && !pTrade.includes(sTrade)) return false;
-      }
-      if (searchQuery.trim() !== '') {
-        const q = searchQuery.toLowerCase().trim();
-        const name = (stu.fullName || stu.fullname || stu.full_name || '').toLowerCase();
-        const id = (stu.unique_code || stu.id || stu.student_id || '').toLowerCase();
-        const cls = (stu.classLevel || stu.class_level || '').toLowerCase();
-        const sec = (stu.section || '').toLowerCase();
-        const trd = (stu.trades_series || stu.trade_series || stu.trade || stu.series || stu.specialty || '').toLowerCase();
-        if (!name.includes(q) && !id.includes(q) && !cls.includes(q) && !sec.includes(q) && !trd.includes(q)) return false;
-      }
-      return true;
-    }).length
-  }
-</span>
-</div>
-</div>
-
-<div className="relative group flex-1 sm:flex-initial">
- <button
-  type="button"
-  onClick={handleExportExcel}
-  className="w-full sm:w-auto px-2 sm:px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 active:scale-95 transition-transform text-white text-xs font-bold rounded-lg shadow flex items-center justify-center gap-1 shrink-0"
-  title="Export to Excel"
->
-  <span className="text-sm">📊</span>
-  <span className="hidden sm:inline">Export to Excel</span>
-  <span className="inline sm:hidden">Excel</span>
-</button>
-  
-  {/* Pop-up Tooltip */}
-  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:flex group-active:flex flex-col items-center w-64 p-2.5 bg-[#0f172a] text-white text-[11px] rounded-md shadow-2xl border border-gray-700 pointer-events-none z-50 text-center leading-tight">
-    Export student list to Excel. Easily re-enroll these students for the next academic year with a single click.
-    <div className="w-2 h-2 bg-[#0f172a] border-r border-b border-gray-700 rotate-45 -mb-3 mt-1"></div>
-  </div>
-</div>
-{/* PDF Export Button */}
-  <div className="relative group flex-1 sm:flex-initial">
-    <button
-      type="button"
-      onClick={() => setShowPdfModal(true)}
-      className="w-full sm:w-auto px-2 sm:px-3 py-1.5 bg-rose-700 hover:bg-rose-600 active:scale-95 transition-transform text-white text-xs font-bold rounded-lg shadow flex items-center justify-center gap-1"
-      title="Download PDF"
-    >
-      <span className="text-sm">📄</span>
-      <span className="hidden sm:inline">Download PDF</span>
-      <span className="inline sm:hidden">PDF</span>
-    </button>
-  </div>
-</div>
   {/* PDF Export Modal */}
 {showPdfModal && (
   <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -3946,22 +4026,23 @@ const handleUpdatePersonnel = async (e) => {
                 No students registered yet. Use the "Register New Member" tab to add students.
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs text-gray-300">
-                  <thead className="bg-[#1f2937] text-gray-400 uppercase font-semibold">
-                    <tr>
-                      <th className="p-3">ID</th>
-                      <th className="p-3">Photo</th>
-                      <th className="p-3">Full Name</th>
-                      <th className="p-3">Section / Class</th>
-                      <th className="p-3">Trade / Series</th>
-                      <th className="p-3">Gender / Age</th>
-<th className="p-3">Guardian Contact</th>
-<th className="p-3">Residence</th>
-<th className="p-3">Reg. Date / Time</th>
-</tr>
-</thead>
-  <tbody className="divide-y divide-gray-800">
+              <div className="w-full overflow-x-auto rounded-xl border border-gray-800 bg-[#0f172a] shadow-lg">
+        <table className="w-full text-left border-collapse min-w-[700px]">
+          <thead className="bg-[#1e293b] text-gray-400 uppercase text-[10px] tracking-wider font-bold">
+            <tr>
+              <th className="py-2.5 px-3">ID</th>
+              <th className="py-2.5 px-2">Photo</th>
+              <th className="py-2.5 px-3">Full Name</th>
+              <th className="py-2.5 px-3">Section / Class</th>
+              <th className="py-2.5 px-2">Trade / Series</th>
+              <th className="py-2.5 px-2">Gender / Age</th>
+              <th className="py-2.5 px-2 hidden md:table-cell">Guardian Contact</th>
+              <th className="py-2.5 px-2 hidden lg:table-cell">Residence</th>
+              <th className="py-2.5 px-2 hidden lg:table-cell">Reg. Date / Time</th>
+                  </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-800">
+                    
  
     
           {studentsList
@@ -3978,12 +4059,12 @@ const handleUpdatePersonnel = async (e) => {
 }
                     // Smart Search (First letters, Name, ID, Class, Section, Trade)
                     if (searchQuery.trim() !== '') {
-  const q = searchQuery.toLowerCase().trim();
-  const name = (stu.fullName || stu.fullname || stu.full_name || '').toLowerCase();
-  const id = (stu.unique_code || stu.id || stu.student_id || '').toLowerCase();
-  const cls = (stu.classLevel || stu.class_level || '').toLowerCase();
-  const sec = (stu.section || '').toLowerCase();
-  const trd = (stu.trades_series || stu.trade_series || stu.trade || stu.series || stu.specialty || '').toLowerCase();
+                      const q = searchQuery.toLowerCase().trim();
+                      const name = (stu.fullName || stu.fullname || stu.full_name || '').toLowerCase();
+                      const id = (stu.unique_code || stu.id || stu.student_id || '').toLowerCase();
+                      const cls = (stu.classLevel || stu.class_level || '').toLowerCase();
+                      const sec = (stu.section || '').toLowerCase();
+                      const trd = (stu.trades_series || stu.trade_series || stu.trade || stu.series || stu.specialty || '').toLowerCase();
                       const nameMatch = name.includes(q) || name.startsWith(q);
                       const idMatch = id.includes(q);
                       const classMatch = cls.includes(q);
@@ -4003,7 +4084,9 @@ const handleUpdatePersonnel = async (e) => {
                 onClick={() => handleRowClick(stu)}
                 className="hover:bg-gray-800/60 cursor-pointer transition"
               >
-<td className="p-3 font-mono text-[10px] sm:text-sm text-amber-100 font-bold whitespace-nowrap">{stu.unique_code || stu.id}</td>
+                <td className="py-2 px-3 font-mono text-[10px] font-bold text-amber-100 whitespace-nowrap">
+  {stu.unique_code || stu.id}
+</td>
 <td className="p-3"> 
   {stu.picture ? (
     <img src={stu.picture} alt="" className="w-12 h-12 rounded-lg object-cover border border-amber-500/50 shadow-sm" />
@@ -4011,7 +4094,9 @@ const handleUpdatePersonnel = async (e) => {
     <div className="w-12 h-12 rounded-lg bg-gray-700 flex items-center justify-center text-[10px] text-gray-400">No Photo</div>
   )}
 </td>
-<td className="p-3 font-semibold text-[11px] sm:text-base text-amber-100 whitespace-nowrap">{stu.fullName}</td>
+<td className="py-2.5 px-3 font-semibold text-amber-100 text-[10.5px] sm:text-xs md:text-sm whitespace-nowrap">
+  {stu.fullName || stu.fullname || stu.full_name}
+</td>
              <td className="p-3">
   <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2">
   <span className="text-[11px] bg-blue-900/40 text-blue-300 px-1.5 py-0.5 rounded border border-blue-700/40">
@@ -4597,7 +4682,7 @@ const handleUpdatePersonnel = async (e) => {
                   return (
                     <button
                       type="button"
-                      onClick={() => handleOpenBulkReportCards('commercial', 'First Year Commercial (Y1Com)', printTrade || 'ALL', printTerm || 'Term 1')}
+                      onClick={() => handleOpenBulkReportCards('commercial', 'First Year Commercial (Y1Com)', 'Term 1')}
                       className="w-full sm:w-auto px-4 py-2 bg-[#1b4332] hover:bg-[#2d6a4f] text-amber-300 font-bold text-xs rounded-xl shadow-md transition active:scale-95 flex items-center justify-center gap-2 border border-emerald-600/50"
                     >
                       <span>🖨️</span> Technical Commercial Report Cards Preview & Bulk Printing
@@ -4609,7 +4694,7 @@ const handleUpdatePersonnel = async (e) => {
                   return (
                     <button
                       type="button"
-                      onClick={() => handleOpenBulkReportCards('industrial', 'First Year Industrial (Y1Ind)', printTrade || 'ALL', printTerm || 'Term 1')}
+                    onClick={() => handleOpenBulkReportCards('industrial', 'First Year Industrial (Y1Ind)', 'ALL', 'Term 1')}
                       className="w-full sm:w-auto px-4 py-2 bg-orange-900/90 hover:bg-orange-800 text-amber-300 font-bold text-xs rounded-xl shadow-md transition active:scale-95 flex items-center justify-center gap-2 border border-orange-600/50"
                     >
                       <span>⚙️</span> Technical Industrial Report Cards Preview & Bulk Printing
@@ -5544,13 +5629,13 @@ return (
       )}
      
       {showWelcomeOverlay && (
-  <div className="fixed inset-0 z-50 bg-black bg-opacity-80 flex items-center justify-center p-4">
-    <div className="bg-gray-900 border border-gray-700 rounded-xl max-w-2xl w-full p-6 sm:p-8 text-white shadow-2xl relative">
+       <div className="fixed inset-0 z-50 bg-black bg-opacity-70 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+     <div className="bg-gray-900 border border-gray-700 rounded-xl max-w-2xl w-full p-4 sm:p-6 md:p-8 text-white shadow-2xl my-auto">      
       <div className="text-center mb-6">
         <div className="mx-auto w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mb-4 text-2xl font-bold">
           🎓
         </div>
-        <h2 className="text-2xl font-extrabold text-blue-400">
+          <h2 className="text-lg sm:text-xl md:text-2xl font-extrabold text-blue-400">
           Welcome to ClassLogs, thank you for trusting us!
         </h2>
         <p className="text-gray-300 text-sm font-semibold mt-2">

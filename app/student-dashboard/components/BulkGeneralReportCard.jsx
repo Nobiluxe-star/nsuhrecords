@@ -50,6 +50,72 @@ function normalizeClass(cls) {
   return cls.toLowerCase().replace(/\(.*?\)/g, '').trim();
 }
 
+// ==============================================================================
+// INDEXEDDB HELPERS FOR OFFLINE CACHING
+// ==============================================================================
+const openReportsDB = () => {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined' || !('indexedDB' in window)) {
+      resolve(null);
+      return;
+    }
+    const request = window.indexedDB.open('ClassLogsBulkReportsDB', 1);
+    request.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains('bulk_reports')) {
+        db.createObjectStore('bulk_reports');
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => resolve(null);
+  });
+};
+
+const getIDBCache = async (key) => {
+  try {
+    const db = await openReportsDB();
+    if (!db) return null;
+    return new Promise((resolve) => {
+      const tx = db.transaction('bulk_reports', 'readonly');
+      const store = tx.objectStore('bulk_reports');
+      const request = store.get(key);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => resolve(null);
+    });
+  } catch (e) {
+    return null;
+  }
+};
+
+const setIDBCache = async (key, val) => {
+  try {
+    const db = await openReportsDB();
+    if (!db) return;
+    const tx = db.transaction('bulk_reports', 'readwrite');
+    const store = tx.objectStore('bulk_reports');
+    store.put(val, key);
+  } catch (e) {
+    // Silent catch
+  }
+};
+
+// Image to Base64 converter for CORS-safe Vector PDF Logo Support
+const getBase64ImageFromUrl = async (imageUrl) => {
+  if (!imageUrl) return null;
+  try {
+    const res = await fetch(imageUrl, { mode: 'cors' });
+    const blob = await res.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch (e) {
+    return null;
+  }
+};
+
 export default function BulkGeneralReportCard({
   isOpen,
   onClose,
@@ -114,7 +180,7 @@ export default function BulkGeneralReportCard({
   }, [selectedClass]);
 
   // ==============================================================================
-  // HIGH-SPEED MASTER QUERY ENGINE (WITH LOCAL STORAGE CACHING)
+  // HIGH-SPEED MASTER QUERY ENGINE (WITH LOCAL STORAGE & INDEXEDDB CACHING)
   // ==============================================================================
   const fetchAndCalculateBulkData = useCallback(async () => {
     if (!isOpen || !selectedClass) return;
@@ -122,10 +188,13 @@ export default function BulkGeneralReportCard({
     const cacheKey = `bg_cache_${effectiveSchoolId}_${normalizeClass(selectedClass)}_${selectedTerm}_${selectedSeries}`;
 
     if (typeof window !== 'undefined') {
-      const cachedData = localStorage.getItem(cacheKey);
+      let cachedData = localStorage.getItem(cacheKey);
+      if (!cachedData) {
+        cachedData = await getIDBCache(cacheKey);
+      }
       if (cachedData) {
         try {
-          const parsed = JSON.parse(cachedData);
+          const parsed = typeof cachedData === 'string' ? JSON.parse(cachedData) : cachedData;
           setSchoolData(parsed.schoolData || {});
           setStudentsList(parsed.studentsList || []);
           setSubjectsList(parsed.subjectsList || []);
@@ -195,17 +264,47 @@ export default function BulkGeneralReportCard({
       });
 
       const teachersData = teachersRes.data || [];
+
+      // STRICT TEACHER-CLASS & SERIES MAPPING
       const getTeacherForSubject = (subjectName) => {
-        if (!subjectName) return 'N/A';
+        if (!subjectName) return '—';
         const cleanSub = subjectName.toLowerCase().trim();
+        const cleanSeries = selectedSeries && selectedSeries !== 'ALL' && selectedSeries !== 'N/A' ? selectedSeries.toLowerCase().trim() : null;
+
         const match = teachersData.find((t) => {
-          const rawSubs = t.subjects || t.subject || [];
-          if (Array.isArray(rawSubs)) {
-            return rawSubs.some((s) => typeof s === 'string' && s.toLowerCase().trim() === cleanSub);
+          const tClass = normalizeClass(t.classLevel || t.class_level || t.class_name || t.class || '');
+          const matchesClass = !tClass || tClass === targetClassClean || tClass.includes(targetClassClean) || targetClassClean.includes(tClass);
+
+          if (!matchesClass) return false;
+
+          const assignments = t.assignments || t.class_assignments || t.assigned_classes || [];
+
+          if (Array.isArray(assignments) && assignments.length > 0) {
+            return assignments.some((item) => {
+              const itemSub = String(item.subject || item.subject_name || '').toLowerCase().trim();
+              const itemClass = normalizeClass(item.class || item.class_level || item.classLevel || '');
+              const itemSeries = String(item.series || item.trades_series || item.option || '').toLowerCase().trim();
+
+              const subMatch = itemSub === cleanSub;
+              const classMatch = !itemClass || itemClass === targetClassClean || itemClass.includes(targetClassClean);
+              const seriesMatch = !cleanSeries || !itemSeries || itemSeries === cleanSeries;
+
+              return subMatch && classMatch && seriesMatch;
+            });
           }
-          return typeof rawSubs === 'string' && rawSubs.toLowerCase().trim() === cleanSub;
+
+          const rawSubs = t.subjects || t.subject || [];
+          let subMatch = false;
+          if (Array.isArray(rawSubs)) {
+            subMatch = rawSubs.some((s) => typeof s === 'string' && s.toLowerCase().trim() === cleanSub);
+          } else if (typeof rawSubs === 'string') {
+            subMatch = rawSubs.toLowerCase().trim() === cleanSub;
+          }
+
+          return subMatch;
         });
-        return match ? (match.name || match.fullName || match.full_name || 'N/A') : 'N/A';
+
+        return match ? (match.name || match.fullName || match.full_name || '—') : '—';
       };
 
       if (matchedCoeffRow) {
@@ -245,11 +344,15 @@ export default function BulkGeneralReportCard({
       let remQuery = supabase.from('principal_notices').select('*').in('student_id', studentIds);
       if (effectiveSchoolId) remQuery = remQuery.eq('school_id', effectiveSchoolId);
 
-      const [marksRes, feesRes, discRes, remRes] = await Promise.all([
+      let attQuery = supabase.from('attendance').select('*').in('student_id', studentIds);
+      if (effectiveSchoolId) attQuery = attQuery.eq('school_id', effectiveSchoolId);
+
+      const [marksRes, feesRes, discRes, remRes, attRes] = await Promise.all([
         marksQuery,
         feesQuery,
         discQuery,
-        remQuery
+        remQuery,
+        attQuery
       ]);
 
       const classMarksList = (marksRes.data || []).filter((m) => {
@@ -296,9 +399,31 @@ export default function BulkGeneralReportCard({
           studentAverages.push({ studentId: sId, avg: termAvg });
         }
 
-        const feeRec = (feesRes.data || []).find((f) => String(f.student_id) === String(sId));
-        const discRec = (discRes.data || []).find((d) => String(d.student_id) === String(sId));
-        const remRec = (remRes.data || []).find((r) => String(r.student_id) === String(sId));
+        const feeRec = (feesRes.data || []).find((f) => String(f.student_id) === String(sId) || (sCode && f.unique_code === sCode));
+        const discRec = (discRes.data || []).find((d) => String(d.student_id) === String(sId) || (sCode && d.unique_code === sCode));
+        const remRec = (remRes.data || []).find((r) => String(r.student_id) === String(sId) || (sCode && r.unique_code === sCode));
+
+        // LIVE ATTENDANCE PARSING (UNJUSTIFIED ABSENCES & TARDINESS)
+        let liveAbsences = 0;
+        let liveTardiness = 0;
+
+        const studentAttLogs = (attRes.data || []).filter((a) => 
+          (sId && String(a.student_id) === String(sId)) || 
+          (sCode && (a.unique_code === sCode || a.code === sCode))
+        );
+
+        studentAttLogs.forEach((rec) => {
+          const st = String(rec.status || '').toLowerCase().trim();
+          if (st === 'absent' || st === 'unjustified') liveAbsences += 1;
+          if (st === 'late' || st === 'tardy' || st === 'tardiness') liveTardiness += 1;
+        });
+
+        const mergedDiscipline = {
+          absences: liveAbsences > 0 ? liveAbsences : (discRec?.absences ?? 0),
+          latecomings: liveTardiness > 0 ? liveTardiness : (discRec?.latecomings || discRec?.tardiness || 0),
+          remarks: discRec?.remarks || null,
+          punishments: discRec?.punishments || null
+        };
 
         studentMap[sId] = {
           marksMap: scoreMap,
@@ -307,7 +432,7 @@ export default function BulkGeneralReportCard({
           termAverage: termAvg !== null ? termAvg.toFixed(2) : null,
           termStatus: termAvg !== null ? (termAvg >= 10 ? 'Passed' : 'Failed') : null,
           feesRecord: feeRec || null,
-          disciplineRecord: discRec || null,
+          disciplineRecord: mergedDiscipline,
           adminRemarks: remRec || null
         };
       });
@@ -351,16 +476,15 @@ export default function BulkGeneralReportCard({
       setProcessedDataMap(studentMap);
 
       if (typeof window !== 'undefined') {
-        localStorage.setItem(
-          cacheKey,
-          JSON.stringify({
-            schoolData: fetchedSchoolData,
-            studentsList: filteredStudents,
-            subjectsList: loadedSubjects,
-            processedDataMap: studentMap,
-            classAverage: calculatedAvg
-          })
-        );
+        const payload = {
+          schoolData: fetchedSchoolData,
+          studentsList: filteredStudents,
+          subjectsList: loadedSubjects,
+          processedDataMap: studentMap,
+          classAverage: calculatedAvg
+        };
+        localStorage.setItem(cacheKey, JSON.stringify(payload));
+        setIDBCache(cacheKey, payload);
       }
 
     } catch (err) {
@@ -375,7 +499,7 @@ export default function BulkGeneralReportCard({
   }, [fetchAndCalculateBulkData]);
 
   // ==============================================================================
-  // DIRECT VECTOR PDF ENGINE (INTERNATIONAL SPECIFICATIONS)
+  // DIRECT VECTOR PDF ENGINE (WITH LOGO & BASE64 SUPPORT)
   // ==============================================================================
   const handleDownloadBulkPDF = async () => {
     if (studentsList.length === 0) return;
@@ -392,6 +516,9 @@ export default function BulkGeneralReportCard({
         unit: 'mm',
         format: 'a4'
       });
+
+      const logoUrl = schoolData.logo_url || schoolData.logo || schoolData.school_logo || schoolData.badge_url || schoolData.image_url || schoolInfo?.logo_url || schoolInfo?.logo || null;
+      const base64Logo = logoUrl ? await getBase64ImageFromUrl(logoUrl) : null;
 
       const schoolTitle = (schoolData.name || schoolData.institution_name || schoolInfo?.name || 'COLLEGE NAME').toUpperCase();
       const regionText = schoolData.region ? `REGIONAL DELEGATION FOR SECONDARY EDUCATION FOR THE ${schoolData.region.toUpperCase()}` : 'REGIONAL DELEGATION FOR SECONDARY EDUCATION';
@@ -417,10 +544,18 @@ export default function BulkGeneralReportCard({
         const displayPaid = paidAmount > 0 ? `${paidAmount.toLocaleString()} FCFA` : '—';
         const displayBalance = paidAmount > 0 ? `${balanceAmount.toLocaleString()} FCFA` : '—';
 
-        // 1. Header Box
+        // Header Box
         pdf.setDrawColor(203, 213, 225);
         pdf.setFillColor(248, 250, 252);
         pdf.roundedRect(10, 8, 190, 26, 3, 3, 'FD');
+
+        if (base64Logo) {
+          try {
+            pdf.addImage(base64Logo, 'PNG', 13, 10, 20, 22);
+          } catch (imgErr) {
+            console.warn('Could not embed logo image into PDF:', imgErr);
+          }
+        }
 
         pdf.setFont('helvetica', 'bold');
         pdf.setFontSize(14);
@@ -451,7 +586,7 @@ export default function BulkGeneralReportCard({
           pdf.text(mottoText, 105, 40, { align: 'center' });
         }
 
-        // 2. Report Card Title
+        // Report Card Title
         const titleY = mottoText ? 44 : 36;
         pdf.setFillColor(219, 234, 254);
         pdf.roundedRect(10, titleY, 190, 7, 2, 2, 'F');
@@ -461,7 +596,7 @@ export default function BulkGeneralReportCard({
         const termTitle = `ACADEMIC PERFORMANCE RECORD — ${getOrdinalTermWord(selectedTerm.replace(/[^0-9]/g, '') || 1).toUpperCase()}`;
         pdf.text(termTitle, 105, titleY + 5, { align: 'center' });
 
-        // 3. Student Details Table
+        // Student Details Table
         const studentInfoY = titleY + 9;
         autoTable(pdf, {
           startY: studentInfoY,
@@ -486,7 +621,7 @@ export default function BulkGeneralReportCard({
           tableLineWidth: 0.2
         });
 
-        // 4. Academic Marks Table
+        // Academic Marks Table
         const tableData = subjectsList.map((sub) => {
           const subKey = sub.subject_name.toLowerCase().trim();
           const score = marksMap[subKey];
@@ -506,7 +641,7 @@ export default function BulkGeneralReportCard({
             isScoreValid ? `${totalScoreVal} / ${maxPossible}` : '—',
             calculatedGrade,
             rawRank ? getOrdinalSuffix(rawRank) : '—',
-            sub.instructor || 'N/A'
+            sub.instructor || '—'
           ];
         });
 
@@ -532,16 +667,16 @@ export default function BulkGeneralReportCard({
               const rawScore = data.row.cells[2].raw;
               if (typeof rawScore === 'number') {
                 if (rawScore >= 10) {
-                  data.cell.styles.textColor = [29, 78, 216]; // Blue Pass
+                  data.cell.styles.textColor = [29, 78, 216];
                 } else {
-                  data.cell.styles.textColor = [220, 38, 38]; // Red Fail
+                  data.cell.styles.textColor = [220, 38, 38];
                 }
               }
             }
           }
         });
 
-        // 5. Summary Stats Bar
+        // Summary Stats Bar
         const summaryY = pdf.lastAutoTable.finalY + 3;
         pdf.setFillColor(30, 58, 138);
         pdf.roundedRect(10, summaryY, 190, 9, 2, 2, 'F');
@@ -575,7 +710,7 @@ export default function BulkGeneralReportCard({
 
         pdf.text(stData.termStatus || '—', 177, summaryY + 7.2, { align: 'center' });
 
-        // 6. Discipline & Remarks Section
+        // Discipline & Remarks Section
         const discY = summaryY + 11;
         autoTable(pdf, {
           startY: discY,
@@ -583,7 +718,7 @@ export default function BulkGeneralReportCard({
           body: [
             [
               {
-                content: `DISCIPLINE & CONDUCT\nUnjustified Absences: ${stData.disciplineRecord?.absences ?? 0} hrs\nTardiness: ${stData.disciplineRecord?.latecomings || stData.disciplineRecord?.tardiness || 0} times\nRemark: ${stData.disciplineRecord?.remarks ? `"${stData.disciplineRecord.remarks}"` : ''}`,
+                content: `DISCIPLINE & CONDUCT\nUnjustified Absences: ${stData.disciplineRecord?.absences ?? 0} times\nTardiness: ${stData.disciplineRecord?.latecomings || stData.disciplineRecord?.tardiness || 0} times\nRemark: ${stData.disciplineRecord?.remarks ? `"${stData.disciplineRecord.remarks}"` : ''}`,
                 styles: { cellWidth: 93 }
               },
               {
@@ -598,7 +733,7 @@ export default function BulkGeneralReportCard({
           tableLineWidth: 0.2
         });
 
-        // 7. Signatures Block
+        // Signatures Block
         const sigY = pdf.lastAutoTable.finalY + 10;
         pdf.setFont('helvetica', 'bold');
         pdf.setFontSize(8);
@@ -650,18 +785,17 @@ export default function BulkGeneralReportCard({
     const displayPaid = paidAmount > 0 ? `${paidAmount.toLocaleString()} FCFA` : '—';
     const displayBalance = paidAmount > 0 ? `${balanceAmount.toLocaleString()} FCFA` : '—';
 
-    // FORCED IMAGE SOURCE RESOLUTION WITH GUARANTEED FALLBACKS
     const logoSrc = schoolData.logo_url || schoolData.logo || schoolData.school_logo || schoolData.badge_url || schoolData.image_url || schoolInfo?.logo_url || schoolInfo?.logo || null;
     const photoSrc = student.picture || student.photo_url || student.passport_photo || student.image || null;
 
     return (
       <div
         key={sId || index}
-        className="bulk-student-card-render print-page-card bg-white text-slate-800 p-5 rounded-3xl shadow-2xl border border-slate-300 max-w-4xl w-full mx-auto space-y-2.5"
+        className="bulk-student-card-render print-page-card bg-white text-slate-800 p-3 sm:p-5 rounded-3xl shadow-2xl border border-slate-300 max-w-4xl w-full mx-auto space-y-2.5"
       >
-        {/* HEADER SECTION WITH FORCED SCHOOL LOGO CONTAINER */}
-        <div className="border border-slate-300 bg-blue-50/20 rounded-2xl p-2.5 shadow-sm flex flex-row items-center gap-4">
-          <div className="w-20 h-20 sm:w-24 sm:h-24 border-2 border-blue-900/20 rounded-xl bg-white flex items-center justify-center shrink-0 overflow-hidden p-1 shadow-inner">
+        {/* HEADER SECTION WITH FRAMED SCHOOL LOGO */}
+        <div className="border border-slate-300 bg-blue-50/20 rounded-2xl p-2.5 shadow-sm flex flex-col sm:flex-row items-center gap-3 sm:gap-4">
+          <div className="w-20 h-20 sm:w-24 sm:h-24 border-2 border-blue-900/20 rounded-xl bg-white flex items-center justify-center shrink-0 overflow-hidden p-1 shadow-md">
             {logoSrc ? (
               <img
                 src={logoSrc}
@@ -669,22 +803,23 @@ export default function BulkGeneralReportCard({
                 className="w-full h-full object-contain"
                 onError={(e) => {
                   e.currentTarget.style.display = 'none';
-                  if (e.currentTarget.nextSibling) e.currentTarget.nextSibling.style.display = 'flex';
+                  const fallback = e.currentTarget.nextSibling;
+                  if (fallback) fallback.style.display = 'flex';
                 }}
               />
             ) : null}
-            <div className={`flex-col items-center justify-center text-blue-900 p-1 text-center ${logoSrc ? 'hidden' : 'flex'}`}>
-              <svg className="w-8 h-8 text-blue-800 mb-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className={`flex flex-col items-center justify-center text-blue-900 text-center ${logoSrc ? 'hidden' : 'flex'}`}>
+              <svg className="w-9 h-9 text-blue-800 mb-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 14l9-5-9-5-9 5 9 5z" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0112 20.055a11.952 11.952 0 01-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" />
               </svg>
-              <span className="text-[8px] font-black uppercase tracking-tighter">SCHOOL LOGO</span>
+              <span className="text-[8px] font-black uppercase tracking-tighter text-blue-900">SCHOOL LOGO</span>
             </div>
           </div>
 
-          <div className="flex-1 border border-slate-300 rounded-xl bg-white divide-y divide-slate-200 text-center">
+          <div className="flex-1 w-full border border-slate-300 rounded-xl bg-white divide-y divide-slate-200 text-center">
             <div className="p-1">
-              <h1 className="text-base sm:text-xl font-black text-blue-800 uppercase tracking-tight">
+              <h1 className="text-base sm:text-xl font-black text-blue-800 uppercase tracking-tight break-words">
                 {schoolData.name || schoolData.institution_name || schoolInfo?.name || 'COLLEGE NAME'}
               </h1>
               <p className="text-[10px] sm:text-xs font-semibold text-blue-600">
@@ -692,13 +827,12 @@ export default function BulkGeneralReportCard({
               </p>
             </div>
             <div className="p-0.5 bg-blue-50/50">
-              <p className="text-[10px] sm:text-xs font-black text-blue-900 uppercase tracking-tight whitespace-nowrap">
+              <p className="text-[9px] sm:text-xs font-black text-blue-900 uppercase tracking-tight">
                 REGIONAL DELEGATION FOR SECONDARY EDUCATION
                 {schoolData.region && ` FOR THE ${schoolData.region.toUpperCase()}`}
               </p>
             </div>
-            {/* INCREASED INTERNATIONAL STANDARD TEXT SIZE FOR ADDRESS */}
-            <div className="p-1 flex justify-center items-center gap-x-4 text-xs sm:text-sm font-bold text-blue-950 flex-wrap whitespace-nowrap">
+            <div className="p-1 flex justify-center items-center gap-x-2 sm:gap-x-4 text-[10px] sm:text-sm font-bold text-blue-950 flex-wrap">
               <span>Tel: {schoolData.contact_line || schoolData.phone || schoolInfo?.phone || '—'}</span>
               <span>Email: {schoolData.official_email || schoolData.email || schoolInfo?.email || '—'}</span>
               {(schoolData.address_location || schoolInfo?.address) && (
@@ -708,7 +842,7 @@ export default function BulkGeneralReportCard({
           </div>
         </div>
 
-        {/* MOTTO BANNER WITH MATCHED ACADEMIC PERFORMANCE RECORD STYLE */}
+        {/* MOTTO BANNER */}
         {(schoolData.motto || schoolInfo?.motto) && (
           <div className="p-1.5 bg-blue-100/50 border border-blue-200 rounded-xl text-center shadow-sm">
             <p className="text-xs sm:text-sm font-serif italic font-extrabold text-blue-950 tracking-wide">
@@ -723,8 +857,8 @@ export default function BulkGeneralReportCard({
           </h2>
         </div>
 
-        {/* STUDENT INFO BOX WITH FORCED PHOTO CONTAINER */}
-        <div className="flex flex-row gap-4 items-center bg-slate-50 p-2 rounded-xl border border-slate-200">
+        {/* STUDENT INFO BOX */}
+        <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 items-center bg-slate-50 p-2 sm:p-3 rounded-xl border border-slate-200">
           <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl bg-slate-200 border border-slate-300 flex items-center justify-center shrink-0 overflow-hidden shadow-inner">
             {photoSrc ? (
               <img
@@ -742,20 +876,20 @@ export default function BulkGeneralReportCard({
               <span className="text-[7px] font-medium uppercase">No Photo</span>
             </div>
           </div>
-          <div className="flex-1 grid grid-cols-2 sm:grid-cols-4 gap-y-1 gap-x-3 text-[10px]">
+          <div className="flex-1 w-full grid grid-cols-2 sm:grid-cols-4 gap-y-1 gap-x-3 text-[10px]">
             <div><span className="text-slate-400 block text-[8px] uppercase font-bold">Student Name</span><strong className="text-slate-900 block truncate">{sName}</strong></div>
             <div><span className="text-slate-400 block text-[8px] uppercase font-bold">Class</span><strong className="text-slate-900 block">{selectedClass}</strong></div>
             <div><span className="text-slate-400 block text-[8px] uppercase font-bold">Section</span><strong className="text-slate-900 block">General Education</strong></div>
-            <div><span className="text-slate-400 block text-[8px] uppercase font-bold">Series / Option</span><strong className="text-slate-900 block">{student.trades_series || student.series || 'N/A'}</strong></div>
+            <div><span className="text-slate-400 block text-[8px] uppercase font-bold">Series / Option</span><strong className="text-slate-900 block">{student.trades_series || student.series || '—'}</strong></div>
             <div className="pt-0.5 border-t border-slate-200"><span className="text-slate-400 block text-[8px] uppercase font-bold">Matricule</span><strong className="text-blue-800 font-mono block">{sMatricule}</strong></div>
             <div className="pt-0.5 border-t border-slate-200"><span className="text-slate-400 block text-[8px] uppercase font-bold">Enrolment</span><strong className="text-slate-900 block">{studentsList.length} Students</strong></div>
-            <div className="pt-0.5 border-t border-slate-200 text-right"><span className="text-slate-400 block text-[8px] uppercase font-bold">Fees Paid</span><strong className="text-emerald-700 block">{displayPaid}</strong></div>
-            <div className="pt-0.5 border-t border-slate-200 text-right"><span className="text-slate-400 block text-[8px] uppercase font-bold">Fee Balance</span><strong className="text-red-600 block">{displayBalance}</strong></div>
+            <div className="pt-0.5 border-t border-slate-200 text-left sm:text-right"><span className="text-slate-400 block text-[8px] uppercase font-bold">Fees Paid</span><strong className="text-emerald-700 block">{displayPaid}</strong></div>
+            <div className="pt-0.5 border-t border-slate-200 text-left sm:text-right"><span className="text-slate-400 block text-[8px] uppercase font-bold">Fee Balance</span><strong className="text-red-600 block">{displayBalance}</strong></div>
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-[10px] border border-slate-300 rounded-lg overflow-hidden">
+        <div className="overflow-x-auto -mx-1 sm:mx-0">
+          <table className="w-full text-left text-[10px] border border-slate-300 rounded-lg overflow-hidden min-w-[580px] sm:min-w-full">
             <thead className="bg-slate-900 text-white uppercase text-[8px] tracking-wider">
               <tr>
                 <th className="p-1">Subject Name</th>
@@ -795,7 +929,7 @@ export default function BulkGeneralReportCard({
                       </td>
                       <td className="p-1 text-center font-black text-slate-800">{calculatedGrade}</td>
                       <td className="p-1 text-center font-bold text-blue-700">{rawRank ? getOrdinalSuffix(rawRank) : '—'}</td>
-                      <td className="p-1 text-slate-600 truncate max-w-[100px]">{sub.instructor || 'N/A'}</td>
+                      <td className="p-1 text-slate-600 truncate max-w-[100px]">{sub.instructor || '—'}</td>
                     </tr>
                   );
                 })
@@ -804,22 +938,22 @@ export default function BulkGeneralReportCard({
           </table>
         </div>
 
-        <div className="grid grid-cols-5 gap-1.5 bg-blue-900 text-white p-1.5 rounded-xl text-center">
+        <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5 bg-blue-900 text-white p-2 rounded-xl text-center">
           <div><span className="text-[8px] text-blue-200 uppercase block font-semibold">Total Points</span><strong className="text-xs sm:text-sm">{stData.totalCoef > 0 ? `${stData.totalPoints?.toFixed(1)} / ${stData.totalCoef * 20}` : '—'}</strong></div>
-          <div><span className="text-[8px] text-blue-200 uppercase block font-semibold">Term Average</span><strong className="text-sm sm:text-base font-black text-amber-300">{stData.termAverage ? `${stData.termAverage} / 20` : '—'}</strong></div>
+          <div><span className="text-[8px] text-blue-200 uppercase block font-semibold">Term Average</span><strong className="text-xs sm:text-base font-black text-amber-300">{stData.termAverage ? `${stData.termAverage} / 20` : '—'}</strong></div>
           <div><span className="text-[8px] text-blue-200 uppercase block font-semibold">Class Rank</span><strong className="text-xs sm:text-sm">{stData.rank ? getOrdinalSuffix(stData.rank) : '—'}</strong></div>
           <div><span className="text-[8px] text-blue-200 uppercase block font-semibold">Class Avg</span><strong className="text-xs sm:text-sm">{classAverage ? `${classAverage} / 20` : '—'}</strong></div>
-          <div><span className="text-[8px] text-blue-200 uppercase block font-semibold">Status</span><strong className={`text-xs sm:text-sm font-extrabold ${stData.termStatus === 'Passed' ? 'text-emerald-400' : stData.termStatus === 'Failed' ? 'text-red-400' : 'text-slate-300'}`}>{stData.termStatus || '—'}</strong></div>
+          <div className="col-span-2 sm:col-span-1"><span className="text-[8px] text-blue-200 uppercase block font-semibold">Status</span><strong className={`text-xs sm:text-sm font-extrabold ${stData.termStatus === 'Passed' ? 'text-emerald-400' : stData.termStatus === 'Failed' ? 'text-red-400' : 'text-slate-300'}`}>{stData.termStatus || '—'}</strong></div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 text-[10px]">
-          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-0.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
+          <div className="p-2.5 sm:p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-0.5">
             <span className="font-extrabold text-slate-900 uppercase block text-[9px]">Discipline & Conduct</span>
-            <p className="text-slate-600">Unjustified Absences: <strong className="text-slate-900">{stData.disciplineRecord?.absences ?? 0} hrs</strong></p>
+            <p className="text-slate-600">Unjustified Absences: <strong className="text-slate-900">{stData.disciplineRecord?.absences ?? 0} times</strong></p>
             <p className="text-slate-600">Tardiness: <strong className="text-slate-900">{stData.disciplineRecord?.latecomings || stData.disciplineRecord?.tardiness || 0} times</strong></p>
             <p className="text-slate-700 italic text-[9px] truncate">{stData.disciplineRecord?.remarks ? `"${stData.disciplineRecord.remarks}"` : ''}</p>
           </div>
-          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-0.5">
+          <div className="p-2.5 sm:p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-0.5">
             <span className="font-extrabold text-slate-900 uppercase block text-[9px]">Principal Remarks</span>
             <p className="text-slate-700 italic text-[10px] min-h-[20px]">
               {stData.adminRemarks?.remark_text || stData.adminRemarks?.notice_text ? `"${stData.adminRemarks?.remark_text || stData.adminRemarks?.notice_text}"` : ''}
@@ -827,15 +961,15 @@ export default function BulkGeneralReportCard({
           </div>
         </div>
 
-        <div className="pt-2 border-t border-slate-300 grid grid-cols-2 gap-6 text-center text-[10px]">
+        <div className="pt-2 border-t border-slate-300 grid grid-cols-2 gap-4 sm:gap-6 text-center text-[10px]">
           <div className="space-y-4">
             <p className="font-bold text-slate-800 uppercase text-[9px]">Vice-Principal / Senior Master</p>
-            <div className="border-b border-dashed border-slate-400 mx-4"></div>
+            <div className="border-b border-dashed border-slate-400 mx-2 sm:mx-4"></div>
             <p className="text-[8px] text-slate-400 italic">Signature & Stamp</p>
           </div>
           <div className="space-y-4">
             <p className="font-bold text-slate-800 uppercase text-[9px]">The Principal</p>
-            <div className="border-b border-dashed border-slate-400 mx-4"></div>
+            <div className="border-b border-dashed border-slate-400 mx-2 sm:mx-4"></div>
             <p className="text-[8px] text-slate-400 italic">Signature & Stamp</p>
           </div>
         </div>
@@ -891,9 +1025,9 @@ export default function BulkGeneralReportCard({
       `}</style>
 
       {/* TOOLBAR CONTROLS */}
-      <div className="no-print w-full max-w-5xl bg-slate-900 border border-slate-700 rounded-2xl p-4 mb-4 flex flex-wrap items-center justify-between gap-4 text-white sticky top-2 z-10 shadow-2xl">
+      <div className="no-print w-full max-w-5xl bg-slate-900 border border-slate-700 rounded-2xl p-3 sm:p-4 mb-4 flex flex-wrap items-center justify-between gap-3 sm:gap-4 text-white sticky top-2 z-10 shadow-2xl">
         <div>
-          <h2 className="text-lg font-bold text-emerald-400 flex items-center gap-2">
+          <h2 className="text-base sm:text-lg font-bold text-emerald-400 flex items-center gap-2">
             📄 Bulk General Education — <span className="text-white">{selectedClass}</span>
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
@@ -907,7 +1041,7 @@ export default function BulkGeneralReportCard({
             <select
               value={selectedClass}
               onChange={(e) => { setSelectedClass(e.target.value); setCurrentIndex(0); }}
-              className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-medium focus:border-emerald-500 focus:outline-none max-w-[170px] truncate"
+              className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-medium focus:border-emerald-500 focus:outline-none max-w-[140px] sm:max-w-[170px] truncate"
             >
               {(GENERAL_CLASSES_CATALOG || []).map((cls) => (
                 <option key={cls} value={cls}>{cls}</option>
@@ -920,7 +1054,7 @@ export default function BulkGeneralReportCard({
             <select
               value={selectedSeries}
               onChange={(e) => { setSelectedSeries(e.target.value); setCurrentIndex(0); }}
-              className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-medium focus:border-emerald-500 focus:outline-none max-w-[150px] truncate"
+              className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-medium focus:border-emerald-500 focus:outline-none max-w-[120px] sm:max-w-[150px] truncate"
             >
               {availableSeriesList.map((s) => (
                 <option key={s} value={s}>{s === 'ALL' ? 'All Series' : s}</option>
@@ -945,7 +1079,7 @@ export default function BulkGeneralReportCard({
             <button
               type="button"
               onClick={() => setViewMode('single')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+              className={`px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
                 viewMode === 'single' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-400 hover:text-white'
               }`}
             >
@@ -954,7 +1088,7 @@ export default function BulkGeneralReportCard({
             <button
               type="button"
               onClick={() => setViewMode('all')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+              className={`px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
                 viewMode === 'all' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-400 hover:text-white'
               }`}
             >
@@ -987,38 +1121,38 @@ export default function BulkGeneralReportCard({
           )}
 
           <div className="flex items-center gap-2 self-end">
-           <button
-  type="button"
-  disabled={isProcessing || studentsList.length === 0}
-  onClick={handleDownloadBulkPDF}
-  className="px-2 sm:px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow transition-all flex items-center gap-1 shrink-0 disabled:opacity-50"
-  title="Download Vector PDF"
->
-  <span className="text-sm">📥</span>
-  <span className="hidden sm:inline">
-    {isProcessing ? statusMessage || 'Downloading...' : 'Download Vector PDF'}
-  </span>
-  <span className="inline sm:hidden">
-    {isProcessing ? '...' : 'PDF'}
-  </span>
-</button>
+            <button
+              type="button"
+              disabled={isProcessing || studentsList.length === 0}
+              onClick={handleDownloadBulkPDF}
+              className="px-2 sm:px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow transition-all flex items-center gap-1 shrink-0 disabled:opacity-50"
+              title="Download Vector PDF"
+            >
+              <span className="text-sm">📥</span>
+              <span className="hidden sm:inline">
+                {isProcessing ? statusMessage || 'Downloading...' : 'Download Vector PDF'}
+              </span>
+              <span className="inline sm:hidden">
+                {isProcessing ? '...' : 'PDF'}
+              </span>
+            </button>
 
             <button
               type="button"
               disabled={studentsList.length === 0}
               onClick={() => window.print()}
-              className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-md transition-all flex items-center gap-1.5 disabled:opacity-50"
+              className="px-3 sm:px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-md transition-all flex items-center gap-1.5 disabled:opacity-50"
             >
               <span>🖨️</span> Print Full Class
             </button>
 
             <button
-  type="button"
-  onClick={onClose}
-  className="px-2 sm:px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-xl transition-all shrink-0"
->
-  Close
-</button>
+              type="button"
+              onClick={onClose}
+              className="px-2 sm:px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-xl transition-all shrink-0"
+            >
+              Close
+            </button>
           </div>
         </div>
       </div>
