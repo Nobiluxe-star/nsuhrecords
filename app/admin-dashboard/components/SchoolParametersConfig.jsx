@@ -15,69 +15,118 @@ export default function SchoolParametersConfig({ activeSchool, deleteBanner, set
   const [schoolRules, setSchoolRules] = useState('');
   const [rulesFileUrl, setRulesFileUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   // --- Supabase Hydration ---
+  // --- Instant Offline-First Hydration Engine ---
   useEffect(() => {
     let isMounted = true;
+    const CACHE_KEY = 'cached_school_details_v1';
 
-    async function loadSchoolDetailsFromSupabase() {
+    // Helper: Clean up placeholders like 'EMPTY' or 'NULL'
+    const sanitize = (val) => (val && val !== 'EMPTY' && val !== 'NULL' ? val : '');
+
+    // 1. INSTANT LOAD: Load local cache immediately (0ms speed)
+    const loadFromCache = () => {
+      try {
+        const localData = localStorage.getItem(CACHE_KEY) || localStorage.getItem('active_school_details');
+        if (localData) {
+          const parsed = JSON.parse(localData);
+          setSchoolMotto(sanitize(parsed.motto));
+          setSchoolRegion(sanitize(parsed.region));
+          setSchoolLogo(sanitize(parsed.logo_url || parsed.logo));
+          setSchoolContact(sanitize(parsed.contact_line));
+          setSchoolEmail(sanitize(parsed.official_email));
+          setSchoolLocation(sanitize(parsed.address_location || parsed.address || parsed.location));
+          setSchoolRules(sanitize(parsed.rules_and_regulations));
+          setRulesFileUrl(sanitize(parsed.rules_file_url));
+          setAcademicYearStartDate(sanitize(parsed.academic_year_start_date));
+          setAcademicYearEndDate(sanitize(parsed.academic_year_end_date));
+        }
+      } catch (e) {
+        console.warn('Error reading offline school details cache:', e);
+      }
+    };
+
+    // Load local storage first
+    loadFromCache();
+
+    // 2. BACKGROUND REVALIDATION: Sync with Supabase silently
+    async function syncWithSupabase() {
+      if (!supabase) return;
+
       const targetSchoolId = activeSchool?.school_id || activeSchool?.id;
       const targetName = activeSchool?.name || activeSchool?.institution_name;
 
-      if (!targetSchoolId && !targetName) return;
-
-      setIsLoading(true);
+      // Show loader only if local storage was completely empty
+      const hasCachedData = typeof window !== 'undefined' && (localStorage.getItem(CACHE_KEY) || localStorage.getItem('active_school_details'));
+      if (!hasCachedData) setIsLoading(true);
 
       try {
         let detailsData = null;
 
-        if (targetSchoolId && supabase) {
-          const { data, error } = await supabase
+        // Optimized single OR query or sequential check
+        if (targetSchoolId) {
+          const { data } = await supabase
             .from('school_details')
             .select('*')
             .eq('school_id', targetSchoolId)
             .maybeSingle();
-
-          if (!error && data) detailsData = data;
+          detailsData = data;
         }
 
-        if (!detailsData && targetName && supabase) {
-          const { data, error } = await supabase
+        if (!detailsData && targetName) {
+          const { data } = await supabase
             .from('school_details')
             .select('*')
             .ilike('name', `%${targetName}%`)
             .maybeSingle();
+          detailsData = data;
+        }
 
-          if (!error && data) detailsData = data;
+        // Public user fallback: Grab primary row if no active user session
+        if (!detailsData) {
+          const { data } = await supabase
+            .from('school_details')
+            .select('*')
+            .limit(1)
+            .maybeSingle();
+          detailsData = data;
         }
 
         if (isMounted && detailsData) {
-          const logo = detailsData.logo_url && detailsData.logo_url !== 'NULL' ? detailsData.logo_url : '';
-          
-          setSchoolMotto(detailsData.motto && detailsData.motto !== 'EMPTY' ? detailsData.motto : '');
-          setSchoolRegion(detailsData.region && detailsData.region !== 'EMPTY' ? detailsData.region : '');
-          setSchoolLogo(logo);
-          setSchoolContact(detailsData.contact_line && detailsData.contact_line !== 'EMPTY' ? detailsData.contact_line : '');
-          setSchoolEmail(detailsData.official_email && detailsData.official_email !== 'EMPTY' ? detailsData.official_email : '');
-          setSchoolLocation(detailsData.address_location || detailsData.address || detailsData.location || '');
-          setSchoolRules(detailsData.rules_and_regulations && detailsData.rules_and_regulations !== 'EMPTY' ? detailsData.rules_and_regulations : '');
-          setRulesFileUrl(detailsData.rules_file_url && detailsData.rules_file_url !== 'EMPTY' ? detailsData.rules_file_url : '');
-          setAcademicYearStartDate(detailsData.academic_year_start_date || '');
-          setAcademicYearEndDate(detailsData.academic_year_end_date || '');
+          const logo = sanitize(detailsData.logo_url);
 
-          if (typeof window !== 'undefined' && logo) {
-            localStorage.setItem('active_school_logo', logo);
-            window.dispatchEvent(new Event('school-logo-updated'));
+          // Update form states with fresh cloud data
+          setSchoolMotto(sanitize(detailsData.motto));
+          setSchoolRegion(sanitize(detailsData.region));
+          setSchoolLogo(logo);
+          setSchoolContact(sanitize(detailsData.contact_line));
+          setSchoolEmail(sanitize(detailsData.official_email));
+          setSchoolLocation(sanitize(detailsData.address_location || detailsData.address || detailsData.location));
+          setSchoolRules(sanitize(detailsData.rules_and_regulations));
+          setRulesFileUrl(sanitize(detailsData.rules_file_url));
+          setAcademicYearStartDate(sanitize(detailsData.academic_year_start_date));
+          setAcademicYearEndDate(sanitize(detailsData.academic_year_end_date));
+
+          // Save to local storage for offline use
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(CACHE_KEY, JSON.stringify(detailsData));
+            localStorage.setItem('active_school_details', JSON.stringify(detailsData));
+            if (logo) {
+              localStorage.setItem('active_school_logo', logo);
+              window.dispatchEvent(new Event('school-logo-updated'));
+            }
           }
         }
       } catch (err) {
-        console.error('Error fetching school details:', err);
+        console.error('Background sync failed (operating offline mode):', err);
       } finally {
         if (isMounted) setIsLoading(false);
       }
     }
 
-    loadSchoolDetailsFromSupabase();
+    syncWithSupabase();
 
     return () => {
       isMounted = false;
@@ -110,61 +159,91 @@ export default function SchoolParametersConfig({ activeSchool, deleteBanner, set
   };
 
   // --- Save Handler ---
- const handleSaveSchoolDetails = async (e) => {
-  if (e) e.preventDefault();
+ // --- Save Handler ---
+  const handleSaveSchoolDetails = async (e) => {
+    if (e) e.preventDefault();
+    if (isSaving) return; // Prevent multiple clicks if already saving
 
-  // Fallback to a default ID or name for testing as a public/guest user
-  const targetSchoolId = activeSchool?.school_id || activeSchool?.id || 'demo-school-id';
-  const targetName = activeSchool?.name || activeSchool?.institution_name || 'Demo School';
+    setIsSaving(true); // <--- Start loading state
 
-  if (!supabase) {
-    if (typeof setDeleteBanner === 'function') {
-      setDeleteBanner({ type: 'error', message: 'Database connection client unavailable.' });
-    }
-    return;
-  }
+    // Fallback to active school identifiers or default test values
+    const targetSchoolId = activeSchool?.school_id || activeSchool?.id || 'demo-school-id';
+    const targetName = activeSchool?.name || activeSchool?.institution_name || 'Demo School';
 
-  try {
-    const payload = {
-      school_id: targetSchoolId,
-      name: targetName,
-      logo_url: schoolLogo || '',
-      motto: schoolMotto || '',
-      region: schoolRegion || '',
-      contact_line: schoolContact || '',
-      official_email: schoolEmail || '',
-      rules_and_regulations: schoolRules || '',
-      rules_file_url: rulesFileUrl || '',
-      academic_year_start_date: academicYearStartDate || null,
-      academic_year_end_date: academicYearEndDate || null,
-      address_location: schoolLocation || '',
-      updated_at: new Date().toISOString()
-    };
-
-    let { error } = await supabase
-      .from('school_details')
-      .upsert(payload, { onConflict: 'school_id' });
-
-    if (error) {
+    if (!supabase) {
       if (typeof setDeleteBanner === 'function') {
-        const customMessage = error.code === '42501' || error.message?.includes('row-level security')
-          ? 'You do not have authorization to perform this action. Please log in or check permissions.'
-          : 'Unable to save school details. Please try again or contact your administrator.';
+        setDeleteBanner({ type: 'error', message: 'Database connection client unavailable.' });
+      }
+      setIsSaving(false);
+      return;
+    }
 
-        setDeleteBanner({ type: 'error', message: customMessage });
+    try {
+      const payload = {
+        school_id: targetSchoolId,
+        name: targetName,
+        logo_url: schoolLogo || '',
+        motto: schoolMotto || '',
+        region: schoolRegion || '',
+        contact_line: schoolContact || '',
+        official_email: schoolEmail || '',
+        rules_and_regulations: schoolRules || '',
+        rules_file_url: rulesFileUrl || '',
+        academic_year_start_date: academicYearStartDate || null,
+        academic_year_end_date: academicYearEndDate || null,
+        address_location: schoolLocation || '',
+        updated_at: new Date().toISOString()
+      };
+
+      let { error } = await supabase
+        .from('school_details')
+        .upsert(payload, { onConflict: 'school_id' });
+
+      if (error && error.message?.includes('Failed to fetch')) {
+        await new Promise((res) => setTimeout(res, 500));
+        const retryResult = await supabase
+          .from('school_details')
+          .upsert(payload, { onConflict: 'school_id' });
+        error = retryResult.error;
       }
-    } else {
+
+      if (error) {
+        if (typeof setDeleteBanner === 'function') {
+          const customMessage = error.code === '42501' || error.message?.includes('row-level security')
+            ? 'You do not have authorization to perform this action. Please log in or check permissions.'
+            : 'Unable to save school details. Please try again or contact your administrator.';
+
+          setDeleteBanner({ type: 'error', message: customMessage });
+        }
+      } else {
+        // --- Offline Cache Writer ---
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('cached_school_details_v1', JSON.stringify(payload));
+          localStorage.setItem('active_school_details', JSON.stringify(payload));
+
+          if (payload.logo_url) {
+            localStorage.setItem('active_school_logo', payload.logo_url);
+            window.dispatchEvent(new Event('school-logo-updated'));
+          }
+          if (payload.academic_year_start_date) {
+            localStorage.setItem('academic_year_start_date', payload.academic_year_start_date);
+          }
+        }
+
+        if (typeof setDeleteBanner === 'function') {
+          setDeleteBanner({ type: 'success', message: 'School parameters updated successfully!' });
+          setTimeout(() => setDeleteBanner(null), 4000);
+        }
+      }
+    } catch (err) {
       if (typeof setDeleteBanner === 'function') {
-        setDeleteBanner({ type: 'success', message: 'School parameters updated successfully!' });
-        setTimeout(() => setDeleteBanner(null), 4000);
+        setDeleteBanner({ type: 'error', message: 'Network error. Please try saving again.' });
       }
+    } finally {
+      setIsSaving(false); // <--- Reset button state
     }
-  } catch (err) {
-    if (typeof setDeleteBanner === 'function') {
-      setDeleteBanner({ type: 'error', message: 'Network error. Please try saving again.' });
-    }
-  }
-};
+  };
+
   return (
     <div className="bg-[#0b1329] border border-gray-800 p-4 sm:p-8 rounded-2xl w-full max-w-7xl mx-auto shadow-2xl space-y-6">
       <div className="flex items-center justify-between border-b border-gray-800 pb-3">
@@ -340,10 +419,25 @@ export default function SchoolParametersConfig({ activeSchool, deleteBanner, set
 
       <button
         type="button"
+        disabled={isSaving}
         onClick={handleSaveSchoolDetails}
-        className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-xl transition-all duration-200 shadow-lg text-center"
+        className={`w-full text-white font-bold py-3.5 px-6 rounded-xl transition-all duration-200 shadow-lg flex items-center justify-center space-x-2 active:scale-[0.98] ${
+          isSaving
+            ? 'bg-blue-600/70 cursor-not-allowed opacity-80'
+            : 'bg-blue-600 hover:bg-blue-500 hover:shadow-blue-500/25 active:bg-blue-700 cursor-pointer'
+        }`}
       >
-        Save Changes
+        {isSaving ? (
+          <>
+            <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span>Saving Parameters...</span>
+          </>
+        ) : (
+          <span>Save Changes</span>
+        )}
       </button>
     </div>
   );
