@@ -1,4 +1,4 @@
-const CACHE_NAME = 'classlogs-v4';
+const CACHE_NAME = 'classlogs-v6';
 const STATIC_ASSETS = [
   '/',
   '/admin-dashboard',
@@ -43,19 +43,20 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(event.request.url);
 
-  // 1. Leave external API, Supabase domain, REST endpoints, and Storage calls completely untouched
+  // 1. Completely bypass Service Worker for all Supabase API, storage, and school data queries
   if (
     url.origin !== self.location.origin ||
-    url.hostname.includes('supabase.co') ||
-    url.pathname.includes('/rest/v1') ||
-    url.pathname.includes('/storage/v1') ||
+    url.hostname.includes('supabase') ||
+    url.pathname.includes('rest') ||
+    url.pathname.includes('storage') ||
+    url.pathname.includes('school') ||
     url.pathname.startsWith('/api') ||
-    event.request.url.startsWith('data:image')
+    event.request.url.startsWith('data:')
   ) {
-    return;
+    return; // Direct network pass-through (zero delay)
   }
 
-  // 2. Handle page requests: fetch live when online, serve from local cache when offline
+  // 2. Handle static page UI shells for offline support
   event.respondWith(
     fetch(event.request)
       .then((response) => {

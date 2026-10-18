@@ -5,7 +5,7 @@ import { APP_BASE_URL } from '../lib/classlogsConfig';
 import * as XLSX from 'xlsx';
 
 import { getCurrentAcademicYear } from '../../lib/academicYear';
-
+import SchoolParametersConfig from './components/SchoolParametersConfig';
 import GeneralMarkSheet from './components/mark-sheets/GeneralMarkSheet';
 import TechnicalCommercialMarkSheet from './components/mark-sheets/TechnicalCommercialMarkSheet';
 import TechnicalIndustrialMarkSheet from './components/mark-sheets/TechnicalIndustrialMarkSheet';
@@ -393,13 +393,11 @@ export default function AdminDashboardPage() {
   const [fetchedLessonLogs, setFetchedLessonLogs] = useState([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const [teacherSearchQuery, setTeacherSearchQuery] = useState('');
-  const [schoolMotto, setSchoolMotto] = useState('');
-  const [schoolRules, setSchoolRules] = useState('');
-  const [rulesFileUrl, setRulesFileUrl] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [registrationMode, setRegistrationMode] = useState('single'); // 'single' or 'bulk'
   const [teacherSubTab, setTeacherSubTab] = useState('assigned');
+  const [schoolLogo, setSchoolLogo] = useState('');
   const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
   
 // --- MEMBER REGISTRATION INITIAL DRAFT RECOVERY ---
@@ -543,9 +541,7 @@ const [isMarkEntryAuthorized, setIsMarkEntryAuthorized] = useState(true);
   const handleCloseBulkModal = () => {
     setBulkModalState((prev) => ({ ...prev, isOpen: false }));
   };
-  const [schoolRegion, setSchoolRegion] = useState('');
-  const [academicYearStartDate, setAcademicYearStartDate] = useState('');
-  const [academicYearEndDate, setAcademicYearEndDate] = useState('');
+ 
   const calculateAcademicWeek = (startDateStr, logDateStr = new Date()) => {
   if (!startDateStr) return 1;
 
@@ -984,64 +980,6 @@ const handleExecuteBulkImport = async () => {
     setIsProcessingBulk(false);
   };
 
-
-const handleSaveSchoolDetails = async (e) => {
-    if (e) e.preventDefault();
-
-    try {
-      const targetSchoolId = activeSchool?.school_id || activeSchool?.id;
-
-      if (!targetSchoolId) {
-        if (typeof setDeleteBanner === 'function') {
-          setDeleteBanner({ type: 'error', message: 'Error: Active school ID not found.' });
-        }
-        return;
-      }
-
-      const payload = {
-        school_id: targetSchoolId,
-        name: activeSchool?.name || '',logo_url: typeof schoolLogo !== 'undefined' ? schoolLogo : (activeSchool?.logo_url || null),
-        motto: typeof schoolMotto !== 'undefined' ? schoolMotto : (activeSchool?.motto || ''),
-        region: typeof schoolRegion !== 'undefined' ? schoolRegion : (activeSchool?.region || ''),
-        contact_line: typeof schoolContact !== 'undefined' ? schoolContact : (activeSchool?.contact_line || ''),
-        official_email: typeof schoolEmail !== 'undefined' ? schoolEmail : (activeSchool?.official_email || ''),
-        rules_and_regulations: typeof schoolRules !== 'undefined' ? schoolRules : (activeSchool?.rules_and_regulations || ''),
-        rules_file_url: typeof rulesFileUrl !== 'undefined' ? rulesFileUrl : (activeSchool?.rules_file_url || ''),
-        academic_year_start_date: typeof academicYearStartDate !== 'undefined' ? academicYearStartDate : null,
-        academic_year_end_date: typeof academicYearEndDate !== 'undefined' ? academicYearEndDate : null,
-        updated_at: new Date().toISOString()
-      };
-
-      // Perform upsert
-      let { error } = await supabase
-        .from('school_details')
-        .upsert(payload, { onConflict: 'school_id' });
-
-      // Retry once automatically if network flickered
-      if (error && error.message?.includes('Failed to fetch')) {
-        await new Promise((res) => setTimeout(res, 500));
-        const retryResult = await supabase
-          .from('school_details')
-          .upsert(payload, { onConflict: 'school_id' });
-        error = retryResult.error;
-      }
-
-      if (error) {
-        if (typeof setDeleteBanner === 'function') {
-          setDeleteBanner({ type: 'error', message: `Save error: ${error.message}` });
-        }
-      } else {
-        if (typeof setDeleteBanner === 'function') {
-          setDeleteBanner({ type: 'success', message: 'School parameters updated successfully!' });
-          setTimeout(() => setDeleteBanner(null), 4000);
-        }
-      }
-    } catch (err) {
-      if (typeof setDeleteBanner === 'function') {
-        setDeleteBanner({ type: 'error', message: `Network timeout. Please click save again.` });
-      }
-    }
-  };
 const handleEditTeacherSchedule = (teacher) => {
   setTeacherToEdit(teacher);
   setIsEditingSchedule(true);
@@ -1096,43 +1034,17 @@ const directSchoolName = (rawName && rawName.toLowerCase() !== 'assigned school'
     .eq('school_id', targetId)
     .maybeSingle();
 
-    if (data && !error) {
-      const realName = data.institution_name || data.name || data.school_name;
-      const updatedSchool = { ...data, name: realName, institution_name: realName };
-      setActiveSchool(updatedSchool);
-      localStorage.setItem('active_school_id', targetId);
-      localStorage.setItem('active_school_name', realName);
-
-      // Fetch school details before returning
-      const { data: detailsData } = await supabase
-        .from('school_details')
-        .select('logo_url, motto, region, contact_line, official_email, address_location, rules_and_regulations, rules_file_url, academic_year_start_date, academic_year_end_date')
-        .eq('school_id', targetId)
-        .maybeSingle();
-
-      if (detailsData) {
-        if (detailsData.logo_url) setSchoolLogo(detailsData.logo_url);
-        if (detailsData.motto) setSchoolMotto(detailsData.motto);
-        if (detailsData.region) setSchoolRegion(detailsData.region);
-        if (detailsData.contact_line) setSchoolContact(detailsData.contact_line);
-        if (detailsData.official_email) setSchoolEmail(detailsData.official_email);
-        if (detailsData.address_location && typeof setSchoolLocation !== 'undefined') setSchoolLocation(detailsData.address_location);
-        if (detailsData.rules_and_regulations && typeof setSchoolRules !== 'undefined') setSchoolRules(detailsData.rules_and_regulations);
-        if (detailsData.rules_file_url && typeof setRulesFileUrl !== 'undefined') setRulesFileUrl(detailsData.rules_file_url);
-        if (detailsData.academic_year_start_date) setAcademicYearStartDate(detailsData.academic_year_start_date);
-        if (detailsData.academic_year_end_date) setAcademicYearEndDate(detailsData.academic_year_end_date);
-      // Sync latest from network back into localStorage
-        if (targetId) {
-        localStorage.setItem(`school_dates_${targetId}`, JSON.stringify({
-        academicYearStartDate: detailsData.academic_year_start_date || '',
-        academicYearEndDate: detailsData.academic_year_end_date || ''
-  }));
-}
+   if (data && !error) {
+        const realName = data.institution_name || data.name || data.school_name;
+        const updatedSchool = { ...data, name: realName, institution_name: realName };
+        setActiveSchool(updatedSchool);
+        localStorage.setItem('active_school_id', targetId);
+        localStorage.setItem('active_school_name', realName);
       }
-
-      return;
     }
-  }
+
+    return;
+
 // Dynamic fallback: Read directly from authenticated session if local targets are missing
   if (!targetId && !targetName) {
     const { data: { session } } = await supabase.auth.getSession();
@@ -1513,14 +1425,14 @@ if (!active.has_onboarded) {
   const [picturePreview, setPicturePreview] = useState(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const videoRef = useRef(null);
-  const [schoolLogo, setSchoolLogo] = useState(null);
+  const [memberPhoto, setMemberPhoto] = useState(null);
 
   const handleLogoUpload = (e) => {
     const file = e.target.files[0];
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        setSchoolLogo(reader.result);
+        setMemberPhoto(reader.result);
       };
       reader.readAsDataURL(file);
     }
@@ -2471,7 +2383,7 @@ if (typeof db !== 'undefined' && db?.pendingSyncQueue) {
   // Explicitly passes role= parameter and formatted query params
 const signupLink = activeEditRecord?.signup_link || `${baseUrl}/staff-signup?role=${encodeURIComponent(regRole)}&school_id=${encodeURIComponent(activeSchoolId)}&token=${token}`;
 const activeSchoolId = typeof schoolId !== 'undefined' ? schoolId : (activeSchool?.school_id || activeSchool?.id || '');
-const activeSchoolName = (typeof active_school_name !== 'undefined' ? active_school_name : null) || activeSchool?.name || activeSchool?.['school-name'] || 'NsuRecords School';
+const activeSchoolName = localStorage.getItem('active_school_name') || 'ClassLogs';
 const newStaffRecord = {
   school_id: activeSchoolId,
   school_name: activeSchoolName,
@@ -2685,17 +2597,32 @@ const handleUpdatePersonnel = async (e) => {
 
           {/* LEFT: School Logo */}
           <div className="flex items-center shrink-0">
-            {schoolLogo && (schoolLogo.startsWith('http') || schoolLogo.startsWith('data:image')) ? (
-              <img
-                src={schoolLogo}
-                alt="School Logo"
-                className="h-8 sm:h-12 md:h-14 w-auto object-contain filter drop-shadow-md transition-all"
-              />
-            ) : (
-              <div className="h-8 w-8 sm:h-11 sm:w-11 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center">
-                <span className="text-[10px] sm:text-xs font-bold text-sky-400">LOGO</span>
-              </div>
-            )}
+          {/* LEFT: School Logo */}
+        <div className="flex items-center shrink-0">
+          {(schoolLogo && schoolLogo.length > 20) ? (
+            <img
+              src={schoolLogo}
+              alt="School Logo"
+              className="h-8 sm:h-12 md:h-14 w-auto object-contain filter drop-shadow-md transition-all"
+            />
+          ) : (activeSchool?.logo_url && activeSchool.logo_url.length > 20) ? (
+            <img
+              src={activeSchool.logo_url}
+              alt="School Logo"
+              className="h-8 sm:h-12 md:h-14 w-auto object-contain filter drop-shadow-md transition-all"
+            />
+          ) : (typeof window !== 'undefined' && localStorage.getItem('active_school_logo')) ? (
+            <img
+              src={localStorage.getItem('active_school_logo')}
+              alt="School Logo"
+              className="h-8 sm:h-12 md:h-14 w-auto object-contain filter drop-shadow-md transition-all"
+            />
+          ) : (
+            <div className="h-8 w-8 sm:h-11 sm:w-11 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center">
+              <span className="text-[10px] sm:text-xs font-bold text-sky-400">LOGO</span>
+            </div>
+          )}
+        </div>
           </div>
 
           {/* CENTER: Centralized Title, Academic Year & Mobile Active Session Pill */}
@@ -4759,209 +4686,16 @@ const handleUpdatePersonnel = async (e) => {
 )}
   </div>
 )}
-        {activeTab === 'details' && (
-          <div className="bg-[#0b1329] border border-gray-800 p-4 sm:p-8 rounded-2xl w-full max-w-7xl mx-auto shadow-2xl space-y-6">
-            <h2 className="text-lg font-bold text-white border-b border-gray-800 pb-3">School Parameters & Configuration</h2>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">School Official Name</label>
-                <input 
-                  type="text" 
-                  value={activeSchool?.name || ''}
-                  disabled 
-                  className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-gray-400 cursor-not-allowed"
-                />
-              </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-  {/* SCHOOL MOTTO */}
-  <div>
-    <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
-      School Motto
-    </label>
-    <input
-      type="text"
-      value={schoolMotto || ''}
-      onChange={(e) => setSchoolMotto(e.target.value)}
-      placeholder="e.g. Discipline, Hard Work, Success"
-      className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none"
-    />
-  </div>
+       {activeTab === 'details' && (
+        <SchoolParametersConfig
+          activeSchool={activeSchool}
+          deleteBanner={deleteBanner}
+          setDeleteBanner={setDeleteBanner}
+          getCurrentAcademicYear={getCurrentAcademicYear}
+          supabase={supabase}
+        />
+      )}
 
-  {/* SCHOOL REGION */}
-  <div>
-    <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
-      School Region (MINSEC Delegation)
-    </label>
-    <input
-      type="text"
-      value={schoolRegion || ''}
-      onChange={(e) => setSchoolRegion(e.target.value)}
-      placeholder="e.g. NORTH WEST REGION"
-      className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none"
-    />
-  </div>
-</div>
-              <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
-              School Official Logo
-            </label>
-            <div className="flex items-center space-x-4">
-              {schoolLogo && (
-                <img
-                  src={schoolLogo}
-                  alt="School Logo Preview"
-                  className="h-16 w-16 object-cover rounded-lg border border-gray-700 bg-[#1f2937]"
-                />
-              )}
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleLogoUpload}
-                className="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-amber-500 file:text-black hover:file:bg-amber-400 cursor-pointer"
-              />
-            </div>
-          </div>
-
-{/* ADMINISTRATOR CONTACT LINE (EDITABLE) */}
-<div>
-  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
-    Administrator Contact Line
-  </label>
-  <input
-    type="text"
-    value={schoolContact}
-    onChange={(e) => setSchoolContact(e.target.value)}
-    className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500"
-  />
-</div>
-
-{/* SCHOOL OFFICIAL EMAIL (EDITABLE) */}
-<div>
-  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
-    School Official Email
-  </label>
-  <input
-    type="email"
-    value={schoolEmail}
-    onChange={(e) => setSchoolEmail(e.target.value)}
-    placeholder="e.g. admin@school.cm"
-    className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500"
-  />
-</div>
-
-{/* ACADEMIC YEAR - DYNAMIC SINGLE SOURCE OF TRUTH (STATIC) */}
-
-<div>
-  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
-    Academic Year
-  </label>
-  <input
-    type="text"
-    value={activeSchool?.academic_year || getCurrentAcademicYear()}
-    disabled
-    readOnly
-    className="w-full bg-[#111827] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-gray-400 cursor-not-allowed"
-  />
-</div>
-{/* ACADEMIC YEAR DATES (EDITABLE) */}
-<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
-  <div>
-    <label className="block text-xs font-semibold uppercase tracking-wider text-amber-400 mb-1">
-      Academic Year Start Date
-    </label>
-    <input
-      type="date"
-      value={academicYearStartDate}
-      onChange={(e) => setAcademicYearStartDate(e.target.value)}
-      className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500"
-    />
-  </div>
-  <div>
-    <label className="block text-xs font-semibold uppercase tracking-wider text-amber-400 mb-1">
-      Academic Year End Date
-    </label>
-    <input
-      type="date"
-      value={academicYearEndDate}
-      onChange={(e) => setAcademicYearEndDate(e.target.value)}
-      className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500"
-    />
-  </div>
-</div>
-      <div>
-  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
-    Address / Location
-  </label>
-  <input
-    type="text"
-    value={schoolLocation}
-    onChange={(e) => setSchoolLocation(e.target.value)}
-    className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500"
-  />
-</div>
-{/* SCHOOL RULES & REGULATIONS */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
-              School Rules & Regulations
-            </label>
-            <textarea
-              rows={6}
-              value={schoolRules}
-              onChange={(e) => setSchoolRules(e.target.value)}
-              placeholder="Type, paste, or format internal school rules, policies, or code of conduct..."
-              className="w-full bg-white border border-gray-300 rounded-lg p-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-500 font-sans shadow-inner"
-            />
-            {/* DOCUMENT UPLOAD (PDF / WORD <= 0.5MB) */}
-            <div className="bg-[#1f2937] p-3 rounded-lg border border-gray-700 mt-3">
-              <label className="block text-xs font-semibold uppercase tracking-wider text-amber-400 mb-1">
-                Upload Official Rules Document (PDF / Word — Max 0.5MB)
-              </label>
-              <input
-                type="file"
-                accept=".pdf,.doc,.docx"
-                onChange={handleRulesFileUpload}
-                className="block w-full text-xs text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-blue-600 hover:file:bg-blue-500 file:text-white hover:file:bg-amber-500 cursor-pointer"
-              />
-              {rulesFileUrl && (
-                <p className="mt-2 text-xs text-green-400 font-medium truncate">
-                  Attached: {rulesFileUrl}
-                </p>
-              )}
-            </div>
-          </div>
-          {/* CUSTOM SUCCESS / ERROR BANNER */}
-        {deleteBanner && (
-          <div className={`mb-4 p-4 rounded-xl flex items-center justify-between text-sm font-medium animate-fade-in ${
-            (deleteBanner.type === 'error' || deleteBanner.isError)
-              ? 'bg-rose-500/10 border border-rose-500/30 text-rose-400' 
-              : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'
-          }`}>
-            <div className="flex items-center gap-2">
-              <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
-              </svg>
-              <span>{typeof deleteBanner === 'string' ? deleteBanner : deleteBanner.message}</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setDeleteBanner(null)} 
-              className="opacity-70 hover:opacity-100 text-xs uppercase tracking-wider font-semibold ml-4"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
-              <button
-             type="button"
-             onClick={(e) => handleSaveSchoolDetails(e)}
-             className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl shadow-lg transition-all cursor-pointer"
-             >
-             Save Changes
-            </button>
-            </div>
-          </div>
-        )}
       </main>
       {/* EDIT PERSONNEL MODAL SCREEN */}
       {isEditPersonnelModalOpen && editingPersonnel && (

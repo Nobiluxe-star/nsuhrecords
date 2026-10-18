@@ -1,5 +1,5 @@
 import React, { useState, createContext, useContext } from 'react';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '../../../lib/supabase';
 import { 
   Globe, 
   Settings, 
@@ -16,11 +16,6 @@ import {
   Save,
   ArrowRight
 } from 'lucide-react';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
-);
 
 // ==========================================
 // 1. TRANSLATION DICTIONARY (EN / FR / ES / AR)
