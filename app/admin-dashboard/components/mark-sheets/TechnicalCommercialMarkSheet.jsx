@@ -668,8 +668,66 @@ export default function TechnicalCommercialMarkSheet({
       {isLoading ? (
         <p className="text-gray-400 text-sm py-4">Loading Technical Commercial mark sheet records...</p>
       ) : (
-        <div className="overflow-x-auto max-h-[600px] border border-gray-800 rounded-lg relative">
-          <table className="w-full text-left border-collapse text-xs">
+       <div className="overflow-x-auto touch-pan-x max-h-[600px] border border-gray-800 rounded-lg relative">
+        {/* MOBILE VIEW: Touch Cards for Technical Commercial Marks */}
+          <div className="block md:hidden space-y-3 p-2">
+            {filteredStudents.length === 0 ? (
+              <p className="text-center text-gray-400 text-xs py-4">
+                No Technical Commercial student records found for {currentClassLevel}.
+              </p>
+            ) : (
+              studentsWithMetrics.map((st, idx) => (
+                <div key={st.id || idx} className="bg-slate-900 border border-gray-800 rounded-xl p-3 space-y-2">
+                  <div className="flex items-center justify-between border-b border-gray-800 pb-2">
+                    <div>
+                      <p className="text-xs font-bold text-white">{idx + 1}. {st.fullName}</p>
+                      <p className="text-[10px] text-emerald-400 font-semibold">{st.trades_series || 'FOUNDATIONAL'} • <span className="text-gray-400 font-mono">{st.uniqueCode}</span></p>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[10px] text-emerald-400 font-bold block">Avg: {st.formattedAvg}</span>
+                      <span className="text-[10px] text-purple-300">Rank: {st.rank}</span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    {subjectsList.map((sub, subIdx) => {
+                      const sName = sub.subject_name || sub.subject_code;
+                      const mRecord = st.marks?.find((m) => m.subject_name === sName) || {};
+
+                      return (
+                        <div key={sub.id || sName || `tc-mob-sub-${subIdx}`} className="bg-gray-900/80 p-1.5 rounded border border-gray-800 text-[11px]">
+                          <span className="text-gray-300 font-medium block truncate">{sName}</span>
+                          <div className="flex items-center gap-1 mt-1">
+                            <input
+                              type="number"
+                              min="0"
+                              max="20"
+                              step="0.5"
+                              placeholder={currentTerm === 'Term 1' ? 'S1' : currentTerm === 'Term 2' ? 'S3' : 'S5'}
+                              value={mRecord[seqA] ?? ''}
+                              onChange={(e) => handleMarkChange(st, sName, seqA, e.target.value)}
+                              className="w-10 p-1 bg-gray-950 border border-gray-700 rounded text-center text-white text-xs focus:border-[#10B981] outline-none"
+                            />
+                            <input
+                              type="number"
+                              min="0"
+                              max="20"
+                              step="0.5"
+                              placeholder={currentTerm === 'Term 1' ? 'S2' : currentTerm === 'Term 2' ? 'S4' : 'S6'}
+                              value={mRecord[seqB] ?? ''}
+                              onChange={(e) => handleMarkChange(st, sName, seqB, e.target.value)}
+                              className="w-10 p-1 bg-gray-950 border border-gray-700 rounded text-center text-white text-xs focus:border-[#10B981] outline-none"
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+       <table className="hidden md:table w-full text-left border-collapse text-xs">
             <thead className="sticky top-0 bg-[#1E293B] text-[#10B981] z-20">
               <tr>
                 <th className="p-2.5 border border-gray-700 min-w-[40px] text-center bg-[#1E293B]">N°</th>

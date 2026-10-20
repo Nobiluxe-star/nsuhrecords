@@ -254,29 +254,25 @@ useEffect(() => {
 
   // --- ID GENERATOR ---
   const generateTeacherId = (schoolNameInput, section, fullName, phoneNumber) => {
-    const cleanStr = (str) => (str || '').replace(/[^a-zA-Z0-9\s]/g, '').trim();
-    const validSchoolName = cleanStr(schoolNameInput) || 'School';
-    const schoolWords = validSchoolName.split(/\s+/).filter(Boolean);
-    let schoolCode = '';
-    if (schoolWords.length >= 2) {
-      schoolCode = (schoolWords[0][0] + schoolWords[1][0]).toUpperCase();
-    } else {
-      schoolCode = schoolWords[0].substring(0, 2).toUpperCase();
-    }
+    const schoolCode = String(schoolNameInput || 'SCH')
+      .trim()
+      .split(/\s+/)
+      .slice(0, 3)
+      .map((word) => word[0])
+      .join('')
+      .toUpperCase();
 
     const secCode = (section || 'General').toUpperCase().startsWith('T') ? 'T' : 'G';
-    const validFullName = cleanStr(fullName) || 'Teacher';
-    const nameWords = validFullName.split(/\s+/).filter(Boolean);
-    let initials = '';
-    if (nameWords.length >= 2) {
-      initials = (nameWords[0][0] + nameWords[1][0]).toUpperCase();
-    } else {
-      initials = nameWords[0].substring(0, 2).toUpperCase();
-    }
+
+    const cleanName = (fullName || 'TE').replace(/[^a-zA-Z]/g, '');
+    const initials = cleanName.substring(0, 2).toUpperCase();
 
     const cleanPhone = (phoneNumber || '0000').replace(/\D/g, '');
     const phoneSuffix = cleanPhone.length >= 3 ? cleanPhone.slice(-3) : '000';
-    const yearSuffix = '26';
+
+    // Single source of truth: extract '26' dynamically from getAcademicYear()
+    const fullYear = typeof getAcademicYear === 'function' ? getAcademicYear() : new Date().getFullYear().toString();
+    const yearSuffix = fullYear.substring(2, 4);
     const randomLetter = String.fromCharCode(65 + Math.floor(Math.random() * 26));
 
     return `${schoolCode}-${secCode}${initials}${phoneSuffix}${yearSuffix}${randomLetter}`;
@@ -406,21 +402,23 @@ if (teacherToEdit) {
     if (savedRecord) {
       const formattedSavedTeacher = {
         ...savedRecord,
-        id: savedRecord.id,
-        teacher_id: savedRecord.teacher_id,
+        teacher_id: savedRecord.teacher_id || teacherId,
         school_id: savedRecord.school_id,
         name: savedRecord.name,
         phone: savedRecord.contact || savedRecord.phone || '',
         email: savedRecord.email || '',
-        signupLink: savedRecord.signup_link || '',
+        signupLink: savedRecord.signup_link || generatedLink,
         schedules: savedRecord.schedules || {},
         classLevel: savedRecord.classLevel || finalClassLevelString,
       };
 
+      // Set state to update the green success banner instantly
+      setActiveTeacherResult(formattedSavedTeacher);
+      
       setTeachersList((prev) => {
       const exists = prev.some((t) => (t.id === formattedSavedTeacher.id || t.teacher_id === formattedSavedTeacher.teacher_id));
         if (exists) {
-          return prev.map((t) => ((t.id === formattedSavedTeacher.id || t.teacher_id === formattedSavedTeacher.teacher_id) ? formattedSavedTeacher : t));s
+          return prev.map((t) => ((t.id === formattedSavedTeacher.id || t.teacher_id === formattedSavedTeacher.teacher_id) ? formattedSavedTeacher : t));
         }
         return [formattedSavedTeacher, ...prev];
       });
@@ -476,17 +474,13 @@ const startTeacherCamera = () => {
     });
   };
   const START_TIME_OPTIONS = [
-  "07:30 AM", "08:15 AM", "09:00 AM", "09:45 AM", "10:30 AM", "1:15 AM",
-  "12:00 PM", "12:30 PM", "12:45 PM", "01:00 PM", "01:15 PM", "01:30 PM",
-  "01:45 PM", "02:00 PM", "02:15 PM", "02:30 PM", "02:45 PM", "03:00 PM",
-  "03:15 PM", "03:30 PM", "03:45 PM", "04:00 PM", "04:15 PM"
+  "08:00 AM", "08:45 AM", "09:30 AM", "10:15 AM", "11:00 AM",
+  "12:15 PM", "01:00 PM", "01:45 PM", "02:30 PM", "03:15 PM", "04:00 PM"
 ];
 
 const END_TIME_OPTIONS = [
-  "08:15 AM", "09:00 AM", "09:45 AM", "10:30 AM", "11:15 AM", "12:00 PM",
-  "12:30 PM", "12:45 PM", "01:00 PM", "01:15 PM", "01:30 PM", "01:45 PM",
-  "02:00 PM", "02:15 PM", "02:30 PM", "02:45 PM", "03:00 PM", "03:15 PM",
-  "03:30 PM", "03:45 PM", "04:00 PM", "04:15 PM", "04:30 PM"
+  "08:45 AM", "09:30 AM", "10:15 AM", "11:00 AM", "11:45 AM",
+  "01:00 PM", "01:45 PM", "02:30 PM", "03:15 PM", "04:00 PM", "04:45 PM"
 ];
   const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const [selectedSection, setSelectedSection] = useState('General Education');
@@ -1056,18 +1050,37 @@ return (
 </div>
             </form>
 
-            {activeTeacherResult && (
-              <div className="mt-6 p-4 bg-emerald-950/40 border border-emerald-600/50 rounded-xl space-y-3">
-                <h3 className="text-sm font-bold text-emerald-400">
-  {teacherToEdit ? 'Teachers details successfully edited and stored' : 'Teacher Assigned Successfully!'}
-</h3>
-                <p className="text-xs text-gray-300">Generated Teacher ID: <strong className="text-amber-300 font-mono">{activeTeacherResult.id}</strong></p>
-                <p className="text-xs text-gray-300">Share this dedicated signup and timetable portal link with <strong>{activeTeacherResult.name}</strong>:</p>
-                <div className="bg-[#1f2937] p-3 rounded border border-emerald-500/40 text-amber-300 font-mono text-xs select-all">
-                  {activeTeacherResult.signupLink}
-                </div>
-              </div>
-          )}
+           {activeTeacherResult && (
+        <div className="mt-6 p-4 bg-emerald-950/40 border border-emerald-600/50 rounded-xl space-y-3">
+          <h3 className="text-sm font-bold text-emerald-400">
+            {teacherToEdit ? 'Teacher details successfully updated and stored!' : 'Teacher Assigned Successfully!'}
+          </h3>
+          
+          {/* Mobile-Friendly Copyable Teacher ID Badge */}
+          <div className="flex items-center gap-2 flex-wrap text-xs text-gray-300">
+            <span>Generated Teacher ID:</span>
+            <button
+              type="button"
+              onClick={() => {
+                const idToCopy = activeTeacherResult.teacher_id || activeTeacherResult.id;
+                if (idToCopy) navigator.clipboard.writeText(idToCopy);
+              }}
+              title="Click to copy full ID"
+              className="bg-[#1f2937] hover:bg-[#374151] active:scale-95 text-amber-300 font-mono text-[11px] px-2.5 py-1 rounded-md border border-amber-500/40 transition-all flex items-center gap-1.5 cursor-pointer max-w-[180px] sm:max-w-none truncate"
+            >
+              <span className="truncate">
+                {activeTeacherResult.teacher_id || (activeTeacherResult.id ? `${activeTeacherResult.id.substring(0, 10)}...` : 'N/A')}
+              </span>
+              <span className="text-[9px] text-gray-400 uppercase tracking-wider shrink-0">(Copy)</span>
+            </button>
+          </div>
+
+          <p className="text-xs text-gray-300">Share this dedicated signup and timetable portal link with <strong>{activeTeacherResult.name}</strong>:</p>
+          <div className="bg-[#1f2937] p-3 rounded border border-emerald-500/40 text-amber-300 font-mono text-xs break-all select-all">
+            {activeTeacherResult.signupLink}
+          </div>
+        </div>
+      )}
 </div>
   );
 }

@@ -100,7 +100,7 @@ export const GENERAL_SERIES_CATALOG = {
       { code: 'S2', subjects: ['Chemistry', 'Physics', 'Biology'] },
       { code: 'S3', subjects: ['Biology', 'Chemistry', 'Mathematics'] },
       { code: 'S4', subjects: ['Biology', 'Chemistry', 'Geology'] },
-      { code: 'S5', subjects: ['Chemistry', 'Computer Science / ICT', 'Mathematics'] },
+      { code: 'S5', subjects: ['Chemistry', 'Computer Science', 'Mathematics'] },
       { code: 'S6', subjects: ['Chemistry', 'Physics', 'Mathematics', 'Further Mathematics'] },
       { code: 'S7', subjects: ['Chemistry', 'Biology', 'Physics', 'Mathematics'] },
       { code: 'S8', subjects: ['Biology', 'Chemistry', 'Physics', 'Mathematics', 'Further Mathematics'] }
@@ -145,12 +145,13 @@ export const ALL_AVAILABLE_CLASSES = [
 ];
 export const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-// Student ID Generator: WC-GMA15739G or WC-TPA16814B
-const generateStudentId = (schoolName, section, fullName, classLevel, age, gender) => {
+// Student ID Generator: WCM-GMA15739G or WCM-TPA16814B
+
+const generateStudentId = (schoolName, section, fullName, classLevel, gender) => {
   const schoolCode = String(schoolName || 'SCH')
     .trim()
     .split(/\s+/)
-    .slice(0, 2)
+    .slice(0, 3) // Captures up to 3 initials (e.g., BHS)
     .map(word => word[0])
     .join('')
     .toUpperCase();
@@ -170,35 +171,16 @@ const generateStudentId = (schoolName, section, fullName, classLevel, age, gende
     ? bracketMatch[1].toUpperCase()
     : rawClass.split(/\s+/).map(word => word[0]).join('').toUpperCase();
 
-  const studentAge = String(age || '15');
+  // Single Source of Truth: Dynamically calculates session from system date (e.g. '2026/2027' -> '26')
+  const fullAcademicYear = getAcademicYear();
+  const academicYearSuffix = fullAcademicYear.substring(2, 4);
 
   const cleanGender = String(gender || '').toLowerCase();
-  const genderCode = (cleanGender.includes('female') || cleanGender.includes('girl') || cleanGender.startsWith('g')) ? 'G' : 'B';
+  const genderCode = (cleanGender.includes('female') || cleanGender.includes('girl') || cleanGender.startsWith('g')) ? 'F' : 'M';
 
-  // Random 2-digit suffix placed right after gender (10 - 99)
   const randomSuffix = String(Math.floor(10 + Math.random() * 90));
 
-  return `${schoolCode}-${secCode}${initials}${classCode}${studentAge}${genderCode}${randomSuffix}`;
-};
-// Teacher ID Generator: WC-TJO45626K or WC-GJO45626K
-const generateTeacherId = (schoolName, section, fullName, phoneNumber) => {
-  const schoolCode = (schoolName || 'SCH')
-    .replace(/[^a-zA-Z]/g, '')
-    .substring(0, 2)
-    .toUpperCase();
-
-  const secCode = (section || 'General Education').toUpperCase().startsWith('T') ? 'T' : 'G';
-
-  const cleanName = (fullName || 'TE').replace(/[^a-zA-Z]/g, '');
-  const initials = cleanName.substring(0, 2).toUpperCase();
-
-  const cleanPhone = (phoneNumber || '0000').replace(/\D/g, '');
-  const phoneSuffix = cleanPhone.length >= 3 ? cleanPhone.slice(-3) : '000';
-
-  const yearSuffix = '26';
-  const randomLetter = String.fromCharCode(65 + Math.floor(Math.random() * 26));
-
-  return `${schoolCode}-${secCode}${initials}${phoneSuffix}${yearSuffix}${randomLetter}`;
+  return `${schoolCode}-${secCode}${initials}${classCode}${academicYearSuffix}${genderCode}${randomSuffix}`;
 };
 
 export const getAcademicYear = () => {
@@ -212,6 +194,7 @@ export const getAcademicYear = () => {
       return `${currentYear - 1}-${currentYear}`;
     }
   };
+
 // Helper to retrieve classes dynamically based on active section
 const getSectionClasses = (section) => {
   if (!section) return [...(GENERAL_CLASSES_CATALOG || []), ...(TECHNICAL_COMMERCIAL_CATALOG || []), ...(TECHNICAL_INDUSTRIAL_CATALOG || [])];
@@ -245,7 +228,8 @@ export const ALL_SUBJECTS_LIST = [
   { name: "Biology", category: "General Core Subjects" },
   { name: "Chemistry", category: "General Core Subjects" },
   { name: "Citizenship Education / Moral Education", category: "General Core Subjects" },
-  { name: "Computer Science / ICT", category: "General Core Subjects" },
+  { name: "Computer Science", category: "General Core Subjects" },
+  { name: "Information & Communication Technology/ICT", category: "General Core Subjects" },
   { name: "Economics", category: "General Core Subjects" },
   { name: "Economic Geography", category: "General Core Subjects" },
   { name: "English Language", category: "General Core Subjects" },
@@ -755,7 +739,7 @@ const [isMarkEntryAuthorized, setIsMarkEntryAuthorized] = useState(true);
           fullName: "Fuh Gerald",
           gender: "Male",
           dob: "2008-08-20",
-          residence: "Ntambeng",
+          residence: "Fon's Street",
           guardian_name: "Parent",
           guardian_phone: "682491189"
         }
@@ -1043,37 +1027,6 @@ const directSchoolName = (rawName && rawName.toLowerCase() !== 'assigned school'
       }
     }
 
-    return;
-
-// Dynamic fallback: Read directly from authenticated session if local targets are missing
-  if (!targetId && !targetName) {
-    const { data: { session } } = await supabase.auth.getSession();
-    const sessionSchoolName = session?.user?.user_metadata?.school_name || session?.user?.user_metadata?.assigned_school;
-    const sessionSchoolId = session?.user?.user_metadata?.school_id || session?.user?.id;
-
-    if (sessionSchoolName) {
-      setActiveSchool({
-        id: sessionSchoolId,
-        school_id: sessionSchoolId,
-        name: sessionSchoolName,
-        institution_name: sessionSchoolName
-      });
-      return;
-    }
-  }
-      // Fallback dynamic database query if only a name/slug target exists
-      if (targetName && targetName.toLowerCase() !== 'assigned school') {
-        const { data, error } = await supabase
-          .from('assigned_schools')
-          .select('*')
-          .or(`slug.ilike.${encodeURIComponent(targetName)},name.ilike.${encodeURIComponent(targetName)}`)
-          .maybeSingle();
-
-        if (data && !error) {
-          setActiveSchool(data);
-          localStorage.setItem('active_school_id', data.id);
-        }
-      }
     };
 
     hydrateActiveSchool();
@@ -1149,13 +1102,58 @@ const [teacherPhotoPreview, setTeacherPhotoPreview] = useState(null);
 const [editingStudent, setEditingStudent] = useState(null);
 const [editFormData, setEditFormData] = useState({});
 const [studentToDelete, setStudentToDelete] = useState(null);
-const handleRowClick = (student) => {
-    setEditingStudent(student);
-    setEditFormData({
-      ...student,
-      medical_history: student.medical_history || ''
-    });
-  };
+
+const handleRowClick = async (student) => {
+  setEditingStudent(student);
+
+  const rawGuardianPhone = student.guardian_phone || student.guardianPhone || student.parent_phone || student.phone || '';
+  const rawStudentPhone = student.student_phone || student.studentPhone || '';
+  const currentFullName = student.fullName || student.full_name || student.name || '';
+
+  // Fetch financial summary
+  let amount_due = 0;
+  let amount_paid = 0;
+  let balance = 0;
+
+  try {
+    const studentIdentifier = student.unique_code || student.student_id || student.id;
+    if (studentIdentifier) {
+      const { data: finData } = await supabase
+        .from('financial_records')
+        .select('amount_due, amount_paid, balance')
+        .or(`student_id.eq.${studentIdentifier},id.eq.${studentIdentifier}`)
+        .maybeSingle();
+
+      if (finData) {
+        amount_due = finData.amount_due || 0;
+        amount_paid = finData.amount_paid || 0;
+        balance = finData.balance !== undefined ? finData.balance : (Number(amount_due) - Number(amount_paid));
+      }
+    }
+  } catch (err) {
+    console.warn('Financial records fetch skipped:', err);
+  }
+
+  setEditFormData({
+    ...student,
+    original_section: student.section || '',
+    original_fullName: currentFullName,
+    fullName: currentFullName,
+    section: student.section || '',
+    classLevel: student.classLevel || student.class_level || '',
+    trades_series: student.trades_series || student.trade || '',
+    residence: student.residence || '',
+    dob: student.dob || student.date_of_birth || '',
+    gender: student.gender || 'Male',
+    guardian_name: student.guardian_name || student.guardianName || student.parent_name || '',
+    guardian_phone: rawGuardianPhone,
+    student_phone: rawStudentPhone,
+    medical_history: student.medical_history || student.medicalNotes || 'None',
+    amount_due,
+    amount_paid,
+    balance
+  });
+};
 
  const handleSaveStudent = async (e) => {
     e.preventDefault();
@@ -1183,18 +1181,46 @@ if (!editFormData?.residence || !editFormData.residence.trim()) {
   const currentSeries = editFormData?.trades_series || editFormData?.series || '';
   // Clean and strictly separate Guardian Contact and Student Contact
     const cleanGuardianPhone = String(editFormData?.guardian_phone || '').trim() || 'N/A';
-    const cleanStudentPhone = String(editFormData?.phone || '').trim() || 'N/A';
+   const cleanStudentPhone = String(editFormData?.student_phone || editFormData?.phone || '').trim() || 'N/A';
+
+    // Strip read-only financial & baseline properties
+const { updated_at, trade, class_level, phone, student_phone, amount_due, amount_paid, balance, original_section, original_fullName, ...sanitizedFormData } = editFormData;    
+// Detect if Section OR Name changed to generate a new Unique Code
+    const targetName = editFormData?.fullName?.trim() || editFormData?.full_name?.trim() || editFormData?.name?.trim() || '';
+    const sectionChanged = original_section && original_section !== editFormData.section;
+    const nameChanged = original_fullName && original_fullName !== targetName;
+
+   if (sectionChanged || nameChanged) {
+      const activeSchoolName = activeSchool?.school_name || activeSchool?.name || 'School';
+      const targetClassForCode = editFormData?.classLevel || editFormData?.class_level || '';
+      const targetSectionForCode = editFormData?.section || '';
+      const targetGenderForCode = editFormData?.gender || 'Male';
+
+      sanitizedFormData.unique_code = generateStudentId(
+        activeSchoolName,
+        targetSectionForCode,
+        targetName,
+        targetClassForCode,
+        targetGenderForCode
+      );
+    }
+
+    const targetClass = editFormData?.classLevel || editFormData?.class_level || '';
+    const targetTrade = GENERAL_LOWER_CLASSES.includes(targetClass) ? 'N/A' : (editFormData?.trades_series || 'N/A');
 
     const payloadToSave = {
-      ...editFormData,
-      fullName: editFormData?.fullName?.trim() || editFormData?.name?.trim() || '',
+      ...sanitizedFormData,              
+      fullName: targetName,                   
+      section: editFormData?.section || '',     
+      classLevel: targetClass,                
+      trades_series: targetTrade,                                   
       residence: editFormData?.residence?.trim() || 'N/A',
+      dob: editFormData?.dob || '',
+      gender: editFormData?.gender || 'Male',
+      guardian_name: editFormData?.guardian_name?.trim() || editFormData?.guardianName?.trim() || 'Parent',
+      guardian_phone: cleanGuardianPhone,
       medical_history: editFormData?.medical_history?.trim() || 'None',
-      guardian_name: editFormData?.guardian_name?.trim() || 'Parent',
-      guardian_phone: cleanGuardianPhone, // Strict Guardian Contact
-      phone: cleanStudentPhone,          // Strict Student Contact (Optional / N/A)
-      trades_series: GENERAL_LOWER_CLASSES.includes(currentClass) ? 'N/A' : (currentSeries || 'N/A'),
-      updated_at: new Date().toISOString()
+      
     };
 
     const studentId = editFormData?.id;
@@ -1215,25 +1241,30 @@ if (!editFormData?.residence || !editFormData.residence.trim()) {
     } catch (localErr) {
       console.warn("Local student edit notice:", localErr);
     }
-
-    // 2. BACKGROUND SYNC TO SUPABASE IF ONLINE
+   // 2. BACKGROUND SYNC TO SUPABASE IF ONLINE
     if (navigator.onLine && studentId) {
       try {
-        const { error } = await supabase
+        const targetSchoolId = currentSchoolId || editFormData?.school_id || activeSchool?.id || activeSchool?.school_id;
+
+        const { data, error } = await supabase
           .from('students')
           .update(payloadToSave)
           .eq('id', studentId)
-          .eq('school_id', currentSchoolId);
+          .eq('school_id', targetSchoolId)
+          .select();
 
-        if (!error) {
+        if (!error && data && data.length > 0) {
           // Clear queue item if cloud update succeeded
           await db.pendingSyncQueue
             .where('payload.id')
             .equals(studentId)
             .delete();
+        } else if (error) {
+          console.error("Supabase Save Error:", error);
+          alert(`Supabase Error: ${error.message}`);
         }
       } catch (err) {
-        console.warn("Remote edit delayed. Action queued in local storage.");
+        console.warn("Remote edit delayed. Action queued in local storage.", err);
       }
     }
 
@@ -2261,7 +2292,7 @@ if (sec.includes('commercial') && (!selectedTechnicalSubject || !COMMERCIAL_TRAD
       age,
       dob,
       residence: residence || 'N/A',
-     medical_history: medicalHistory || 'None',
+      medical_history: medicalHistory || 'None',
       guardian_name: guardianName || 'Parent',
       guardian_phone: guardianPhone || phone || 'N/A',
       picture: picturePreview,
@@ -2360,10 +2391,10 @@ if (typeof db !== 'undefined' && db?.pendingSyncQueue) {
         ? active_school_name
         : (typeof activeSchool !== 'undefined' ? (activeSchool?.school_name || activeSchool?.name) || schoolName : schoolName);
 
-      const schoolWords = String(resolvedSchoolName).trim().split(/\s+/);
-      const schoolInitials = schoolWords.length > 1
-        ? (schoolWords[0].charAt(0) + schoolWords[1].charAt(0)).toUpperCase()
-        : schoolWords[0].substring(0, 2).toUpperCase();
+      const words = String(resolvedSchoolName || 'SCH').trim().split(/\s+/);
+        const schoolInitials = words.length >= 3
+          ? words.slice(0, 3).map((w) => w[0]).join('').toUpperCase()
+          : words.join('').substring(0, 3).toUpperCase();
 
       const nameWords = fullName.trim().split(/\s+/);
       const nameInitials = nameWords.length > 1
@@ -2381,9 +2412,10 @@ if (typeof db !== 'undefined' && db?.pendingSyncQueue) {
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : APP_BASE_URL;
 
   // Explicitly passes role= parameter and formatted query params
-const signupLink = activeEditRecord?.signup_link || `${baseUrl}/staff-signup?role=${encodeURIComponent(regRole)}&school_id=${encodeURIComponent(activeSchoolId)}&token=${token}`;
+// Explicitly passes role= parameter and formatted query params
 const activeSchoolId = typeof schoolId !== 'undefined' ? schoolId : (activeSchool?.school_id || activeSchool?.id || '');
-const activeSchoolName = localStorage.getItem('active_school_name') || 'ClassLogs';
+const activeSchoolName = localStorage.getItem('active_school_name') || activeSchool?.name || 'ClassLogs';
+const signupLink = activeEditRecord?.signup_link || `${baseUrl}/staff-signup?role=${encodeURIComponent(regRole)}&school_id=${encodeURIComponent(activeSchoolId)}&token=${token}`;
 const newStaffRecord = {
   school_id: activeSchoolId,
   school_name: activeSchoolName,
@@ -2605,23 +2637,17 @@ const handleUpdatePersonnel = async (e) => {
               alt="School Logo"
               className="h-8 sm:h-12 md:h-14 w-auto object-contain filter drop-shadow-md transition-all"
             />
-          ) : (activeSchool?.logo_url && activeSchool.logo_url.length > 20) ? (
-            <img
-              src={activeSchool.logo_url}
-              alt="School Logo"
-              className="h-8 sm:h-12 md:h-14 w-auto object-contain filter drop-shadow-md transition-all"
-            />
-          ) : (typeof window !== 'undefined' && localStorage.getItem('active_school_logo')) ? (
-            <img
-              src={localStorage.getItem('active_school_logo')}
-              alt="School Logo"
-              className="h-8 sm:h-12 md:h-14 w-auto object-contain filter drop-shadow-md transition-all"
-            />
-          ) : (
-            <div className="h-8 w-8 sm:h-11 sm:w-11 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center">
-              <span className="text-[10px] sm:text-xs font-bold text-sky-400">LOGO</span>
-            </div>
-          )}
+          ) : (hasMounted && typeof window !== 'undefined' && localStorage.getItem('active_school_logo')) ? (
+                    <img
+                      src={localStorage.getItem('active_school_logo')}
+                      alt="School Logo"
+                      className="h-8 sm:h-12 md:h-14 w-auto object-contain filter drop-shadow-md transition-all"
+                    />
+                  ) : (
+                    <div className="h-8 w-8 sm:h-11 sm:w-11 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center">
+                      <span className="text-[10px] sm:text-xs font-bold text-sky-400">LOGO</span>
+                    </div>
+                  )}
         </div>
           </div>
 
@@ -2703,15 +2729,15 @@ const handleUpdatePersonnel = async (e) => {
         {/* OVERVIEW TAB */}
         {activeTab === 'overview' && (
           <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6"> 
               <div className="bg-[#f0f7ff] border border-blue-200 p-4 sm:p-6 rounded-xl shadow-sm text-slate-900">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-blue-500 font-bold">Total Students</h3>
-                <p className="text-3xl font-black mt-2 text-[#052e16]">{totalStudents}</p>
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-emerald-600 font-bold">Total Students</h3>
+                <p className="text-3xl font-black mt-2 text-[#059669]">{totalStudents}</p>
                 <div className="text-[11px] text-blue-500 font-bold mt-1 flex gap-2">
                   <div>
-                    <span>General Education = <strong className="text-amber-500 font-bold">{generalStudentsCount}</strong> | </span>
-                    <span>Technical Commercial = <strong className="text-amber-500 font-bold">{tcStudentsCount}</strong> | </span>
-                    <span>Technical Industrial = <strong className="text-amber-500 font-bold">{tiStudentsCount}</strong></span>
+                    <span>General Education = <strong className="text-emerald-900 font-bold">{generalStudentsCount}</strong> | </span>
+                    <span>Technical Commercial = <strong className="text-emerald-900 font-bold">{tcStudentsCount}</strong> | </span>
+                    <span>Technical Industrial = <strong className="text-emerald-900 font-bold">{tiStudentsCount}</strong></span>
   </div>
                 </div>
               </div>
@@ -4024,19 +4050,19 @@ const handleUpdatePersonnel = async (e) => {
 <td className="py-2.5 px-3 font-semibold text-amber-100 text-[10.5px] sm:text-xs md:text-sm whitespace-nowrap">
   {stu.fullName || stu.fullname || stu.full_name}
 </td>
-             <td className="p-3">
-  <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2">
-  <span className="text-[11px] bg-blue-900/40 text-blue-300 px-1.5 py-0.5 rounded border border-blue-700/40">
-    {stu.section}
-  </span>
-  <span className="text-[11px] text-gray-400">
-    {stu.classLevel}
-  </span>
-</div>
-    </td>
-          <td className="p-3">
-  <div className="font-semibold text-[14px] sm:text-sm text-amber-100">
-    {stu.section?.toLowerCase() === 'general' ? 'N/A' : (stu.trades_series || stu.trade || stu.trade_series || stu.series || stu.specialty || '-')}
+<td className="py-1 px-2 whitespace-nowrap">
+  <div className="flex flex-col gap-0.5 leading-none">
+    <span className="text-[11px] font-semibold bg-blue-900/40 text-blue-300 px-1.7 py-0.7 rounded border border-blue-700/40 w-fit whitespace-nowrap">
+      {stu.section}
+    </span>
+    <span className="text-[10px] text-gray-300 font-medium whitespace-nowrap">
+      {stu.classLevel}
+    </span>
+  </div>
+</td>
+  <td className="p-2 max-w-[160px] truncate">
+  <div className="font-semibold text-xs text-amber-100 truncate" title={stu.trades_series || stu.trade}>
+    {stu.section?.toLowerCase() === 'general' ? 'N/A' : (stu.trades_series || stu.trade || stu.trade_series || 'N/A')}
   </div>
 </td>
                 <td className="p-3"><span className="text-amber-200 font-medium">{stu.gender}</span>, {stu.age} yrs</td>
@@ -4114,7 +4140,7 @@ const handleUpdatePersonnel = async (e) => {
         {teacherSubTab === 'assigned' && (
           <div className="space-y-4">
            <h2 className="text-lg font-bold text-white border-b border-gray-800 pb-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-  <span>All Assigned Teachers Summary (Click ID to Copy)</span>
+  <span>All Assigned Teachers Summary (Click Teacher ID to Copy & Share)</span>
   
   <div className="flex items-center gap-3 w-full sm:w-auto">
     <div className="relative flex-1 sm:w-64">
@@ -4172,16 +4198,19 @@ const handleUpdatePersonnel = async (e) => {
   <h3 className="text-base font-bold text-white">{teacher.name}</h3>
   <p className="text-xs text-gray-400 mt-1">Phone: {teacher.phone || 'N/A'} | Email: {teacher.email || 'N/A'}</p>
 </div>
-        <button
-          onClick={() => {
-            navigator.clipboard.writeText(teacher.id);
-            alert(`Teacher ID ${teacher.id} copied to clipboard!`);
-          }}
-          className="bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-mono text-xs px-2.5 py-1 rounded transition-colors"
-          title="Click to copy Teacher ID"
-        >
-          ID {teacher.id} (Copy)
-        </button>
+      <button
+  onClick={() => {
+    const codeToCopy = teacher.teacher_id || teacher.id;
+    if (codeToCopy) {
+      navigator.clipboard.writeText(codeToCopy);
+      alert(`Teacher ID ${codeToCopy} copied to clipboard!`);
+    }
+  }}
+  className="bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-mono text-[10px] sm:text-xs px-2 py-1 rounded-lg"
+  title="Click to copy Teacher ID"
+>
+  {teacher.teacher_id || teacher.id}
+</button>
       </div>
 
     </div>
@@ -4806,6 +4835,7 @@ const handleUpdatePersonnel = async (e) => {
           </div>
         </div>
       )}
+
 {/* EDIT STUDENT MODAL SCREEN */}
       {editingStudent && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
@@ -4870,29 +4900,55 @@ const handleUpdatePersonnel = async (e) => {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">Section</label>
-                  <input
-                    type="text"
-                    value={editFormData.section || ""}
-                    onChange={(e) =>
-                      setEditFormData({ ...editFormData, section: e.target.value })
-                    }
-                    className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-sm focus:border-amber-500 outline-none"
-                  />
-                </div>
+              <div>
+  <label className="block text-xs text-gray-400 mb-1">Section</label>
+  <select
+    value={editFormData.section || ''}
+    onChange={(e) => {
+      const newSection = e.target.value;
+      setEditFormData({
+        ...editFormData,
+        section: newSection,
+        trades_series: '' // Clears trade when switching sections so invalid choices don't remain
+      });
+    }}
+    className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-sm text-white focus:border-amber-500/50 outline-none"
+  >
+    <option value="">-- Select Section --</option>
+    <option value="General Education">General Education</option>
+    <option value="Technical Commercial (STT)">Technical Commercial (STT)</option>
+    <option value="Technical Industrial (IND)">Technical Industrial (IND)</option>
+  </select>
+</div>
 
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">Class Level</label>
-                  <input
-                    type="text"
-                    value={editFormData.classLevel || ""}
-                    onChange={(e) =>
-                      setEditFormData({ ...editFormData, classLevel: e.target.value })
-                    }
-                    className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-sm focus:border-amber-500 outline-none"
-                  />
-                </div>
+               {/* Dynamic Class Level Dropdown using Single Source of Truth Catalogs */}
+        <div>
+          <label className="block text-xs font-semibold text-gray-400 mb-1">Class Level</label>
+          <select
+            value={editFormData.classLevel || editFormData.class_level || ''}
+            onChange={(e) => setEditFormData({ 
+              ...editFormData, 
+              classLevel: e.target.value,
+              class_level: e.target.value 
+            })}
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-sm text-white focus:border-amber-500/50 outline-none"
+          >
+            <option value="">-- Select Class Level --</option>
+            {editFormData.section?.toLowerCase().includes('commercial') ? (
+              TECHNICAL_COMMERCIAL_CATALOG.map((c, i) => (
+                <option key={i} value={c}>{c}</option>
+              ))
+            ) : editFormData.section?.toLowerCase().includes('industrial') ? (
+              TECHNICAL_INDUSTRIAL_CATALOG.map((c, i) => (
+                <option key={i} value={c}>{c}</option>
+              ))
+            ) : (
+              GENERAL_CLASSES_CATALOG.map((c, i) => (
+                <option key={i} value={c}>{c}</option>
+              ))
+            )}
+          </select>
+        </div>
 
                 <div>
                   <label className="block text-xs text-gray-400 mb-1">Gender</label>
@@ -4921,41 +4977,122 @@ const handleUpdatePersonnel = async (e) => {
                 </div>
 
                 <div>
-                  <label className="block text-xs text-gray-400 mb-1">Guardian Phone</label>
-                  <input
-                    type="text"
-                    value={editFormData.guardianPhone || ""}
-                    onChange={(e) =>
-                      setEditFormData({ ...editFormData, guardianPhone: e.target.value })
-                    }
-                    className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-sm focus:border-amber-500 outline-none"
-                  />
-                </div>
-                {/* Student Direct Phone */}
-<div>
-  <label className="block text-xs font-semibold text-gray-400 mb-1">Student Phone</label>
-  <input
-    type="text"
-    value={editFormData.phone || editFormData.student_phone || ''}
-    onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
-    placeholder="Optional (e.g. 670000000)"
-    className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-white text-sm"
-  />
-</div>
-{/* Technical Specialty Trade Field */}
-{(editFormData.section?.toLowerCase().includes('technical') || editFormData.trade) && (
-  <div>
-    <label className="block text-xs font-semibold text-amber-400 mb-1">Technical Specialty Trade</label>
-    <input
-      type="text"
-      value={editFormData.trade || editFormData.trade_series || editFormData.specialty || ''}
-      onChange={(e) => setEditFormData({ ...editFormData, trade: e.target.value })}
-      placeholder="e.g. Building Construction"
-      className="w-full bg-gray-800 border border-amber-500/50 rounded-lg p-2.5 text-amber-300 text-sm font-medium"
-    />
-  </div>
-)}
+          <label className="block text-xs text-gray-400 mb-1">Guardian Phone</label>
+          <input
+            type="text"
+            value={editFormData.guardian_phone || editFormData.guardianPhone || ''}
+            onChange={(e) => setEditFormData({ ...editFormData, guardian_phone: e.target.value })}
+            placeholder="e.g. 675000000"
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-sm text-white focus:border-amber-500/50 outline-none"
+          />
+        </div>
+        {/* Student Direct Phone */}
+        <div>
+          <label className="block text-xs font-semibold text-gray-400 mb-1">Student Phone</label>
+          <input
+            type="text"
+            value={editFormData.student_phone || editFormData.studentPhone || ''}
+            onChange={(e) => setEditFormData({ ...editFormData, student_phone: e.target.value })}
+            placeholder="Optional (e.g. 670000000)"
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-white text-sm outline-none"
+          />
+        </div>
+{/* Dynamic Specialty Trade / Series Selector */}
+        <div>
+          <label className="block text-xs font-semibold text-amber-400 mb-1">
+            Specialty Trade / Series
+          </label>
+          <select
+            value={editFormData.trades_series || editFormData.trade || ''}
+            onChange={(e) => setEditFormData({ ...editFormData, trades_series: e.target.value, trade: e.target.value })}
+            className="w-full bg-gray-800 border border-amber-500/50 rounded-lg p-2.5 text-amber-300 text-sm font-medium focus:border-amber-400 outline-none"
+          >
+            <option value="">-- Select Trade / Series --</option>
+            {editFormData.section?.toLowerCase().includes('commercial') ? (
+              COMMERCIAL_TRADE_SERIES.map((t, i) => (
+                <option key={i} value={t}>{t}</option>
+              ))
+            ) : editFormData.section?.toLowerCase().includes('industrial') ? (
+              INDUSTRIAL_TRADE_SERIES.map((t, i) => (
+                <option key={i} value={t}>{t}</option>
+              ))
+            ) : editFormData.classLevel?.toLowerCase().includes('sixth') || editFormData.class_level?.toLowerCase().includes('sixth') ? (
+              [...(GENERAL_SERIES_CATALOG.ARTS || []), ...(GENERAL_SERIES_CATALOG.SCIENCE || [])].map((s, i) => (
+                <option key={i} value={s.code}>{s.code} - {s.subjects?.join(', ')}</option>
+              ))
+            ) : (
+              <option value="N/A">N/A - General Education</option>
+            )}
+          </select>
+        </div>
               </div>
+              {/* Date of Birth & Place of Residence */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-300 mb-1">
+              Date of Birth (DOB)
+            </label>
+            <input
+              type="date"
+              value={editFormData.dob || ''}
+              onChange={(e) => setEditFormData({ ...editFormData, dob: e.target.value })}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-sm text-white focus:border-amber-500/50 outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-300 mb-1">
+              Place of Residence
+            </label>
+            <input
+              type="text"
+              value={editFormData.residence || ''}
+              onChange={(e) => setEditFormData({ ...editFormData, residence: e.target.value })}
+              placeholder="e.g. Boumjere"
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-sm text-white focus:border-amber-500/50 outline-none"
+            />
+          </div>
+        </div>
+
+        {/* Charming Financial Summary Badge (Read-Only) */}
+        <div className="bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900 border border-amber-500/40 p-3.5 rounded-xl flex flex-wrap items-center justify-between gap-3 shadow-lg my-2">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-300 font-bold text-sm">
+              💳
+            </div>
+            <div>
+              <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block">
+                Financial Summary (Read-Only)
+              </span>
+              <span className="text-xs font-semibold text-gray-200">
+                Live School Fees Overview
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-5 text-xs bg-black/40 px-3.5 py-1.5 rounded-lg border border-gray-800">
+            <div>
+              <span className="text-gray-400 block text-[10px]">Total Due</span>
+              <span className="font-mono text-white font-bold">
+                {Number(editFormData.amount_due || 0).toLocaleString()} FCFA
+              </span>
+            </div>
+            <div className="h-6 w-[1px] bg-gray-800" />
+            <div>
+              <span className="text-gray-400 block text-[10px]">Total Paid</span>
+              <span className="font-mono text-emerald-400 font-bold">
+                {Number(editFormData.amount_paid || 0).toLocaleString()} FCFA
+              </span>
+            </div>
+            <div className="h-6 w-[1px] bg-gray-800" />
+            <div>
+              <span className="text-gray-400 block text-[10px]">Balance</span>
+              <span className="font-mono text-rose-400 font-bold">
+                {Number(editFormData.balance || 0).toLocaleString()} FCFA
+              </span>
+            </div>
+          </div>
+        </div>
 {/* Medical Notes & Health History (View/Edit Only - Excluded from Printouts) */}
           <div className="col-span-1 md:col-span-2 space-y-1 mt-2">
             <label className="block text-xs font-semibold text-amber-400">
@@ -4998,6 +5135,8 @@ const handleUpdatePersonnel = async (e) => {
                   Save & Update Student
                 </button>
               </div>
+
+
               {/* Universal Red Delete Confirmation Modal */}
       {studentToDelete && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
@@ -5057,7 +5196,7 @@ const handleUpdatePersonnel = async (e) => {
             </button>
 
             {/* Header & Details */}
-            <div className="border-b border-gray-800 pb-4 mb-4 flex flex-wrap items-center justify-between gap-4">
+           <div className="border-b border-gray-800 pb-4 mb-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="flex items-center gap-4">
                 {selectedTeacherModal.picture ? (
                   <img
@@ -5071,12 +5210,12 @@ const handleUpdatePersonnel = async (e) => {
                   </div>
                 )}
                 <div id="printable-teacher-timetable">
-                  <h2 className="text-2xl font-bold text-amber-400">{selectedTeacherModal.name || 'Unnamed Teacher'}</h2>
+                  <h2 className="text-2xl font-bold text-amber-100">{selectedTeacherModal.name || 'Unnamed Teacher'}</h2>
                   <p className="text-xs text-gray-400 mt-1">
                     ID: <span className="font-mono text-gray-200">{selectedTeacherModal.id}</span> | Email: {selectedTeacherModal.email || 'N/A'} | Phone: {selectedTeacherModal.phone || 'N/A'}
                   </p>
                   <p className="text-xs text-gray-400 mt-1">
-                    Section: <span className="text-amber-300">{selectedTeacherModal.section || 'N/A'}</span> | Residence: {selectedTeacherModal.residence || 'N/A'}
+                    Section: <span className="text-amber-100">{selectedTeacherModal.section || 'N/A'}</span> | Residence: {selectedTeacherModal.residence || 'N/A'}
                   </p>
                 </div>
               </div>
@@ -5111,8 +5250,7 @@ const handleUpdatePersonnel = async (e) => {
                <button
   type="button"
   onClick={() => window.print()}
-  className="bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold px-3 py-2 rounded-lg no-print"
->
+className="bg-amber-600/30 hover:bg-amber-600/50 border border-amber-500/50 text-amber-100 text-xs font-bold px-3 py-2 rounded-lg no-print">
   Print Timetable
 </button>
 <button
@@ -5219,24 +5357,24 @@ className="px-2 sm:px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs 
             
 {/* Dynamic School & Academic Year Banner for Multi-Tenant Isolation */}
         <div id="printable-teacher-timetable" className="grid grid-cols-3 gap-2 bg-[#1f2937]/60 border border-gray-800 p-3 rounded-xl mb-4">
-          <div className="text-gray-400">ASSIGNED CLASSES & SUBJECTS</div>
-          <div className="text-center text-amber-400 font-extrabold">
+          <div className="text-amber-100">ASSIGNED CLASSES & SUBJECTS</div>
+          <div className="text-center cream-yellow text-amber-100 font-extrabold">
   {activeSchool?.name || activeSchool?.school_name || (typeof window !== 'undefined' ? (localStorage.getItem('active_school_name') || localStorage.getItem('school_name')) : '') || '-'}
 </div>
 
-<div className="text-right flex items-center justify-end gap-2">
-  <span className="text-xs text-emerald-400 hidden sm:inline">ACADEMIC YEAR: {getCurrentAcademicYear()}</span>
+<div className="text-right flex items-center justify-end gap-1.5">
+  <span className="text-[11px] text-amber-100 hidden sm:inline">ACADEMIC YEAR: {getCurrentAcademicYear()}</span>
   <button
     type="button"
     onClick={handleToggleLock}
     disabled={isTogglingLock}
-    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-md border ${
+    className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 border shrink-0 ${
       isMarkEntryAuthorized
-        ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300 hover:bg-emerald-600 hover:text-white'
-        : 'bg-rose-600/20 border-rose-500 text-rose-300 hover:bg-rose-600 hover:text-white'
+        ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/80'
+        : 'bg-rose-950/60 border-rose-500/50 text-rose-300 hover:bg-rose-900/80'
     }`}
   >
-    <span>{isMarkEntryAuthorized ? '🔓 Marks: AUTHORIZED' : '🔒 Marks: FROZEN'}</span>
+    <span>{isMarkEntryAuthorized ? '🔓 AUTHORIZED' : '🔒 FROZEN'}</span>
   </button>
 </div>
         </div>
@@ -5246,7 +5384,7 @@ className="px-2 sm:px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs 
               <div className="flex flex-wrap gap-2">
                 {Array.isArray(selectedTeacherModal.subjects) && selectedTeacherModal.subjects.length > 0 ? (
                   selectedTeacherModal.subjects.map((sub, idx) => (
-                    <span key={idx} className="bg-amber-500/10 text-amber-300 border border-amber-500/30 text-xs px-3 py-1 rounded-full font-medium">
+                    <span key={idx} className="bg-amber-500/10 text-amber-100 border border-amber-500/30 text-xs px-3 py-1 rounded-full font-medium">
                       {sub}
                     </span>
                   ))

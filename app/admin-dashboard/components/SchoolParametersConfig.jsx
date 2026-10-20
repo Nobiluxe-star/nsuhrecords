@@ -17,16 +17,15 @@ export default function SchoolParametersConfig({ activeSchool, deleteBanner, set
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // --- Supabase Hydration ---
-  // --- Instant Offline-First Hydration Engine ---
+
+ // --- Fail-Safe Hydration Engine ---
   useEffect(() => {
     let isMounted = true;
     const CACHE_KEY = 'cached_school_details_v1';
 
-    // Helper: Clean up placeholders like 'EMPTY' or 'NULL'
     const sanitize = (val) => (val && val !== 'EMPTY' && val !== 'NULL' ? val : '');
 
-    // 1. INSTANT LOAD: Load local cache immediately (0ms speed)
+    // 1. Instant Cache Load (0ms speed)
     const loadFromCache = () => {
       try {
         const localData = localStorage.getItem(CACHE_KEY) || localStorage.getItem('active_school_details');
@@ -44,28 +43,30 @@ export default function SchoolParametersConfig({ activeSchool, deleteBanner, set
           setAcademicYearEndDate(sanitize(parsed.academic_year_end_date));
         }
       } catch (e) {
-        console.warn('Error reading offline school details cache:', e);
+        console.warn('Cache load error:', e);
       }
     };
 
-    // Load local storage first
     loadFromCache();
 
-    // 2. BACKGROUND REVALIDATION: Sync with Supabase silently
+    // 2. Safety Timeout: Force disable loader after 4 seconds max
+    const timer = setTimeout(() => {
+      if (isMounted) setIsLoading(false);
+    }, 4000);
+
+    // 3. Silent Supabase Background Fetch
     async function syncWithSupabase() {
-      if (!supabase) return;
-
-      const targetSchoolId = activeSchool?.school_id || activeSchool?.id;
-      const targetName = activeSchool?.name || activeSchool?.institution_name;
-
-      // Show loader only if local storage was completely empty
       const hasCachedData = typeof window !== 'undefined' && (localStorage.getItem(CACHE_KEY) || localStorage.getItem('active_school_details'));
       if (!hasCachedData) setIsLoading(true);
 
       try {
+        if (!supabase) return;
+
+        const targetSchoolId = activeSchool?.school_id || activeSchool?.id;
+        const targetName = activeSchool?.name || activeSchool?.institution_name;
+
         let detailsData = null;
 
-        // Optimized single OR query or sequential check
         if (targetSchoolId) {
           const { data } = await supabase
             .from('school_details')
@@ -84,7 +85,6 @@ export default function SchoolParametersConfig({ activeSchool, deleteBanner, set
           detailsData = data;
         }
 
-        // Public user fallback: Grab primary row if no active user session
         if (!detailsData) {
           const { data } = await supabase
             .from('school_details')
@@ -97,7 +97,6 @@ export default function SchoolParametersConfig({ activeSchool, deleteBanner, set
         if (isMounted && detailsData) {
           const logo = sanitize(detailsData.logo_url);
 
-          // Update form states with fresh cloud data
           setSchoolMotto(sanitize(detailsData.motto));
           setSchoolRegion(sanitize(detailsData.region));
           setSchoolLogo(logo);
@@ -109,7 +108,6 @@ export default function SchoolParametersConfig({ activeSchool, deleteBanner, set
           setAcademicYearStartDate(sanitize(detailsData.academic_year_start_date));
           setAcademicYearEndDate(sanitize(detailsData.academic_year_end_date));
 
-          // Save to local storage for offline use
           if (typeof window !== 'undefined') {
             localStorage.setItem(CACHE_KEY, JSON.stringify(detailsData));
             localStorage.setItem('active_school_details', JSON.stringify(detailsData));
@@ -120,7 +118,7 @@ export default function SchoolParametersConfig({ activeSchool, deleteBanner, set
           }
         }
       } catch (err) {
-        console.error('Background sync failed (operating offline mode):', err);
+        console.error('Background fetch failed:', err);
       } finally {
         if (isMounted) setIsLoading(false);
       }
@@ -130,6 +128,7 @@ export default function SchoolParametersConfig({ activeSchool, deleteBanner, set
 
     return () => {
       isMounted = false;
+      clearTimeout(timer);
     };
   }, [activeSchool, supabase]);
 
