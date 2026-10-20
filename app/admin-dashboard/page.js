@@ -146,12 +146,11 @@ export const ALL_AVAILABLE_CLASSES = [
 export const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 // Student ID Generator: WCM-GMA15739G or WCM-TPA16814B
-
-const generateStudentId = (schoolName, section, fullName, classLevel, gender) => {
+export const generateStudentId = (schoolName, section, fullName, classLevel, arg5, arg6) => {
   const schoolCode = String(schoolName || 'SCH')
     .trim()
     .split(/\s+/)
-    .slice(0, 3) // Captures up to 3 initials (e.g., BHS)
+    .slice(0, 3)
     .map(word => word[0])
     .join('')
     .toUpperCase();
@@ -171,12 +170,12 @@ const generateStudentId = (schoolName, section, fullName, classLevel, gender) =>
     ? bracketMatch[1].toUpperCase()
     : rawClass.split(/\s+/).map(word => word[0]).join('').toUpperCase();
 
-  // Single Source of Truth: Dynamically calculates session from system date (e.g. '2026/2027' -> '26')
   const fullAcademicYear = getAcademicYear();
   const academicYearSuffix = fullAcademicYear.substring(2, 4);
 
-  const cleanGender = String(gender || '').toLowerCase();
-  const genderCode = (cleanGender.includes('female') || cleanGender.includes('girl') || cleanGender.startsWith('g')) ? 'F' : 'M';
+  // Safely detect gender whether passed as 5th or 6th argument
+  const rawGender = String(arg6 || arg5 || '').toLowerCase();
+  const genderCode = (rawGender.includes('female') || rawGender.includes('girl') || rawGender.startsWith('f')) ? 'F' : 'M';
 
   const randomSuffix = String(Math.floor(10 + Math.random() * 90));
 
@@ -1143,12 +1142,12 @@ const handleRowClick = async (student) => {
     classLevel: student.classLevel || student.class_level || '',
     trades_series: student.trades_series || student.trade || '',
     residence: student.residence || '',
-    dob: student.dob || student.date_of_birth || '',
+    dob: (student.dob || student.date_of_birth) ? String(student.dob || student.date_of_birth).split('T')[0] : '',
     gender: student.gender || 'Male',
     guardian_name: student.guardian_name || student.guardianName || student.parent_name || '',
     guardian_phone: rawGuardianPhone,
     student_phone: rawStudentPhone,
-    medical_history: student.medical_history || student.medicalNotes || 'None',
+    medical_history: (student.medical_history === 'None' || student.medicalNotes === 'None') ? 'None / No Known Medical Conditions' : (student.medical_history || student.medicalNotes || 'None / No Known Medical Conditions'),
     amount_due,
     amount_paid,
     balance
@@ -1215,7 +1214,7 @@ const { updated_at, trade, class_level, phone, student_phone, amount_due, amount
       classLevel: targetClass,                
       trades_series: targetTrade,                                   
       residence: editFormData?.residence?.trim() || 'N/A',
-      dob: editFormData?.dob || '',
+      dob: (editFormData?.dob || editFormData?.date_of_birth) ? String(editFormData?.dob || editFormData?.date_of_birth).split('T')[0] : '',
       gender: editFormData?.gender || 'Male',
       guardian_name: editFormData?.guardian_name?.trim() || editFormData?.guardianName?.trim() || 'Parent',
       guardian_phone: cleanGuardianPhone,
@@ -2209,23 +2208,20 @@ if (sec.includes('commercial') && (!selectedTechnicalSubject || !COMMERCIAL_TRAD
       setIsSubmitting(false);
       return;
     }
-    if (!fullName || !guardianPhone || !age || !dob || !gender || !residence) {
-  alert('Please fill in all mandatory student credential fields including gender and residence.');
+   if (!fullName || !fullName.trim()) {
+  alert('Please enter the student\'s full name.');
   setIsSubmitting(false);
   return;
 }
 
-    if (phone && !validateCameroonPhone(phone)) {
-      alert('Invalid Student Phone Number! Must start with 6 and contain 9 digits.');
-      setIsSubmitting(false);
-      return; 
-    }
-
-    if (!validateCameroonPhone(guardianPhone)) {
-      alert('Invalid Guardian Phone Number! Must start with 6 and contain 9 digits.');
-      setIsSubmitting(false);
-      return;
-    }
+if (guardianPhone && guardianPhone.trim()) {
+  const cleanPhone = guardianPhone.replace(/\s+/g, '').replace(/^\+237/, '');
+  if (!validateCameroonPhone(cleanPhone)) {
+    alert('Invalid Guardian Phone Number! Must start with 6 and contain 9 digits.');
+    setIsSubmitting(false);
+    return;
+  }
+}
 // Direct Multi-Tenant Resolution with Local Storage Offline Fallback
   const { data: { session } } = await supabase.auth.getSession();
 
@@ -2278,27 +2274,27 @@ if (sec.includes('commercial') && (!selectedTechnicalSubject || !COMMERCIAL_TRAD
           setIsSubmitting(false);
           return;
         }
-      }
-    const uniqueStudentId = generateStudentId(currentSchoolName, section, fullName, classLevel, age, gender);
-    const newStudentRecord = {
-      school_id: currentSchoolId,
-      academic_year: getAcademicYear(),
-      created_at: new Date().toISOString(),
-      unique_code: uniqueStudentId,
-      fullName,
-      section,
-      classLevel,
-      gender,
-      age,
-      dob,
-      residence: residence || 'N/A',
-      medical_history: medicalHistory || 'None',
-      guardian_name: guardianName || 'Parent',
-      guardian_phone: guardianPhone || phone || 'N/A',
-      picture: picturePreview,
-      phone: phone || guardianPhone,
-      trades_series: chosenSeriesOrTrade,
-    };
+      } 
+const uniqueStudentId = generateStudentId(currentSchoolName, section, fullName, classLevel, age, gender);
+const resolvedSchoolId = currentSchoolId || activeSchool?.school_id || activeSchool?.id || (typeof window !== 'undefined' ? localStorage.getItem('active_school_id') : null);
+const newStudentRecord = {
+  school_id: resolvedSchoolId,
+  academic_year: getAcademicYear(),
+  created_at: new Date().toISOString(),
+  unique_code: uniqueStudentId,
+  fullName: fullName ? fullName.trim() : '',
+  section: section || 'General',
+  classLevel: classLevel || '',
+  gender: gender || 'N/A',
+  age: age || null,
+  dob: dob || null,
+  residence: residence || 'N/A',
+  medical_history: medicalHistory || 'None',
+  guardian_name: guardianName || 'Parent',
+  guardian_phone: guardianPhone || phone || 'N/A',
+  picture: picturePreview || null,
+  trades_series: chosenSeriesOrTrade || 'N/A'
+};
 
     const studentCacheKey = `nsuh_students_${currentSchoolId}`;
 
@@ -2322,7 +2318,7 @@ if (sec.includes('commercial') && (!selectedTechnicalSubject || !COMMERCIAL_TRAD
         if (error.message?.includes('EXACT_DUPLICATE_RECORD') || error.code === '23505') {
           alert(`Registration Error: Student "${fullName}" (${gender}, Age: ${age}, Class: ${classLevel}) has already been registered.`);
         } else {
-          console.warn('Supabase insert notice:', error);
+         alert(`Supabase Insert Blocked: ${error?.message || JSON.stringify(error)}`);
         }
      // Remove from offline pending queue if successfully uploaded
 if (typeof db !== 'undefined' && db?.pendingSyncQueue) {
@@ -5099,14 +5095,14 @@ const handleUpdatePersonnel = async (e) => {
               Medical Notes / Health History
             </label>
             <input
-              list="common-medical-conditions"
+              list="edit-medical-conditions"
               type="text"
               placeholder="Select or type condition (e.g. Asthma, Peanut Allergy...)"
               value={editFormData.medical_history || ''}
               onChange={(e) => setEditFormData({ ...editFormData, medical_history: e.target.value })}
               className="w-full bg-gray-900/90 text-white placeholder-gray-500 text-xs px-3 py-2 rounded-lg border border-gray-700 focus:border-amber-400 focus:outline-none transition shadow-inner"
             />
-            <datalist id="common-medical-conditions">
+            <datalist id="edit-medical-conditions">
               <option value="None / No Known Medical Conditions" />
               <option value="Asthma / Respiratory Conditions" />
               <option value="Peanut / Groundnut Allergy" />

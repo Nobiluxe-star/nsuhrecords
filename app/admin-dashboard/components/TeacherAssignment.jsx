@@ -849,13 +849,13 @@ return (
 
               {selectedTeacherSubjects.length > 0 && (
                 <div className="space-y-4 pt-2 border-t border-gray-800">
-                  <h3 className="text-sm font-bold text-amber-400">Configure Class Forms & Schedule (Day, Start Time, End Time) per Subject</h3>
+                  <h3 className="text-sm font-bold text-amber-200">Configure Class Forms & Schedule (Day, Start Time, End Time) per Subject</h3>
                   {selectedTeacherSubjects.map((subject, subIdx) => {
                     const rows = subjectSchedules[subject] || [];
                     return (
                       <div key={subIdx} className="bg-[#1f2937]/40 border border-gray-700 p-2.5 sm:p-4 rounded-xl space-y-3 w-full max-w-full overflow-hidden">
                          <div className="font-bold text-sm text-white flex flex-wrap items-center justify-between gap-2">
-                          <span>📘 Subject: <span className="text-amber-400">{subject}</span></span>
+                          <span>📘 Subject: <span className="text-amber-200">{subject}</span></span>
                           <button 
                             type="button"
                             onClick={() => addClassRowToSubject(subject)}
