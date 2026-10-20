@@ -592,7 +592,7 @@ useEffect(() => {
   }
 }, [teacherToEdit]);
 return (
-  <div className={`p-8 rounded-2xl max-w-4xl mx-auto shadow-2xl space-y-6 transition-colors duration-300 ${isEditing ? 'bg-[#FDFBF7] text-gray-900 border border-gray-300' : 'bg-gray-900 text-white'}`}>
+<div className={`p-3 sm:p-6 rounded-2xl w-full max-w-full shadow-2xl space-y-6 transition-colors duration-300 ${isEditing ? 'bg-[#FDFBF7] text-gray-900 border border-gray-300' : 'bg-gray-900 text-white'}`}>
     <h2 className={`text-lg font-bold border-b pb-3 ${isEditing ? 'text-emerald-900 border-gray-300' : 'text-white border-gray-800'}`}>
       {isEditing ? `Edit Teacher & Configure Timetable: ${teacherToEdit?.name || teacherToEdit?.full_name}` : 'Assign New Teacher & Configure Timetable'}
     </h2>
@@ -625,7 +625,7 @@ return (
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-amber-400 mb-1">Email Address (Mandatory)</label>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-amber-100 mb-1">Email Address (Mandatory)</label>
                   <input 
                     type="email" 
                     value={teacherEmail} 
@@ -648,10 +648,10 @@ return (
               </div>
 
 {/* TEACHER QUALIFICATION (MANDATORY) & PROFILE PHOTO OPTIONS */}
-<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4 w-full max-w-full">
   {/* Qualification Dropdown + Manual Entry */}
   <div>
-    <label className="block text-xs font-semibold uppercase tracking-wider text-amber-400 mb-1">
+    <label className="block text-xs font-semibold uppercase tracking-wider text-amber-100 mb-1">
       Teacher Qualification (Mandatory) *
     </label>
     <select
@@ -707,8 +707,8 @@ return (
 
   {/* Photo Upload (Gallery) & Live Camera Capture Split */}
   <div>
-    <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
-   TEACHER PROFILE PICTURE / TAKE PHOTO
+    <label className="block text-xs font-semibold uppercase tracking-wider text-gray-300 mb-1">
+   TEACHER PROFILE PICTURE / TAKE PHOTO 
   </label>
   <div className="flex items-center gap-3">
     {/* 📁 Choose File from PC/Phone */}
@@ -726,7 +726,7 @@ return (
     <button
       type="button"
       onClick={startTeacherCamera}
-      className="bg-amber-600 hover:bg-amber-500 text-white text-xs px-3 py-2 rounded-lg flex items-center gap-1.5 font-medium shadow-md"
+      className="bg-emerald-800 hover:bg-emerald-700 text-emerald-100 text-xs px-3 py-2 rounded-lg border border-emerald-600/40 flex items-center gap-1.5 font-medium transition-colors"
     >
       📸 Take Photo
     </button>
@@ -806,7 +806,7 @@ return (
                       const settingsTab = Array.from(document.querySelectorAll('button')).find(el => el.textContent?.includes('Class & Coefficient Settings'));
                       if (settingsTab) settingsTab.click();
                     }}
-                    className="text-xs text-amber-400 hover:text-amber-300 underline cursor-pointer"
+                    className="text-xs text-amber-100 hover:text-amber-200 underline cursor-pointer"
                   >
                     + Add/Manage Subjects in Settings
                   </button>
@@ -821,8 +821,7 @@ return (
                     className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
                   />
                 </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 max-h-56 overflow-y-auto bg-[#1f2937]/50 p-3 rounded-lg border border-gray-700/50">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 max-h-56 overflow-y-auto bg-[#1f2937]/50 p-2.5 sm:p-3 rounded-lg border border-gray-700/50 w-full max-w-full">
           {getFilteredSubjects(teacherSection || selectedSection)
             .filter((subObj) => {
               const subName = typeof subObj === 'string' ? subObj : subObj.name;
@@ -854,8 +853,8 @@ return (
                   {selectedTeacherSubjects.map((subject, subIdx) => {
                     const rows = subjectSchedules[subject] || [];
                     return (
-                      <div key={subIdx} className="bg-[#1f2937]/40 border border-gray-700 p-4 rounded-xl space-y-3">
-                        <div className="font-bold text-sm text-white flex items-center justify-between">
+                      <div key={subIdx} className="bg-[#1f2937]/40 border border-gray-700 p-2.5 sm:p-4 rounded-xl space-y-3 w-full max-w-full overflow-hidden">
+                         <div className="font-bold text-sm text-white flex flex-wrap items-center justify-between gap-2">
                           <span>📘 Subject: <span className="text-amber-400">{subject}</span></span>
                           <button 
                             type="button"
@@ -919,7 +918,7 @@ return (
                             </datalist>
 
                             {/* START TIME COMBOBOX (Typable + Dropdown Arrow) */}
-                            <div className="w-full md:w-28">
+                            <div className="flex-1 w-full">
                               <label className="block text-[10px] uppercase text-gray-400 mb-1">Start Time</label>
                               <div className="relative flex items-center">
                                 <input
@@ -1025,7 +1024,7 @@ return (
   <button
     type="submit"
     disabled={isSubmittingTeacher}
-    className="flex-1 bg-amber-600 hover:bg-amber-500 text-white font-bold py-3 rounded-lg"
+    className="flex-1 bg-emerald-700 hover:bg-emerald-600 text-white font-bold py-3 rounded-lg shadow-md transition-colors"
   >
     {isSubmittingTeacher 
       ? 'Saving Teacher Assignment...' 

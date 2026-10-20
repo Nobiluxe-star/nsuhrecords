@@ -4140,6 +4140,7 @@ const handleUpdatePersonnel = async (e) => {
         {teacherSubTab === 'assigned' && (
           <div className="space-y-4">
            <h2 className="text-lg font-bold text-white border-b border-gray-800 pb-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+ 
   <span>All Assigned Teachers Summary (Click Teacher ID to Copy & Share)</span>
   
   <div className="flex items-center gap-3 w-full sm:w-auto">
@@ -4149,7 +4150,7 @@ const handleUpdatePersonnel = async (e) => {
         placeholder="Search teacher, subject..."
         value={teacherSearchQuery}
         onChange={(e) => setTeacherSearchQuery(e.target.value)}
-        className="w-full bg-[#111827] border border-amber-500/50 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-400 focus:outline-none focus:border-amber-400 transition-colors"
+        className="w-full bg-[#111827] border border-amber-200/40 rounded-lg px-3 py-1.5 text-xs text-amber-100 placeholder-gray-400 focus:border-amber-300 outline-none"
       />
       {teacherSearchQuery && (
         <button
@@ -4161,8 +4162,7 @@ const handleUpdatePersonnel = async (e) => {
         </button>
       )}
     </div>
-
-    <span className="text-xs bg-amber-500/20 text-amber-400 px-3 py-1.5 rounded-full border border-amber-500/30 whitespace-nowrap">
+    <span className="text-xs bg-amber-950/40 text-amber-100 px-3 py-1.5 rounded-full border border-amber-200/30 whitespace-nowrap">
       Total: {teachersList.filter(t => !teacherSearchQuery || JSON.stringify(t).toLowerCase().includes(teacherSearchQuery.toLowerCase())).length}
     </span>
   </div>
@@ -4198,19 +4198,19 @@ const handleUpdatePersonnel = async (e) => {
   <h3 className="text-base font-bold text-white">{teacher.name}</h3>
   <p className="text-xs text-gray-400 mt-1">Phone: {teacher.phone || 'N/A'} | Email: {teacher.email || 'N/A'}</p>
 </div>
-      <button
-  onClick={() => {
-    const codeToCopy = teacher.teacher_id || teacher.id;
-    if (codeToCopy) {
-      navigator.clipboard.writeText(codeToCopy);
-      alert(`Teacher ID ${codeToCopy} copied to clipboard!`);
-    }
-  }}
-  className="bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-mono text-[10px] sm:text-xs px-2 py-1 rounded-lg"
-  title="Click to copy Teacher ID"
->
-  {teacher.teacher_id || teacher.id}
-</button>
+     <button
+                        onClick={() => {
+                          const codeToCopy = teacher.teacher_id || teacher.id;
+                          if (codeToCopy) {
+                            navigator.clipboard.writeText(codeToCopy);
+                            alert(`Teacher ID ${codeToCopy} copied to clipboard!`);
+                          }
+                        }}
+                        className="bg-amber-950/40 hover:bg-amber-900/60 border border-amber-200/30 text-amber-100 font-mono text-[11px] px-2.5 py-1 rounded-md transition-colors"
+                        title="Click to copy Teacher ID"
+                      >
+                        {teacher.teacher_id || teacher.id || 'N/A'}
+                      </button>
       </div>
 
     </div>
