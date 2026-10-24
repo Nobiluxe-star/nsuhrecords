@@ -360,6 +360,7 @@ const MONTHS_LIST = [
 const YEARS_LIST = Array.from({ length: 21 }, (_, i) => String(2020 - i));
 export default function AdminDashboardPage() {
   const [activeSchool, setActiveSchool] = useState(null);
+
   const [activeTab, setActiveTab] = useState('overview');
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [deleteBanner, setDeleteBanner] = useState(null);
@@ -5632,10 +5633,11 @@ return (
                     Loading teacher logs...
                   </div>
                 ) : fetchedLessonLogs && fetchedLessonLogs.length > 0 ? (
-                  (() => {
-                    const groupedMap = new Map();
-                    fetchedLessonLogs.forEach((log) => {
-                      const weekNum = log.week_number || calculateAcademicWeek(academicYearStartDate, log.date_logged || log.created_at);
+                 (() => {
+  const academicYearStartDate = typeof schoolDetails !== 'undefined' ? schoolDetails?.academic_year_start : null;
+const groupedMap = new Map();
+fetchedLessonLogs.forEach((log) => {
+  const weekNum = log.week_number || (academicYearStartDate ? calculateAcademicWeek(academicYearStartDate, log.date_logged || log.created_at) : 1);
                       if (!groupedMap.has(weekNum)) {
                         groupedMap.set(weekNum, []);
                       }
@@ -5779,9 +5781,10 @@ return (
                       </tr>
                     ) : fetchedLessonLogs && fetchedLessonLogs.length > 0 ? (
                       (() => {
-                        const groupedMap = new Map();
-                        fetchedLessonLogs.forEach((log) => {
-                          const weekNum = log.week_number || calculateAcademicWeek(academicYearStartDate, log.date_logged || log.created_at);
+                       const academicYearStartDate = typeof schoolDetails !== 'undefined' ? schoolDetails?.academic_year_start : null;
+                const groupedMap = new Map();
+                    fetchedLessonLogs.forEach((log) => {
+                        const weekNum = log.week_number || (academicYearStartDate ? calculateAcademicWeek(academicYearStartDate, log.date_logged || log.created_at) : 1);
                           if (!groupedMap.has(weekNum)) {
                             groupedMap.set(weekNum, []);
                           }
