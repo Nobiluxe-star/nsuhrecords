@@ -22,6 +22,9 @@ import BulkTechnicalIndustrialReportCard from '../student-dashboard/components/B
 import { useAcademicConfigs } from './context/AcademicConfigsContext';
 import { getTeacherLockStatus, toggleTeacherLockStatus } from '../../lib/markLockService';
 
+import CommercialMock from '@/components/mock_examinations/CommercialMock';
+import IndustrialMock from '@/components/mock_examinations/IndustrialMock';
+import GeneralMock from '@/components/mock_examinations/GeneralMock';
 
 // Cameroon Ministry of Secondary Education Official Classes, Technical & Commercial Trades, Subjects & Series Catalog
 export const GENERAL_LOWER_CLASSES = [
@@ -38,9 +41,10 @@ export const GENERAL_LOWER_CLASSES = [
   'Form 3C (F3C)',
   'Form 4A (F4A)',
   'Form 4B (F4B)',
-  'Form 5 Arts (F5A)',
-  'Form 5 Science (F5B)',
+  'Form 5A (F5A)',
+  'Form 5B (F5B)',
 ];
+
 export const GENERAL_CLASSES_CATALOG = [
   'Form 1A (F1A)',
   'Form 1B (F1B)',
@@ -55,8 +59,8 @@ export const GENERAL_CLASSES_CATALOG = [
   'Form 3C (F3C)',
   'Form 4A (F4A)',
   'Form 4B (F4B)',
-  'Form 5 Arts (F5A)',
-  'Form 5 Science (F5B)',
+  'Form 5A (F5A)',
+  'Form 5B (F5B)',
   'Lower Sixth Arts (L6A)',
   'Lower Sixth Science (L6S)',
   'Upper Sixth Arts (U6A)',
@@ -4670,13 +4674,38 @@ const handleUpdatePersonnel = async (e) => {
           </div>
 
     {/* Render Section Specific Mark Sheet Component */}
-    {masterSection?.includes('Commercial') ? (
-      <TechnicalCommercialMarkSheet activeSchool={activeSchool} />
-    ) : masterSection?.includes('Industrial') ? (
-      <TechnicalIndustrialMarkSheet activeSchool={activeSchool} />
-    ) : (
-      <GeneralMarkSheet activeSchool={activeSchool} />
-    )}
+   {masterSection?.includes('Commercial') ? (
+  <TechnicalCommercialMarkSheet 
+    activeSchool={activeSchool} 
+    mockComponent={
+      <CommercialMock
+        schoolId={activeSchool?.id || activeSchool?.school_id || ''}
+        schoolDetails={activeSchool}
+      />
+    }
+  />
+) : masterSection?.includes('Industrial') ? (
+  <TechnicalIndustrialMarkSheet 
+    activeSchool={activeSchool} 
+    mockComponent={
+      <IndustrialMock
+        schoolId={activeSchool?.id || activeSchool?.school_id || ''}
+        schoolDetails={activeSchool}
+      />
+    }
+  />
+) : (
+  <GeneralMarkSheet 
+    activeSchool={activeSchool} 
+    mockComponent={
+      <GeneralMock
+        schoolId={activeSchool?.id || activeSchool?.school_id || ''}
+        schoolDetails={activeSchool}
+      />
+    }
+  />
+)}
+  
 
 {/* BULK REPORT CARD MODALS */}
 {bulkModalState.isOpen && bulkModalState.trackType === 'general' && (

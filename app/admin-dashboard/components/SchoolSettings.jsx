@@ -1,4 +1,4 @@
-import React, { useState, createContext, useContext } from 'react';
+import React, { useState, useEffect, createContext, useContext } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { 
   Globe, 
@@ -14,7 +14,13 @@ import {
   Calendar,
   Clock,
   Save,
-  ArrowRight
+  Lock,
+  KeyRound,
+  ShieldCheck,
+  Eye,
+  EyeOff,
+  Unlock,
+  LogOut
 } from 'lucide-react';
 
 // ==========================================
@@ -55,7 +61,8 @@ const translations = {
     rolloverHeader: 'Academic Year Rollover & Archiving',
     rolloverDesc: 'Promote students to the next level, archive term marks, and prepare the Master Mark Sheet for a new session.',
     triggerRollover: 'Initiate Year Rollover',
-    masterSheetNote: 'Regardless of your selected mode, all student marks and evaluations flow into the unified Master Mark Sheet.'
+    masterSheetNote: 'Regardless of your selected mode, all student marks and evaluations flow into the unified Master Mark Sheet.',
+    logoutLabel: 'Log Out of System'
   },
   fr: {
     dir: 'ltr',
@@ -91,7 +98,8 @@ const translations = {
     rolloverHeader: 'Report d\'Année Académique & Archivage',
     rolloverDesc: 'Faites passer les élèves au niveau supérieur, archivez les notes et préparez la Fiche Maîtresse pour la nouvelle session.',
     triggerRollover: 'Lancer le Report d\'Année',
-    masterSheetNote: 'Quel que soit le mode choisi, toutes les évaluations convergent directement vers la même Fiche Maîtresse.'
+    masterSheetNote: 'Quel que soit le mode choisi, toutes les évaluations convergent directement vers la même Fiche Maîtresse.',
+    logoutLabel: 'Se Déconnecter'
   },
   es: {
     dir: 'ltr',
@@ -127,7 +135,8 @@ const translations = {
     rolloverHeader: 'Traspaso de Año Académico',
     rolloverDesc: 'Promueva estudiantes y archive calificaciones.',
     triggerRollover: 'Iniciar Traspaso',
-    masterSheetNote: 'Independientemente del modo, todas las evaluaciones van a la Planilla Maestra.'
+    masterSheetNote: 'Independientemente del modo, todas las evaluaciones van a la Planilla Maestra.',
+    logoutLabel: 'Cerrar Sesión'
   },
   ar: {
     dir: 'rtl',
@@ -163,7 +172,8 @@ const translations = {
     rolloverHeader: 'ترحيل البيانات السنوية',
     rolloverDesc: 'نقل الطلاب إلى المستوى التالي وأرشفة الدرجات.',
     triggerRollover: 'بدء الترحيل',
-    masterSheetNote: 'تتدفق جميع التقييمات مباشرة إلى ورقة الدرجات الرئيسية.'
+    masterSheetNote: 'تتدفق جميع التقييمات مباشرة إلى ورقة الدرجات الرئيسية.',
+    logoutLabel: 'تسجيل الخروج'
   }
 };
 
@@ -190,10 +200,23 @@ function useLanguage() {
 }
 
 // ==========================================
-// 3. MAIN UI COMPONENT (MATCHING DASHBOARD STYLING)
+// 3. MAIN UI COMPONENT
 // ==========================================
 function SystemSettingsUI({ schoolId, activeSessionId }) {
   const { lang, setLang, t } = useLanguage();
+
+  // Password Feature Access State
+  const [isFormUnlocked, setIsFormUnlocked] = useState(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(false);
+
+  // Password Form State
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPass, setShowPass] = useState(false);
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
+
+  // Logout State
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   // Operating Mode State
   const [systemMode, setSystemMode] = useState('standard');
@@ -201,7 +224,7 @@ function SystemSettingsUI({ schoolId, activeSessionId }) {
   const [showWarningModal, setShowWarningModal] = useState(false);
   const [notification, setNotification] = useState('');
 
-  // Academic Year & Term Settings State
+  // Academic Session State
   const [selectedAcademicYear, setSelectedAcademicYear] = useState('2026/2027');
   const [selectedTerm, setSelectedTerm] = useState('Term 1 - Sequence 1');
 
@@ -212,6 +235,149 @@ function SystemSettingsUI({ schoolId, activeSessionId }) {
   
   const [subjectCatalog, setSubjectCatalog] = useState(['Mathematics', 'English Language', 'French', 'Physics', 'Chemistry', 'Biology']);
   const [newSubjectInput, setNewSubjectInput] = useState('');
+
+  // Extract clean school ID string safely
+  const targetSchoolId = typeof schoolId === 'object' && schoolId !== null 
+    ? schoolId.schoolId || schoolId.id 
+    : schoolId;
+
+  // Handle Log Out Button Click
+  const handleSystemLogout = async () => {
+    setIsLoggingOut(true);
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error('Logout error:', err);
+    } finally {
+      window.location.href = '/';
+    }
+  };
+
+  // Handle "UPDATE PASSWORD" Button Click
+  const handleUnlockPasswordFeature = async () => {
+    setIsCheckingAuth(true);
+
+    try {
+      const isLocalhost = typeof window !== 'undefined' && (
+        window.location.hostname === 'localhost' || 
+        window.location.hostname === '127.0.0.1' ||
+        window.location.port === '3000'
+      );
+
+      if (isLocalhost) {
+        setIsFormUnlocked(true);
+        setIsCheckingAuth(false);
+        return;
+      }
+
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) {
+        alert('You are not authorised to update password.');
+        setIsCheckingAuth(false);
+        return;
+      }
+
+      let query = supabase.from('assigned_schools').select('admin_email');
+      if (targetSchoolId) {
+        query = query.eq('school_id', targetSchoolId);
+      }
+
+      const { data: schoolData } = await query.maybeSingle();
+
+      const isPrimaryAdmin = schoolData && user.email?.trim().toLowerCase() === schoolData.admin_email?.trim().toLowerCase();
+
+      if (isPrimaryAdmin || !schoolData) {
+        setIsFormUnlocked(true);
+      } else {
+        alert('You are not authorised to update password.');
+      }
+
+    } catch (err) {
+      console.error('Authorization check error:', err);
+      alert('You are not authorised to update password.');
+    } finally {
+      setIsCheckingAuth(false);
+    }
+  };
+
+  // Submit Password Update
+  const handleAdminPasswordUpdate = async (e) => {
+    e.preventDefault();
+
+    if (!newPassword || newPassword.length < 6) {
+      alert('Password must be at least 6 characters long.');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      alert('Passwords do not match. Please re-enter.');
+      return;
+    }
+
+    setIsUpdatingPassword(true);
+
+    try {
+      const isLocalhost = typeof window !== 'undefined' && (
+        window.location.hostname === 'localhost' || 
+        window.location.hostname === '127.0.0.1' ||
+        window.location.port === '3000'
+      );
+
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (session) {
+        const { error: authError } = await supabase.auth.updateUser({
+          password: newPassword,
+        });
+        if (authError) throw authError;
+
+        const userEmail = session.user?.email;
+        if (userEmail) {
+          let dbQuery = supabase
+            .from('assigned_schools')
+            .update({ admin_password: newPassword });
+
+          if (targetSchoolId) {
+            dbQuery = dbQuery.eq('school_id', targetSchoolId);
+          } else {
+            dbQuery = dbQuery.eq('admin_email', userEmail);
+          }
+          await dbQuery;
+        }
+
+        alert('Password updated successfully! Logging you out to sign in with your new password...');
+        await supabase.auth.signOut();
+        window.location.href = '/';
+
+      } else if (isLocalhost) {
+        let dbQuery = supabase
+          .from('assigned_schools')
+          .update({ admin_password: newPassword });
+
+        if (targetSchoolId) {
+          dbQuery = dbQuery.eq('school_id', targetSchoolId);
+        } else {
+          dbQuery = dbQuery.eq('admin_email', 'newlife8525path@gmail.com');
+        }
+
+        const { error: dbErr } = await dbQuery;
+        if (dbErr) throw dbErr;
+
+        alert('Localhost Password updated successfully in database! Redirecting to login page...');
+        window.location.href = '/';
+
+      } else {
+        alert('Failed to update password: Auth session missing! Please log in again.');
+        setIsUpdatingPassword(false);
+      }
+
+    } catch (err) {
+      console.error('Error updating password:', err);
+      alert(`Failed to update password: ${err.message}`);
+      setIsUpdatingPassword(false);
+    }
+  };
 
   const handleModeSelection = (targetMode) => {
     if (targetMode === systemMode) return;
@@ -231,7 +397,6 @@ function SystemSettingsUI({ schoolId, activeSessionId }) {
     setTimeout(() => setNotification(''), 4000);
   };
 
-  // Class Levels Handlers
   const handleAddClassLevel = () => {
     if (!newLevelInput.trim()) return;
     setClassLevels([...classLevels, newLevelInput.trim()]);
@@ -242,7 +407,6 @@ function SystemSettingsUI({ schoolId, activeSessionId }) {
     setClassLevels(classLevels.filter((_, i) => i !== index));
   };
 
-  // Subject Catalog Handlers
   const handleAddSubject = () => {
     if (!newSubjectInput.trim()) return;
     setSubjectCatalog([...subjectCatalog, newSubjectInput.trim()]);
@@ -276,7 +440,6 @@ function SystemSettingsUI({ schoolId, activeSessionId }) {
           <p className="text-slate-400 text-sm mt-1">{t.systemDescription}</p>
         </div>
 
-        {/* Dark Language Selector Pill */}
         <div className="bg-[#152238] border border-slate-700/80 px-4 py-2.5 rounded-xl flex items-center gap-3 shrink-0">
           <Globe className="w-5 h-5 text-emerald-400" />
           <div className="flex flex-col">
@@ -313,6 +476,112 @@ function SystemSettingsUI({ schoolId, activeSessionId }) {
       </div>
 
       {/* ========================================== */}
+      {/* SECTION 0: PASSWORD SETTINGS WITH BUTTON   */}
+      {/* ========================================== */}
+      <div className="bg-[#0e172a] border border-emerald-500/40 rounded-2xl p-6 space-y-6 shadow-xl relative overflow-hidden">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400">
+              <ShieldCheck className="w-6 h-6" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                Password Settings
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Update primary school administrator password.
+              </p>
+            </div>
+          </div>
+          <KeyRound className="w-8 h-8 text-slate-700 hidden sm:block" />
+        </div>
+
+        {!isFormUnlocked ? (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 bg-[#152238]/60 border border-slate-700/80 rounded-xl">
+            <div className="flex items-center gap-3">
+              <Lock className="w-5 h-5 text-amber-400 shrink-0" />
+              <p className="text-xs text-slate-300">
+                Click <span className="text-emerald-400 font-semibold">UPDATE PASSWORD</span> to verify authorization and open password fields.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleUnlockPasswordFeature}
+              disabled={isCheckingAuth}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-2.5 px-6 rounded-xl text-xs shadow-lg transition-all flex items-center gap-2 shrink-0 disabled:opacity-50"
+            >
+              {isCheckingAuth ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  Verifying Authorization...
+                </>
+              ) : (
+                <>
+                  <Unlock className="w-4 h-4" />
+                  UPDATE PASSWORD
+                </>
+              )}
+            </button>
+          </div>
+        ) : (
+          <form onSubmit={handleAdminPasswordUpdate} className="grid md:grid-cols-2 gap-6 items-end animate-fade-in">
+            <div className="space-y-2">
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">New Password</label>
+              <div className="relative">
+                <input 
+                  type={showPass ? 'text' : 'password'}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Enter new password (min. 6 characters)"
+                  className="w-full bg-[#152238] border border-slate-700 rounded-xl p-3 pr-10 text-sm text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPass(!showPass)}
+                  className="absolute right-3 top-3 text-slate-400 hover:text-white"
+                >
+                  {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">Confirm New Password</label>
+              <input 
+                type={showPass ? 'text' : 'password'}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Re-enter new password"
+                className="w-full bg-[#152238] border border-slate-700 rounded-xl p-3 text-sm text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                required
+              />
+            </div>
+
+            <div className="md:col-span-2 flex justify-end pt-2">
+              <button
+                type="submit"
+                disabled={isUpdatingPassword}
+                className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold py-3 px-6 rounded-xl shadow-lg transition-all flex items-center gap-2 text-sm"
+              >
+                {isUpdatingPassword ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    Updating Password...
+                  </>
+                ) : (
+                  <>
+                    <Lock className="w-4 h-4" />
+                    Save & Update Credentials
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+
+      {/* ========================================== */}
       {/* SECTION 1: ACADEMIC YEAR & SESSION CONTROL */}
       {/* ========================================== */}
       <div className="bg-[#0e172a] border border-slate-800 rounded-2xl p-6 space-y-6 shadow-xl">
@@ -325,7 +594,6 @@ function SystemSettingsUI({ schoolId, activeSessionId }) {
         </div>
 
         <form onSubmit={handleSaveAcademicSession} className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 items-end">
-          {/* Active Academic Year Dropdown */}
           <div className="space-y-2">
             <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">{t.activeYearLabel}</label>
             <div className="relative">
@@ -341,7 +609,6 @@ function SystemSettingsUI({ schoolId, activeSessionId }) {
             </div>
           </div>
 
-          {/* Active Term / Sequence */}
           <div className="space-y-2">
             <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">{t.activeTermLabel}</label>
             <select 
@@ -358,7 +625,6 @@ function SystemSettingsUI({ schoolId, activeSessionId }) {
             </select>
           </div>
 
-          {/* Submit Academic Session */}
           <div>
             <button 
               type="submit"
@@ -370,7 +636,6 @@ function SystemSettingsUI({ schoolId, activeSessionId }) {
           </div>
         </form>
 
-        {/* Year Rollover & Archiving Trigger Card */}
         <div className="bg-[#152238]/60 border border-slate-700/60 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-4">
           <div className="flex items-start gap-3">
             <Clock className="w-5 h-5 text-amber-300 shrink-0 mt-0.5" />
@@ -400,7 +665,6 @@ function SystemSettingsUI({ schoolId, activeSessionId }) {
         </h2>
 
         <div className="grid md:grid-cols-2 gap-6">
-          {/* Mode 1: Standard System */}
           <div 
             onClick={() => handleModeSelection('standard')}
             className={`cursor-pointer p-6 rounded-2xl border transition-all ${
@@ -423,7 +687,6 @@ function SystemSettingsUI({ schoolId, activeSessionId }) {
             <p className="text-xs text-slate-400 mt-2 leading-relaxed">{t.standardDesc}</p>
           </div>
 
-          {/* Mode 2: Dynamic Custom System */}
           <div 
             onClick={() => handleModeSelection('custom')}
             className={`cursor-pointer p-6 rounded-2xl border transition-all ${
@@ -459,7 +722,6 @@ function SystemSettingsUI({ schoolId, activeSessionId }) {
             <p className="text-xs text-slate-400 mt-1">Configure class levels, custom discipline terms, and global course modules for your school.</p>
           </div>
 
-          {/* Section / Discipline Custom Name */}
           <div className="space-y-2">
             <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">{t.sectionNameLabel}</label>
             <input 
@@ -471,7 +733,6 @@ function SystemSettingsUI({ schoolId, activeSessionId }) {
             />
           </div>
 
-          {/* Class Levels Builder */}
           <div className="space-y-3">
             <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">{t.classLevelsLabel}</label>
             
@@ -505,7 +766,6 @@ function SystemSettingsUI({ schoolId, activeSessionId }) {
             </div>
           </div>
 
-          {/* Global Subject Catalog Builder */}
           <div className="space-y-3">
             <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">{t.subjectCatalogLabel}</label>
             
@@ -539,7 +799,6 @@ function SystemSettingsUI({ schoolId, activeSessionId }) {
             </div>
           </div>
 
-          {/* Save Action */}
           <div className="pt-4 border-t border-slate-800 flex justify-end">
             <button 
               type="submit" 
@@ -554,7 +813,31 @@ function SystemSettingsUI({ schoolId, activeSessionId }) {
       )}
 
       {/* ========================================== */}
-      {/* SECTION 4: MODE SWITCH WARNING MODAL       */}
+      {/* SECTION 4: LOG OUT BUTTON                  */}
+      {/* ========================================== */}
+      <div className="pt-2">
+        <button
+          type="button"
+          onClick={handleSystemLogout}
+          disabled={isLoggingOut}
+          className="bg-red-600/90 hover:bg-red-600 text-white font-semibold py-3 px-6 rounded-xl shadow-lg transition-all flex items-center gap-2 text-sm disabled:opacity-50 cursor-pointer"
+        >
+          {isLoggingOut ? (
+            <>
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              Logging Out...
+            </>
+          ) : (
+            <>
+              <LogOut className="w-4 h-4" />
+              {t.logoutLabel}
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* ========================================== */}
+      {/* SECTION 5: MODE SWITCH WARNING MODAL       */}
       {/* ========================================== */}
       {showWarningModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -566,7 +849,6 @@ function SystemSettingsUI({ schoolId, activeSessionId }) {
               <h3 className="text-lg font-bold text-white">{t.switchWarningTitle}</h3>
             </div>
 
-            {/* Cream-Yellow / Text-Amber-100 Alert Box as Requested */}
             <p className="text-xs text-amber-100 leading-relaxed bg-[#1d1b0e] p-4 rounded-xl border border-amber-500/30">
               {t.switchWarningText}
             </p>

@@ -5,6 +5,7 @@ import { supabase } from '../../../../lib/supabase';
 import { getCurrentAcademicYear } from '../../../../lib/academicYear';
 
 
+
 import { 
   TECHNICAL_INDUSTRIAL_CATALOG, 
   INDUSTRIAL_TRADE_SERIES 
@@ -14,6 +15,7 @@ export default function TechnicalIndustrialMarkSheet({
   activeSchool,
   classLevel,
   selectedTerm = 'Term 1',
+  mockComponent,
   selectedTrade = 'ALL'
 }) {
   const [currentClassLevel, setCurrentClassLevel] = useState(
@@ -35,6 +37,7 @@ export default function TechnicalIndustrialMarkSheet({
   const [isLoading, setIsLoading] = useState(false);
 
   const academicYear = getCurrentAcademicYear();
+  const [showMockModal, setShowMockModal] = useState(false);
 
   // Offline Caching Utility Keys
   const getCacheKey = useCallback((type) => {
@@ -588,7 +591,14 @@ export default function TechnicalIndustrialMarkSheet({
             Class: <span className="text-white font-medium">{currentClassLevel}</span> | Term: <span className="text-white font-medium">{currentTerm}</span>
           </p>
         </div>
-
+      {/* PreMock / Mock Dashboard Launch Button */}
+  <button
+    type="button"
+    onClick={() => setShowMockModal(true)}
+    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg transition-colors flex items-center gap-1.5 shadow-sm shrink-0"
+  >
+    <span>🏆</span> PreMock / Mock Results
+  </button>
         {/* Top-Right Badge & Excel Download Button */}
         <div className="flex flex-wrap items-center justify-between sm:justify-end gap-2 w-full sm:w-auto">
           <div className="px-2.5 py-1 bg-emerald-950/80 border border-emerald-500/40 text-emerald-400 text-[11px] font-bold rounded-md shrink-0">
@@ -1045,9 +1055,26 @@ export default function TechnicalIndustrialMarkSheet({
               </div>
             </div>
           </div>
+         
         )}
 
       </div>
+       {/* Touch & Mobile Friendly PreMock / Mock Dashboard Overlay Modal */}
+      {showMockModal && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-4">
+          <div className="relative w-full max-w-6xl h-[92vh] sm:h-[88vh] overflow-y-auto bg-slate-900 rounded-2xl border border-slate-700 shadow-2xl p-2 sm:p-6">
+            <div className="sticky top-0 z-50 flex justify-end pb-2 bg-slate-900/90 backdrop-blur-sm">
+              <button
+                onClick={() => setShowMockModal(false)}
+                className="text-slate-300 hover:text-white text-xs sm:text-sm font-bold bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700 shadow-md active:scale-95 transition"
+              >
+                ✕ Close Dashboard
+              </button>
+            </div>
+            {mockComponent}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

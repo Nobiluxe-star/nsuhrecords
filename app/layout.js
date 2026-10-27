@@ -1,6 +1,7 @@
 import { AcademicConfigsProvider } from './admin-dashboard/context/AcademicConfigsContext';
 import { Geist, Geist_Mono } from "next/font/google";
 import PWARegister from './components/PWARegister';
+import OfflineDataProvider from './components/OfflineDataProvider';
 import "./globals.css";
 
 const geistSans = Geist({
@@ -58,6 +59,7 @@ export default function RootLayout({ children }) {
     >
       <body className="min-h-full flex flex-col">
         <PWARegister />
+        <OfflineDataProvider />
         <AcademicConfigsProvider>
           {children}
         </AcademicConfigsProvider>

@@ -4,7 +4,6 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../../../../lib/supabase';
 import { getCurrentAcademicYear } from '../../../../lib/academicYear';
 
-
 import { 
   GENERAL_CLASSES_CATALOG, 
   GENERAL_SERIES_CATALOG 
@@ -14,10 +13,12 @@ export default function GeneralMarkSheet({
   activeSchool,
   classLevel,
   selectedTerm = 'Term 1',
+  mockComponent,
   selectedSeries = 'N/A'
 }) {
   const schoolId = activeSchool?.id || activeSchool?.school_id || '';
   const academicYear = getCurrentAcademicYear();
+  const [showMockModal, setShowMockModal] = useState(false);
 
   // LocalStorage Key Helpers - Strict multi-tenant prefixing
   const STORAGE_KEY_PREFIX = `nsuh_marksheet_${schoolId}_`;
@@ -641,7 +642,14 @@ export default function GeneralMarkSheet({
             Class: <span className="text-white font-medium">{currentClassLevel}</span> | Term: <span className="text-white font-medium">{currentTerm}</span>
           </p>
         </div>
-
+      {/* PreMock / Mock Dashboard Launch Button */}
+  <button
+    type="button"
+    onClick={() => setShowMockModal(true)}
+    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg transition-colors flex items-center gap-1.5 shadow-sm shrink-0"
+  >
+    <span>🏆</span> PreMock / Mock Results
+  </button>
         {/* Top-Right Badge & Action Button */}
         <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto">
           {/* Academic Year Badge */}
@@ -1081,10 +1089,27 @@ export default function GeneralMarkSheet({
                 </span>
               </div>
             </div>
+          
           )}
         </div>
 
       </div>
+        {/* Touch & Mobile Friendly PreMock / Mock Dashboard Overlay Modal */}
+{showMockModal && (
+  <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-4">
+    <div className="relative w-full max-w-6xl h-[92vh] sm:h-[88vh] overflow-y-auto bg-slate-900 rounded-2xl border border-slate-700 shadow-2xl p-2 sm:p-6">
+      <div className="sticky top-0 z-50 flex justify-end pb-2 bg-slate-900/90 backdrop-blur-sm">
+        <button
+          onClick={() => setShowMockModal(false)}
+          className="text-slate-300 hover:text-white text-xs sm:text-sm font-bold bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700 shadow-md active:scale-95 transition"
+        >
+          ✕ Close Dashboard
+        </button>
+      </div>
+    {mockComponent}
+    </div>
+  </div>
+)}
     </div>
   );
 }
