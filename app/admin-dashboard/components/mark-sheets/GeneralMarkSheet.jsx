@@ -42,12 +42,12 @@ export default function GeneralMarkSheet({
     return lvl.includes('sixth') || lvl.includes('l6') || lvl.includes('u6');
   }, [currentClassLevel]);
 
-  const [currentSeries, setCurrentSeries] = useState(() => {
+ const [currentSeries, setCurrentSeries] = useState(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem(`${STORAGE_KEY_PREFIX}series`);
       if (saved !== null) return saved;
     }
-    return isSixthForm ? (selectedSeries !== 'N/A' ? selectedSeries : '') : 'N/A';
+    return isSixthForm ? (selectedSeries !== 'N/A' ? selectedSeries : 'ALL') : 'N/A';
   });
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -131,11 +131,6 @@ export default function GeneralMarkSheet({
       return;
     }
 
-    if (isSixthForm && (!currentSeries || currentSeries === 'N/A')) {
-      setSubjectsList([]);
-      setStudentsData([]);
-      return;
-    }
 
     if (studentsData.length === 0) {
       setIsLoading(true);
@@ -149,12 +144,11 @@ export default function GeneralMarkSheet({
         .eq('school_id', schoolId)
         .eq('classLevel', currentClassLevel.trim());
 
-      if (isSixthForm && currentSeries) {
-        coefQuery = coefQuery.eq('trades_series', currentSeries);
-      } else {
-        coefQuery = coefQuery.or('trades_series.eq.N/A,trades_series.is.null');
-      }
-
+     if (isSixthForm && currentSeries && currentSeries !== 'ALL') {
+  coefQuery = coefQuery.eq('trades_series', currentSeries);
+} else if (!isSixthForm) {
+  coefQuery = coefQuery.or('trades_series.eq.N/A,trades_series.is.null');
+}
       const { data: coefData, error: coefErr } = await coefQuery;
       if (coefErr) throw coefErr;
 
@@ -181,7 +175,7 @@ export default function GeneralMarkSheet({
         .eq('school_id', schoolId)
         .eq('classLevel', currentClassLevel.trim());
 
-      if (isSixthForm && currentSeries) {
+      if (isSixthForm && currentSeries && currentSeries !== 'ALL') {
         studentQuery = studentQuery.eq('trades_series', currentSeries);
       }
 
@@ -312,10 +306,15 @@ export default function GeneralMarkSheet({
 
   const { seqA, seqB } = getSequenceFields(currentTerm);
 
-  const seriesList = [
-    ...(GENERAL_SERIES_CATALOG?.series?.ARTS || []),
-    ...(GENERAL_SERIES_CATALOG?.series?.SCIENCE || [])
-  ];
+  const seriesList = useMemo(() => {
+    const catalog = GENERAL_SERIES_CATALOG?.series || GENERAL_SERIES_CATALOG || {};
+    const isArts = currentClassLevel.toLowerCase().includes('art');
+    
+    const targetGroup = isArts ? catalog.ARTS : catalog.SCIENCE;
+    if (!targetGroup) return [];
+
+    return targetGroup.map(s => (typeof s === 'object' ? s.code || s.name : s)).filter(Boolean);
+  }, [currentClassLevel]);
 
   function getOrdinalSuffix(n) {
     const s = ['th', 'st', 'nd', 'rd'];
@@ -698,7 +697,7 @@ export default function GeneralMarkSheet({
           </select>
         </div>
 
-        {/* Series Selector */}
+       {/* Series Selector */}
         <div>
           <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Series</label>
           <select
@@ -711,9 +710,9 @@ export default function GeneralMarkSheet({
               <option value="N/A">Series: N/A</option>
             ) : (
               <>
-                <option value="">-- Select Series (Required) --</option>
+                <option value="ALL">🌐 All Series (Combined Master)</option>
                 {seriesList.map((s) => (
-                  <option key={s.code} value={s.code}>{s.code} - {s.name}</option>
+                  <option key={s.code || s} value={s.code || s}>{s.code ? `${s.code} - ${s.name}` : s}</option>
                 ))}
               </>
             )}
@@ -733,12 +732,10 @@ export default function GeneralMarkSheet({
         </div>
       </div>
 
-      {isSixthForm && !currentSeries ? (
-        <p className="text-amber-400 text-xs py-4">Please select a Series to view subjects and students for this Sixth Form class.</p>
-      ) : isLoading && studentsData.length === 0 ? (
-        <p className="text-gray-400 text-sm py-4">Loading mark sheet records...</p>
-      ) : (
-        <div className="overflow-x-auto touch-pan-x max-h-[600px] border border-gray-800 rounded-lg relative">
+    {isLoading && studentsData.length === 0 ? (
+  <p className="text-gray-400 text-sm py-4">Loading mark sheet records...</p>
+) : (
+  <div className="overflow-x-auto touch-pan-x max-h-[600px] border border-gray-800 rounded-lg relative">
 
           {/* MOBILE VIEW: Touch-Friendly Student Mark Cards */}
           <div className="block md:hidden space-y-3 p-2">

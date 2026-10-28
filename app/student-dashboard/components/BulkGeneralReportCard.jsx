@@ -183,7 +183,7 @@ export default function BulkGeneralReportCard({
   // HIGH-SPEED MASTER QUERY ENGINE (WITH LOCAL STORAGE & INDEXEDDB CACHING)
   // ==============================================================================
   const fetchAndCalculateBulkData = useCallback(async () => {
-    if (!isOpen || !selectedClass) return;
+    if (!isOpen || !effectiveSchoolId || !selectedClass) return;
 
     const cacheKey = `bg_cache_${effectiveSchoolId}_${normalizeClass(selectedClass)}_${selectedTerm}_${selectedSeries}`;
 
@@ -210,20 +210,33 @@ export default function BulkGeneralReportCard({
     }
 
     try {
-      let studentQuery = supabase.from('students').select('*');
-      if (effectiveSchoolId) studentQuery = studentQuery.eq('school_id', effectiveSchoolId);
+      if (effectiveSchoolId) {
+        await supabase.rpc('set_active_school', { school_id: effectiveSchoolId });
+      }
 
-      let schoolQuery = supabase.from('school_details').select('*');
-      if (effectiveSchoolId) schoolQuery = schoolQuery.eq('school_id', effectiveSchoolId);
+      let studentQuery = supabase
+        .from('students')
+        .select('*')
+        .eq('school_id', effectiveSchoolId);
 
-      let coeffQuery = supabase.from('class_coefficients').select('*');
-      if (effectiveSchoolId) coeffQuery = coeffQuery.eq('school_id', effectiveSchoolId);
+      let schoolQuery = supabase
+        .from('school_details')
+        .select('*')
+        .eq('school_id', effectiveSchoolId)
+        .maybeSingle();
 
-      let teacherQuery = supabase.from('teachers').select('*');
-      if (effectiveSchoolId) teacherQuery = teacherQuery.eq('school_id', effectiveSchoolId);
+      let coeffQuery = supabase
+        .from('class_coefficients')
+        .select('*')
+        .eq('school_id', effectiveSchoolId);
+
+      let teacherQuery = supabase
+        .from('teachers')
+        .select('*')
+        .eq('school_id', effectiveSchoolId);
 
       const [schoolRes, allStudentsRes, coeffRes, teachersRes] = await Promise.all([
-        schoolQuery.maybeSingle(),
+        schoolQuery,
         studentQuery.order('fullName', { ascending: true }),
         coeffQuery,
         teacherQuery
@@ -256,75 +269,115 @@ export default function BulkGeneralReportCard({
       }
 
       const studentIds = filteredStudents.map((s) => s.id).filter(Boolean);
-
-      let loadedSubjects = [];
-      const matchedCoeffRow = (coeffRes.data || []).find((row) => {
-        const rowClass = normalizeClass(row.classLevel || row.class_level || row.class_name || row.class || '');
-        return rowClass === targetClassClean || rowClass.includes(targetClassClean);
-      });
-
       const teachersData = teachersRes.data || [];
 
-      // STRICT TEACHER-CLASS & SERIES MAPPING
-      const getTeacherForSubject = (subjectName) => {
+      // STRICT SCHEDULES & CLASS-AWARE TEACHER MAPPING FUNCTION (NO RANDOM BLEEDING)
+      const getTeacherForSubject = (subjectName, seriesName = null) => {
         if (!subjectName) return '—';
         const cleanSub = subjectName.toLowerCase().trim();
-        const cleanSeries = selectedSeries && selectedSeries !== 'ALL' && selectedSeries !== 'N/A' ? selectedSeries.toLowerCase().trim() : null;
+        const targetSeries = seriesName ? seriesName.toLowerCase().trim() : (selectedSeries && selectedSeries !== 'ALL' && selectedSeries !== 'N/A' ? selectedSeries.toLowerCase().trim() : null);
 
         const match = teachersData.find((t) => {
-          const tClass = normalizeClass(t.classLevel || t.class_level || t.class_name || t.class || '');
-          const matchesClass = !tClass || tClass === targetClassClean || tClass.includes(targetClassClean) || targetClassClean.includes(tClass);
+          // 1. Strict Schedule/Timetable Slot Check
+          const schedules = t.schedules || t.schedule || t.timetable || {};
+          for (const [key, slots] of Object.entries(schedules)) {
+            const keySub = key.toLowerCase().trim();
+            if (keySub === cleanSub || cleanSub.includes(keySub) || keySub.includes(cleanSub)) {
+              if (Array.isArray(slots)) {
+                const hasMatchingClassSlot = slots.some((slot) => {
+                  const slotClass = normalizeClass(slot.className || slot.classLevel || slot.class || slot.class_name || '');
+                  const slotSeries = String(slot.series || slot.trades_series || slot.option || '').toLowerCase().trim();
+                  
+                  const classMatch = slotClass && (slotClass === targetClassClean || slotClass.includes(targetClassClean) || targetClassClean.includes(slotClass));
+                  if (!classMatch) return false;
 
-          if (!matchesClass) return false;
+                  if (targetSeries && targetSeries !== 'all' && targetSeries !== 'n/a') {
+                    if (slotSeries && slotSeries !== targetSeries) return false;
+                  }
 
+                  return true;
+                });
+                if (hasMatchingClassSlot) return true;
+              }
+            }
+          }
+
+          // 2. Strict Assignments Array Check
           const assignments = t.assignments || t.class_assignments || t.assigned_classes || [];
-
           if (Array.isArray(assignments) && assignments.length > 0) {
-            return assignments.some((item) => {
-              const itemSub = String(item.subject || item.subject_name || '').toLowerCase().trim();
+            const hasValidAssignment = assignments.some((item) => {
+              if (typeof item === 'string') return false;
+              const itemSub = String(item.subject || item.subject_name || item.name || '').toLowerCase().trim();
               const itemClass = normalizeClass(item.class || item.class_level || item.classLevel || '');
               const itemSeries = String(item.series || item.trades_series || item.option || '').toLowerCase().trim();
 
-              const subMatch = itemSub === cleanSub;
-              const classMatch = !itemClass || itemClass === targetClassClean || itemClass.includes(targetClassClean);
-              const seriesMatch = !cleanSeries || !itemSeries || itemSeries === cleanSeries;
+              const subMatch = itemSub === cleanSub || cleanSub.includes(itemSub);
+              const classMatch = itemClass && (itemClass === targetClassClean || itemClass.includes(targetClassClean) || targetClassClean.includes(itemClass));
+              
+              if (!subMatch || !classMatch) return false;
 
-              return subMatch && classMatch && seriesMatch;
+              if (targetSeries && targetSeries !== 'all' && targetSeries !== 'n/a') {
+                if (itemSeries && itemSeries !== targetSeries) return false;
+              }
+
+              return true;
             });
+
+            if (hasValidAssignment) return true;
           }
 
-          const rawSubs = t.subjects || t.subject || [];
-          let subMatch = false;
-          if (Array.isArray(rawSubs)) {
-            subMatch = rawSubs.some((s) => typeof s === 'string' && s.toLowerCase().trim() === cleanSub);
-          } else if (typeof rawSubs === 'string') {
-            subMatch = rawSubs.toLowerCase().trim() === cleanSub;
-          }
-
-          return subMatch;
+          return false;
         });
 
         return match ? (match.name || match.fullName || match.full_name || '—') : '—';
       };
 
-      if (matchedCoeffRow) {
+      // Build series coefficient map for student-specific loading with strict instructor targeting
+      const allCoeffRows = coeffRes.data || [];
+      const seriesCoeffMap = {};
+
+      allCoeffRows.forEach((row) => {
+        const rowClass = normalizeClass(row.classLevel || row.class_level || row.class_name || row.class || '');
+        if (rowClass === targetClassClean || rowClass.includes(targetClassClean)) {
+          const rSeries = String(row.series || row.trades_series || row.option || 'default').trim().toLowerCase();
+          let rawSubs = row.subject_coefficients;
+          if (typeof rawSubs === 'string') {
+            try { rawSubs = JSON.parse(rawSubs); } catch (e) { rawSubs = null; }
+          }
+          if (Array.isArray(rawSubs)) {
+            seriesCoeffMap[rSeries] = rawSubs.map((item, idx) => {
+              const sName = item.name || item.subject_name || item.subject_code || `Subject ${idx + 1}`;
+              return {
+                id: item.id || `sub_${idx}`,
+                subject_name: sName,
+                coefficient: Number(item.coefficient || item.coeff || item.coef || item.weight || 1),
+                instructor: getTeacherForSubject(sName, rSeries !== 'default' ? rSeries : null)
+              };
+            });
+          }
+        }
+      });
+
+      const matchedCoeffRow = allCoeffRows.find((row) => {
+        const rowClass = normalizeClass(row.classLevel || row.class_level || row.class_name || row.class || '');
+        return rowClass === targetClassClean || rowClass.includes(targetClassClean);
+      });
+
+      let loadedSubjects = seriesCoeffMap['default'] || Object.values(seriesCoeffMap)[0] || [];
+      if (matchedCoeffRow && (!loadedSubjects || loadedSubjects.length === 0)) {
         let rawSubs = matchedCoeffRow.subject_coefficients;
         if (typeof rawSubs === 'string') {
           try { rawSubs = JSON.parse(rawSubs); } catch (e) { rawSubs = null; }
         }
-
-        if (Array.isArray(rawSubs) && rawSubs.length > 0) {
-          rawSubs.forEach((item, idx) => {
+        if (Array.isArray(rawSubs)) {
+          loadedSubjects = rawSubs.map((item, idx) => {
             const sName = item.name || item.subject_name || item.subject_code || `Subject ${idx + 1}`;
-            const coefVal = Number(item.coefficient || item.coeff || item.coef || item.weight || 1);
-            const instructorName = item.instructor || item.teacher_name || getTeacherForSubject(sName);
-
-            loadedSubjects.push({
+            return {
               id: item.id || `sub_${idx}`,
               subject_name: sName,
-              coefficient: coefVal,
-              instructor: instructorName
-            });
+              coefficient: Number(item.coefficient || item.coeff || item.coef || item.weight || 1),
+              instructor: getTeacherForSubject(sName)
+            };
           });
         }
       }
@@ -373,17 +426,39 @@ export default function BulkGeneralReportCard({
             (sCode && (m.unique_code === sCode || m.code === sCode))
         );
 
+        // Get student-specific subjects based on series
+        const stSeries = String(st.trades_series || st.series || '').trim().toLowerCase();
+        const studentSubjects = seriesCoeffMap[stSeries] || loadedSubjects;
+
         const scoreMap = {};
         let totalPts = 0;
         let totalCoef = 0;
         let hasMarks = false;
 
-        loadedSubjects.forEach((sub) => {
+        studentSubjects.forEach((sub) => {
           const subKey = sub.subject_name.toLowerCase().trim();
           const match = stMarks.find(
             (m) => (m.subject_name || m.subject_code || '').toLowerCase().trim() === subKey
           );
-          const scoreVal = match ? Number(match.term_score ?? match.score ?? match.mark ?? match.marks) : NaN;
+          
+          let scoreVal = NaN;
+          if (match) {
+            const seq1 = Number(match.sequence_1 ?? match.seq1 ?? match.seq_1);
+            const seq2 = Number(match.sequence_2 ?? match.seq2 ?? match.seq_2);
+            
+            const hasSeq1 = !isNaN(seq1);
+            const hasSeq2 = !isNaN(seq2);
+            
+            if (hasSeq1 && hasSeq2) {
+              scoreVal = (seq1 + seq2) / 2;
+            } else if (hasSeq1) {
+              scoreVal = seq1;
+            } else if (hasSeq2) {
+              scoreVal = seq2;
+            } else {
+              scoreVal = Number(match.term_score ?? match.score ?? match.mark ?? match.marks);
+            }
+          }
 
           if (!isNaN(scoreVal)) {
             hasMarks = true;
@@ -413,9 +488,9 @@ export default function BulkGeneralReportCard({
         );
 
         studentAttLogs.forEach((rec) => {
-          const st = String(rec.status || '').toLowerCase().trim();
-          if (st === 'absent' || st === 'unjustified') liveAbsences += 1;
-          if (st === 'late' || st === 'tardy' || st === 'tardiness') liveTardiness += 1;
+          const stStat = String(rec.status || '').toLowerCase().trim();
+          if (stStat === 'absent' || stStat === 'unjustified') liveAbsences += 1;
+          if (stStat === 'late' || stStat === 'tardy' || stStat === 'tardiness') liveTardiness += 1;
         });
 
         const mergedDiscipline = {
@@ -433,7 +508,8 @@ export default function BulkGeneralReportCard({
           termStatus: termAvg !== null ? (termAvg >= 10 ? 'Passed' : 'Failed') : null,
           feesRecord: feeRec || null,
           disciplineRecord: mergedDiscipline,
-          adminRemarks: remRec || null
+          adminRemarks: remRec || null,
+          studentSubjects: studentSubjects
         };
       });
 
@@ -531,6 +607,7 @@ export default function BulkGeneralReportCard({
         const stData = processedDataMap[sId] || {};
         const marksMap = stData.marksMap || {};
         const subjectRanks = stData.subjectRanks || {};
+        const studentSubs = stData.studentSubjects || [];
 
         const activeClassName = (student.classLevel || student.class_level || selectedClass || '').toLowerCase().trim();
         const isLowerClass = GENERAL_LOWER_CLASSES.some(c => c.toLowerCase().trim() === activeClassName || activeClassName.includes(c.toLowerCase().trim()));
@@ -622,7 +699,7 @@ export default function BulkGeneralReportCard({
         });
 
         // Academic Marks Table
-        const tableData = subjectsList.map((sub) => {
+        const tableData = studentSubs.map((sub) => {
           const subKey = sub.subject_name.toLowerCase().trim();
           const score = marksMap[subKey];
           const coef = Number(sub.coefficient || 1);
@@ -772,6 +849,7 @@ export default function BulkGeneralReportCard({
     const stData = processedDataMap[sId] || {};
     const marksMap = stData.marksMap || {};
     const subjectRanks = stData.subjectRanks || {};
+    const studentSubs = stData.studentSubjects || [];
 
     const activeClassName = (student.classLevel || student.class_level || selectedClass || '').toLowerCase().trim();
     const isLowerClass = GENERAL_LOWER_CLASSES.some(c => c.toLowerCase().trim() === activeClassName || activeClassName.includes(c.toLowerCase().trim()));
@@ -902,10 +980,10 @@ export default function BulkGeneralReportCard({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 bg-white text-[10px]">
-              {subjectsList.length === 0 ? (
-                <tr><td colSpan="7" className="p-2.5 text-center text-slate-400 italic">No subject coefficients configured for this class.</td></tr>
+              {studentSubs.length === 0 ? (
+                <tr><td colSpan="7" className="p-2.5 text-center text-slate-400 italic">No subject coefficients configured for this series/class.</td></tr>
               ) : (
-                subjectsList.map((sub, idx) => {
+                studentSubs.map((sub, idx) => {
                   const subKey = sub.subject_name.toLowerCase().trim();
                   const score = marksMap[subKey];
                   const coef = Number(sub.coefficient || 1);
@@ -920,7 +998,7 @@ export default function BulkGeneralReportCard({
                   const rawRank = subjectRanks[subKey];
 
                   return (
-                    <tr key={sub.id || idx} className="hover:bg-slate-50">
+                    <tr key={`subj_row_${student.id || index}_${idx}_${sub.subject_name}`} className="hover:bg-slate-50">
                       <td className="p-1 font-bold text-slate-900">{sub.subject_name}</td>
                       <td className="p-1 text-center font-bold">{coef}</td>
                       <td className={`p-1 text-center ${scoreTextColor}`}>{isScoreValid ? score : '—'}</td>
