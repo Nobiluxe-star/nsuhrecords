@@ -71,7 +71,7 @@ export const TECHNICAL_COMMERCIAL_CATALOG = [
   'First Year Commercial (Y1Com)',
   'Second Year Commercial (Y2Com)',
   'Third Year Commercial (Y3Com)',
-  'Fourth Year Commercia (CAPCom)',
+  'Fourth Year Commercial (CAPCom)',
   'Fifth Year Commercial  (Y5Com)',
   'Lower Sixth Commercial (ProCom)',
   'Upper Sixth Commercial (BaCom)',
@@ -111,7 +111,7 @@ export const GENERAL_SERIES_CATALOG = {
     ]
   }
 };
-// Trade Series mapping for Technical Commercial
+
 export const COMMERCIAL_TRADE_SERIES = [
   'FOUNDATIONAL',
   'G1 - Secretarial Studies',
@@ -122,24 +122,49 @@ export const COMMERCIAL_TRADE_SERIES = [
   'HE - Home Economics',
   'HOT - Hotel Management',
   'TO - Tourism',
-  'BO - Bakery and Pastry'
+  'BO - Bakery and Pastry',
+  'ACC - Accounting',
+  'BF - Banking and Finance',
+  'INS - Insurance',
+  'TLM - Transport and Logistics Management',
+  'ICT - Administrative and Communication Techniques'
 ];
 
 // Trade Series mapping for Technical Industrial
 export const INDUSTRIAL_TRADE_SERIES = [
-    'FOUNDATIONAL',
-    'ARM - Automobile Repair Mechanics',
-    'F2 - Electronics',
-    'F3 - Electrical Power Systems',
-    'BUCO - Civil Engineering Building Construction',
-    'F4BE - Building Study and Study Office',
-    'F4TP - Public Works',
-    'F5 - Air Conditioning and Ventilation',
-    'F6 - Laboratory Chemistry',
-    'F7 - Biological Sciences',
-    'F8 - Medical and Social Sciences',
-    'IH - Bespoke Tailoring',
-    'PL - Plumbing and Hydraulic Installation Systems'
+  'FOUNDATIONAL',
+  'IH - Bespoke Tailoring',
+  'ARM - Automobile Repair Mechanics',
+  'EMA - Automobile Construction and Maintenance - Agricultural Equipment',
+  'EMA-LV - Automobile Construction and Maintenance - Light Vehicles',
+  'MF - Manufacturing Mechanics',
+  'MFP - Metal Rarity and Tubework of Piping',
+  'MMP - Specialty Maintenance of Plant Machinery',
+  'ELT - Electronics',
+  'EPS - Electrical Power Systems',
+  'AE - Automobile Electricity',
+  'ISV - Installation and Maintenance of Electronics Systems',
+  'CE-PW - Civil Engineering - Public Works',
+  'CE-BC - Civil Engineering - Building Construction',
+  'CE-AD - Civil Engineering - Architectural - Draftsmanship',
+  'CE-TIL - Civil Engineering - Tiling',
+  'SURV - Surveying',
+  'WFCM - Wood Furniture and Cabinet Making',
+  'WPK - Wood Processing',
+  'CID - Carpentry and Interior Design',
+  'WF - Welding and Fabrication',
+  'UPF - Assembly, Butt/Work and Joining',
+  'FD - Fashion Design',
+  'RHVAC - Refrigeration Heating Ventilation and Air Conditioning',
+  'IC - Industrial Chemistry',
+  'CHE-PCBP - Chemical Engineering - Petro-Chemistry and Bio-Products',
+  'CHE-CP - Chemical Engineering - Cosmetology and Pharmacology',
+  'CHE-OMP - Chemical Engineering - Oleochemicals and Soap Production',
+  'BEMA - Biomedical Equipment Maintenance',
+  'AMDP - Agriculture - Monogastrics Production',
+  'APP - Agriculture - Pig Production',
+  'FMT - Forest Management Technology',
+  'PHIE - Plumbing and Hydraulic Installation Systems'
 ];
 
 export const ALL_AVAILABLE_CLASSES = [
