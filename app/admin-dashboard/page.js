@@ -73,18 +73,18 @@ export const TECHNICAL_COMMERCIAL_CATALOG = [
   'Third Year Commercial (Y3Com)',
   'Fourth Year Commercial (CAPCom)',
   'Fifth Year Commercial  (Y5Com)',
-  'Lower Sixth Commercial (ProCom)',
-  'Upper Sixth Commercial (BaCom)',
+  'Lower Sixth Commercial (L6Com)',
+  'Upper Sixth Commercial (U6Com)',
 ];
 
 export const TECHNICAL_INDUSTRIAL_CATALOG = [
   'First Year Industrial (Y1Ind)',
   'Second Year Industrial (Y2Ind)',
   'Third Year Industrial (Y3Ind)',
-  'Fourth Year Industrial (CAPInd)',
+  'Fourth Year Industrial (Y4Ind)',
   'Fifth Year Industrial  (Y5Ind)',
-  'Lower Sixth Industrial (ProInd)',
-  'Upper Sixth Industrial  (BacInd)',
+  'Lower Sixth Industrial (L6Ind)',
+  'Upper Sixth Industrial  (U6Ind)',
 ];
 
 // Series mapping for Upper/Lower Sixth General
