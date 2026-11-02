@@ -8,12 +8,14 @@ import { getTeacherLockStatus } from '../../lib/markLockService';
 import { db } from '../../lib/db';
 import { syncOfflineQueueToSupabase, downloadFullSchoolData } from '../../lib/offlineSync';
 
+
 import { 
   GENERAL_LOWER_CLASSES,
   GENERAL_SERIES_CATALOG, 
   COMMERCIAL_TRADE_SERIES,
   TECHNICAL_COMMERCIAL_CATALOG,
-  TECHNICAL_INDUSTRIAL_CATALOG
+  TECHNICAL_INDUSTRIAL_CATALOG,
+  INDUSTRIAL_TRADE_SERIES,
 } from '../admin-dashboard/page';
 
 const FORMULA_LIBRARY = {
@@ -208,11 +210,14 @@ export default function TeacherDashboardPage() {
         return;
       }
 
-      const currentTeacherId = teacherProfile?.teacher_id || teacherProfile?.id || (typeof window !== 'undefined' ? localStorage.getItem('teacher_id') : null);
+      const currentTeacherId = teacherProfile?.teacher_id || teacherProfile?.id || (typeof window !== 'undefined' ? (localStorage.getItem('active_teacher_id') || localStorage.getItem('teacher_id')) : null);
       if (schoolIdToUse && currentTeacherId) {
-        getTeacherLockStatus(currentTeacherId, schoolIdToUse).then((isLocked) => {
+        try {
+          const isLocked = await getTeacherLockStatus(currentTeacherId, schoolIdToUse);
           setIsMarkEntryAuthorized(!isLocked);
-        });
+        } catch (lockErr) {
+          console.warn('Notice: Unable to check lock status online, retaining current state:', lockErr?.message || lockErr);
+        }
       }
       
       if (Array.isArray(GENERAL_LOWER_CLASSES) && GENERAL_LOWER_CLASSES.includes(selectedClassForAction)) {
@@ -304,9 +309,9 @@ export default function TeacherDashboardPage() {
       return COMMERCIAL_TRADE_SERIES || TECHNICAL_COMMERCIAL_CATALOG || [];
     }
 
-    if (className.includes('ind') || className.includes('tech') || className.includes('elect')) {
-      return TECHNICAL_INDUSTRIAL_CATALOG || [];
-    }
+  if (className.includes('industrial') || className.includes('tech') || className.includes('ind')) {
+  return INDUSTRIAL_TRADE_SERIES || TECHNICAL_INDUSTRIAL_SERIES || TECHNICAL_INDUSTRIAL_CATALOG || [];
+}
 
     const rawArts = GENERAL_SERIES_CATALOG?.ARTS || [];
     const rawScience = GENERAL_SERIES_CATALOG?.SCIENCE || [];
@@ -562,24 +567,26 @@ export default function TeacherDashboardPage() {
     window.print();
   };
 
-  useEffect(() => {
-    if (!selectedSubjectForAction || !teacherProfile?.schedules) {
-      setSelectedClassForAction('');
-      return;
-    }
+ useEffect(() => {
+    if (!teacherProfile?.schedules || Object.keys(teacherProfile.schedules).length === 0) return;
+
+    const availableSubjects = teacherProfile.subjects || Object.keys(teacherProfile.schedules);
     
-    const slots = teacherProfile.schedules[selectedSubjectForAction] || [];
-    if (Array.isArray(slots) && slots.length > 0) {
-      const uniqueClasses = [...new Set(slots.map((s) => s.className).filter(Boolean))];
-      if (uniqueClasses.length > 0) {
-        setSelectedClassForAction(uniqueClasses[0]);
-      } else {
-        setSelectedClassForAction('');
-      }
-    } else {
-      setSelectedClassForAction('');
+    // Auto-select initial subject if empty
+    let activeSub = selectedSubjectForAction;
+    if (!activeSub && availableSubjects.length > 0) {
+      activeSub = availableSubjects[0];
+      setSelectedSubjectForAction(activeSub);
     }
-  }, [selectedSubjectForAction, teacherProfile?.schedules]);
+
+    if (activeSub && teacherProfile.schedules[activeSub]) {
+      const slots = teacherProfile.schedules[activeSub] || [];
+      const uniqueClasses = [...new Set(slots.map((s) => s.className).filter(Boolean))];
+      if (uniqueClasses.length > 0 && (!selectedClassForAction || !uniqueClasses.includes(selectedClassForAction))) {
+        setSelectedClassForAction(uniqueClasses[0]);
+      }
+    }
+  }, [teacherProfile?.schedules, teacherProfile?.subjects, selectedSubjectForAction]);
 
   const fetchClassLogs = async () => {
     if (!selectedClassLog) return;
@@ -715,56 +722,89 @@ export default function TeacherDashboardPage() {
     }
   };
 
+// Real-time listener for Mark Lock / Freeze status toggled by Admin
   useEffect(() => {
+    const activeSchoolId = typeof window !== 'undefined' ? localStorage.getItem('active_school_id') : null;
+    const teacherId = typeof window !== 'undefined' ? (localStorage.getItem('active_teacher_id') || localStorage.getItem('teacher_id')) : null;
+
+    if (!activeSchoolId || !teacherId) return;
+
+    const channel = supabase
+      .channel(`realtime_teacher_lock_${teacherId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'teachers',
+          filter: `teacher_id=eq.${teacherId}`
+        },
+        (payload) => {
+          if (payload.new && typeof payload.new.is_marks_locked !== 'undefined') {
+            const isLocked = payload.new.is_marks_locked;
+            setIsMarkEntryAuthorized(!isLocked);
+
+            if (isLocked) {
+              if (typeof toast !== 'undefined' && toast.error) {
+                toast.error('🔒 Notice: Mark entry has been FROZEN by Administrator.');
+              }
+            } else {
+              if (typeof toast !== 'undefined' && toast.success) {
+                toast.success('🔓 Notice: Mark entry has been RELEASED by Administrator.');
+              }
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+ useEffect(() => {
     const fetchTeacherAndSchool = async () => {
-      const savedSchoolId = localStorage.getItem('active_school_id') || localStorage.getItem('activeSchoolId');
-      const teacherId = localStorage.getItem('active_teacher_id') || localStorage.getItem('teacher_id');
+      const activeSchoolId = typeof window !== 'undefined' ? localStorage.getItem('active_school_id') : null;
+      const teacherId = typeof window !== 'undefined' ? (localStorage.getItem('active_teacher_id') || localStorage.getItem('teacher_id')) : null;
 
-      if (savedSchoolId && teacherId) {
-        const { data: teacherData, error } = await supabase
-          .from('teachers')
-          .select('*')
-          .eq('teacher_id', teacherId)
-          .eq('school_id', savedSchoolId)
-          .maybeSingle();
+      if (!activeSchoolId || !teacherId) return;
 
-        if (teacherData && !error) {
-          setTeacherProfile(teacherData);
-          setIsMarkEntryAuthorized(!teacherData.is_marks_locked);
+      // 1. Fetch teacher record STRICTLY locked to the active school
+      const { data: teacherData, error: teacherErr } = await supabase
+        .from('teachers')
+        .select('*')
+        .eq('teacher_id', teacherId)
+        .eq('school_id', activeSchoolId)
+        .maybeSingle();
+
+      if (teacherData && !teacherErr) {
+        setTeacherProfile(teacherData);
+        setIsMarkEntryAuthorized(!teacherData.is_marks_locked);
+      }
+
+      // 2. Fetch school details strictly matching activeSchoolId
+      const { data: schoolData, error: schoolErr } = await supabase
+        .from('school_details')
+        .select('*')
+        .eq('school_id', activeSchoolId)
+        .maybeSingle();
+
+      if (schoolData && !schoolErr) {
+        setSchoolDetails(schoolData);
+        setSchoolName(schoolData.name || schoolData.school_name || 'Assigned School');
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('active_school_name', schoolData.name || schoolData.school_name || '');
         }
       }
-      downloadFullSchoolData(savedSchoolId);
+
+      // 3. Trigger offline sync restricted to active school
+      downloadFullSchoolData(activeSchoolId);
       syncOfflineQueueToSupabase();
-      const currentSchoolId = savedSchoolId || teacherProfile?.school_id;
-      if (currentSchoolId) {
-        const { data: schoolData } = await supabase
-          .from('school_details')
-          .select('*')
-          .eq('school_id', currentSchoolId)
-          .maybeSingle();
-
-        if (schoolData) {
-          setSchoolDetails(schoolData);
-        }
-      }
     };
 
     fetchTeacherAndSchool();
-  }, [teacherProfile?.school_id]);
-
-  useEffect(() => {
-    if (teacherProfile?.classes && teacherProfile.classes.length > 0) {
-      if (!selectedClassForAction) {
-        setSelectedClassForAction(teacherProfile.classes[0]);
-      }
-    }
-    if (teacherProfile?.subjects && teacherProfile.subjects.length > 0) {
-      if (!selectedSubjectForAction) {
-        const sortedSubjects = [...teacherProfile.subjects].sort((a, b) => a.localeCompare(b));
-        setSelectedSubjectForAction(sortedSubjects[0]);
-      }
-    }
-  }, [teacherProfile]);
+  }, []);
 
   const getActiveSeqKeys = (term) => {
     if (term === 'Term 2') return { key1: 'seq3_mark', key2: 'seq4_mark', label1: 'SEQ 3', label2: 'SEQ 4' };
@@ -868,7 +908,19 @@ export default function TeacherDashboardPage() {
         if (data && data.length > 0) {
           setClassStudents(data);
           localStorage.setItem(cacheKey, JSON.stringify(data));
+
+          const extractedTrades = Array.from(
+            new Set(
+              data
+                .map(s => s.trades_series || s.trade || s.series)
+                .filter(t => t && t.trim() !== '' && t !== 'N/A' && !t.toLowerCase().includes('year industrial') && !t.toLowerCase().includes('form'))
+            )
+          );
+          if (extractedTrades.length > 0) {
+            setDatabaseTrades(extractedTrades);
+          }
         }
+
       } catch (err) {
         console.warn('Network issue detected, using cached student list:', err.message || err);
       } finally {
@@ -1141,69 +1193,81 @@ export default function TeacherDashboardPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0b0f19] text-white font-sans">
-      <header className="bg-[#111827] border-b border-gray-800 px-6 py-4 shadow-lg">
-        <div className="flex items-center justify-between gap-4 w-full">
-          <div className="flex items-center gap-3.5 shrink-0">
+    <div className="min-h-screen bg-slate-100 text-slate-900 font-sans">
+      <header className="bg-white border-b-2 border-slate-200 px-4 sm:px-8 py-4 shadow-md sticky top-0 z-30">
+      <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+        
+        {/* Top / Left Row: Navigation & Institutional Branding */}
+        <div className="flex items-center justify-between w-full md:w-auto gap-4">
+          <div className="flex items-center gap-3">
             {navigationHistory.length > 1 && (
               <button
                 onClick={handleGoBack}
-                className="bg-gray-800 hover:bg-gray-700 text-amber-100 border border-gray-700 text-xs px-3 py-1.5 rounded-lg flex items-center gap-1"
+                className="bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 text-xs px-3 py-1.5 rounded-lg font-semibold transition-all active:scale-95 flex items-center gap-1 shadow-2xs"
               >
                 ← Back
               </button>
             )}
 
-            <div className="w-10 h-10 bg-slate-800 rounded-lg border border-slate-700 flex items-center justify-center overflow-hidden shadow-inner">
+            <div className="w-11 h-11 bg-slate-900 rounded-xl border-2 border-slate-700 flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
               {schoolDetails?.logo_url ? (
                 <img src={schoolDetails.logo_url} alt="School Logo" className="w-full h-full object-cover" />
               ) : (
-                <span className="text-[10px] font-bold text-amber-100">LOGO</span>
+                <span className="text-xs font-black text-emerald-400 tracking-wider">LOGO</span>
               )}
             </div>
 
-            <div className="hidden sm:block text-left border-l border-gray-700 pl-3">
-              <p className="text-[11px] text-slate-400">
-                Welcome, <strong className="text-white">{teacherProfile?.name || teacherProfile?.full_name || 'Teacher'}</strong>
+            <div className="text-left border-l-2 border-slate-200 pl-3">
+              <p className="text-xs text-slate-500 font-medium">
+                Welcome, <strong className="text-slate-900 font-bold text-sm">{teacherProfile?.name || teacherProfile?.full_name || 'Teacher'}</strong>
               </p>
-              <p className="text-[10px] text-amber-100/80 font-mono">
-                {currentAcademicYear ? `AY: ${currentAcademicYear}` : 'Active Portal'}
-              </p>
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="text-[10px] bg-slate-100 text-slate-700 font-mono font-bold px-2 py-0.5 rounded border border-slate-300">
+                  {currentAcademicYear ? `AY: ${currentAcademicYear}` : 'Active Portal'}
+                </span>
+              </div>
             </div>
           </div>
-
-          <div className="flex-1 text-center px-2">
-            <h1 className="text-sm sm:text-base font-bold text-amber-100 tracking-tight leading-tight truncate">
-              {schoolDetails?.name || schoolName || teacherProfile?.school_name || 'Assigned School'}
-            </h1>
-            <p className="text-[10px] text-slate-400 sm:hidden">
-              Welcome, {teacherProfile?.name || teacherProfile?.full_name || 'Teacher'}
-            </p>
-          </div>
-
-          <div className="flex flex-col items-end gap-0.5 shrink-0">
-            <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-medium border ${
-              teacherProfile?.isAuthorized !== false 
-                ? 'bg-emerald-950/60 text-emerald-400 border-emerald-700/50' 
-                : 'bg-rose-950/60 text-rose-400 border-rose-700/50'
-            }`}>
-              {teacherProfile?.isAuthorized !== false ? 'Active Session' : 'Restricted'}
-            </span>
-            <span className="text-[9px] text-slate-400 font-mono whitespace-nowrap hidden md:inline">
-              {submissionStatus?.marksSubmitted ? 'Uploaded' : 'Pending Entry'}
-            </span>
-          </div>
         </div>
-      </header>
 
-      <div className="bg-gradient-to-r from-amber-900/40 via-blue-900/30 to-[#111827] border-b border-gray-800 px-6 py-3 text-center sm:text-left flex flex-col sm:flex-row justify-between items-center gap-2">
-        <p className="text-xs italic text-amber-200/90 font-serif">
-          &ldquo;{currentQuote.quote}&rdquo; — <span className="font-semibold text-white">{currentQuote.author}</span>
+        {/* Center Section: Full School Title Display */}
+        <div className="text-center w-full md:w-auto px-2">
+          <h1 className="text-lg sm:text-xl md:text-2xl font-black text-slate-900 tracking-tight leading-snug uppercase">
+            {schoolDetails?.name || schoolName || teacherProfile?.school_name || 'Assigned School'}
+          </h1>
+        </div>
+
+        {/* Right Section: Status Badges */}
+        <div className="flex items-center justify-center md:justify-end gap-2.5 w-full md:w-auto shrink-0">
+          <span className={`text-xs px-3 py-1 rounded-full font-bold border shadow-2xs flex items-center gap-1.5 ${
+            teacherProfile?.isAuthorized !== false
+              ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+              : 'bg-rose-50 text-rose-800 border-rose-300'
+          }`}>
+            <span className={`w-2 h-2 rounded-full ${teacherProfile?.isAuthorized !== false ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></span>
+            {teacherProfile?.isAuthorized !== false ? 'Active Session' : 'Restricted'}
+          </span>
+          
+          <span className="text-xs font-semibold text-slate-600 bg-slate-100 border border-slate-300 px-3 py-1 rounded-full shadow-2xs">
+            {submissionStatus?.marksSubmitted ? 'Uploaded' : 'Pending Entry'}
+          </span>
+        </div>
+
+      </div>
+    </header>
+
+      {/* Daily Inspiration Quote Banner */}
+      <div className="bg-slate-50 border-b border-slate-200 px-4 sm:px-8 py-2.5 flex flex-col sm:flex-row justify-between items-center gap-1.5 text-xs">
+        <p className="italic text-slate-600 font-medium text-center sm:text-left">
+          &ldquo;{currentQuote.quote}&rdquo; — <span className="font-bold text-slate-900">{currentQuote.author}</span>
         </p>
-        <span className="text-[10px] font-mono text-gray-400 tracking-wider">ClassLogs Daily Inspiration</span>
+        <span className="text-[10px] font-mono font-semibold text-slate-400 tracking-wider uppercase shrink-0">
+          ClassLogs Daily Inspiration
+        </span>
       </div>
 
-      <nav className="bg-[#111827]/60 border-b border-gray-800 px-6 flex space-x-6 overflow-x-auto">
+      {/* Navigation Tab Bar */}
+      <nav className="bg-white border-b border-slate-200 px-4 sm:px-8 flex space-x-2 sm:space-x-6 overflow-x-auto shadow-2xs">
         {[
           { id: 'overview', label: 'My Overview & Timetable' },
           { id: 'attendance', label: 'Mark Attendance' },
@@ -1214,10 +1278,10 @@ export default function TeacherDashboardPage() {
           <button
             key={tab.id}
             onClick={() => changeTab(tab.id)}
-            className={`py-3 text-sm font-semibold border-b-2 transition-colors whitespace-nowrap ${
+            className={`py-3.5 px-3 text-xs sm:text-sm font-semibold border-b-2 transition-all whitespace-nowrap active:scale-95 ${
               activeTab === tab.id
-                ? 'border-amber-500 text-amber-400'
-                : 'border-transparent text-gray-400 hover:text-white'
+                ? 'border-emerald-600 text-emerald-700 font-bold bg-emerald-50/40 rounded-t-lg'
+                : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50 rounded-t-lg'
             }`}
           >
             {tab.label}
@@ -1230,36 +1294,36 @@ export default function TeacherDashboardPage() {
         {activeTab === 'overview' && (
           <div className="space-y-6">
             <div className="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-md flex flex-col md:flex-row items-center justify-between gap-6">
-              <div className="flex items-center gap-4 w-full md:w-auto">
-                <div className="w-16 h-16 rounded-full bg-slate-900 border border-slate-600 overflow-hidden flex items-center justify-center flex-shrink-0">
-                  {teacherProfile?.photo ? (
-                    <img src={teacherProfile.photo} alt="Teacher Profile" className="w-full h-full object-cover" />
-                  ) : (
-                    <span className="text-xl font-bold text-amber-400">
-                      {teacherProfile?.full_name?.charAt(0) || 'T'}
-                    </span>
-                  )}
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold text-white">{teacherProfile?.name || 'Teacher Profile'}</h2>
-                  <p className="text-xs text-slate-400">{teacherProfile?.email || 'No email provided'}</p>
-                  <p className="text-xs text-slate-400">{teacherProfile?.contact || 'No phone provided'}</p>
-                </div>
-              </div>
+  <div className="flex items-center gap-4 w-full md:w-auto">
+    <div className="w-16 h-16 rounded-full bg-slate-900 border border-slate-600 overflow-hidden flex items-center justify-center flex-shrink-0">
+      {teacherProfile?.photo ? (
+        <img src={teacherProfile.photo} alt="Teacher Profile" className="w-full h-full object-cover" />
+      ) : (
+        <span className="text-xl font-bold text-emerald-400">
+          {teacherProfile?.full_name?.charAt(0) || 'T'}
+        </span>
+      )}
+    </div>
+    <div>
+      <h2 className="text-lg font-bold text-white">{teacherProfile?.name || 'Teacher Profile'}</h2>
+      <p className="text-xs text-slate-400">{teacherProfile?.email || 'No email provided'}</p>
+      <p className="text-xs text-slate-400">{teacherProfile?.contact || 'No phone provided'}</p>
+    </div>
+  </div>
 
-              <div className="flex items-center gap-3 bg-slate-900 px-4 py-2.5 rounded-lg border border-slate-700 w-full md:w-auto justify-between md:justify-start">
-                <div>
-                  <span className="block text-[10px] text-slate-400 uppercase font-semibold tracking-wider">Teacher ID</span>
-                  <span className="text-xs font-mono font-bold text-amber-400">{teacherProfile?.teacher_id || 'ID Pending'}</span>
-                </div>
-                <button
-                  onClick={() => navigator.clipboard.writeText(teacherProfile?.teacher_id || '')}
-                  className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs px-3 py-1.5 rounded transition-colors"
-                >
-                  Copy ID
-                </button>
-              </div>
-            </div>
+  <div className="flex items-center gap-3 bg-slate-900 px-4 py-2.5 rounded-lg border border-slate-700 w-full md:w-auto justify-between md:justify-start">
+    <div>
+      <span className="block text-[10px] text-slate-400 uppercase font-semibold tracking-wider">Teacher ID</span>
+      <span className="text-xs font-mono font-bold text-emerald-400">{teacherProfile?.teacher_id || 'ID Pending'}</span>
+    </div>
+    <button
+      onClick={() => navigator.clipboard.writeText(teacherProfile?.teacher_id || '')}
+      className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs px-3 py-1.5 rounded-lg transition-all shadow-sm active:scale-95"
+    >
+      Copy ID
+    </button>
+  </div>
+</div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="bg-[#111827] border border-gray-800 p-6 rounded-xl shadow-md">
@@ -1284,40 +1348,40 @@ export default function TeacherDashboardPage() {
               </div>
             </div>
 
-            <div className="bg-[#111827] border border-gray-800 p-6 rounded-xl shadow-xl space-y-4">
-              <div className="flex justify-between items-center border-b border-gray-800 pb-3">
-                <h3 className="text-sm font-bold uppercase tracking-wider cream-yellow text-amber-100">
-                  My Class Schedule & Timetable
-                </h3>
-                <button 
-                  onClick={downloadTimetable}
-                  className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-1.5 rounded-lg font-semibold shadow transition-colors"
-                >
-                  Download Timetable
-                </button>
-              </div>
+            <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm space-y-4">
+              <div className="flex justify-between items-center border-b border-slate-200 pb-3">
+    <h3 className="text-sm font-extrabold uppercase tracking-tight text-slate-900">
+      My Class Schedule & Timetable
+    </h3>
+    <button 
+      onClick={downloadTimetable}
+      className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3.5 py-1.5 rounded-xl font-bold shadow-sm transition-all active:scale-95"
+    >
+      Download Timetable
+    </button>
+  </div>
 
               {/* Desktop Table */}
-              <div className="hidden md:block overflow-x-auto">
-                <table className="w-full text-left text-xs text-gray-300 border border-gray-700">
-                  <thead className="bg-[#1f2937] text-amber-400 uppercase font-semibold">
-                    <tr>
-                      <th className="p-3 border border-gray-700">Subject</th>
-                      <th className="p-3 border border-gray-700">Class Form</th>
-                      <th className="p-3 border border-gray-700">Day</th>
-                      <th className="p-3 border border-gray-700">Time Slot</th>
-                    </tr>
-                  </thead>
+              <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-200">
+    <table className="w-full text-left text-xs text-slate-800">
+      <thead className="bg-slate-900 text-white uppercase font-bold tracking-wider">
+        <tr>
+          <th className="p-3.5 border-b border-r border-slate-800">Subject</th>
+          <th className="p-3.5 border-b border-r border-slate-800">Class Form</th>
+          <th className="p-3.5 border-b border-r border-slate-800">Day</th>
+          <th className="p-3.5 border-b border-slate-800">Time Slot</th>
+        </tr>
+      </thead>
                   <tbody className="divide-y divide-gray-800">
                     {teacherProfile.schedules && Object.keys(teacherProfile.schedules).length > 0 ? (
                       Object.entries(teacherProfile.schedules).map(([sub, rows]) =>
                         rows.map((row, rIdx) => (
-                          <tr key={`${sub}-${rIdx}`} className="hover:bg-gray-800/40">
-                            <td className="p-3 border border-gray-700 font-bold text-white">{sub}</td>
-                            <td className="p-3 border border-gray-700 text-amber-300 font-semibold">{row.className}</td>
-                            <td className="p-3 border border-gray-700">{row.day}</td>
-                            <td className="p-3 border border-gray-700 font-mono text-emerald-400">{row.startTime} - {row.endTime}</td>
-                          </tr>
+                          <tr key={`${sub}-${rIdx}`} className="hover:bg-slate-50 transition-colors">
+                <td className="p-3.5 border-r border-b border-slate-200 font-extrabold text-slate-900">{sub}</td>
+                <td className="p-3.5 border-r border-b border-slate-200 text-slate-800 font-bold">{row.className}</td>
+                <td className="p-3.5 border-r border-b border-slate-200 text-slate-600 font-medium">{row.day}</td>
+                <td className="p-3.5 border-b border-slate-200 font-mono text-emerald-700 font-bold">{row.startTime} - {row.endTime}</td>
+              </tr>
                         ))
                       )
                     ) : (
@@ -1330,34 +1394,82 @@ export default function TeacherDashboardPage() {
                   </tbody>
                 </table>
               </div>
+{/* Mobile Card List View for Timetable */}
+             {/* Mobile Matrix Table View */}
+              <div className="block md:hidden">
+                {(() => {
+                  const schedules = teacherProfile?.schedules || {};
+                  const subjects = Object.keys(schedules);
+                  const allClasses = Array.from(
+                    new Set(
+                      Object.values(schedules)
+                        .flat()
+                        .map((slot) => slot.className)
+                        .filter(Boolean)
+                    )
+                  );
 
-              {/* Mobile Card List View for Timetable */}
-              <div className="block md:hidden space-y-3">
-                {teacherProfile.schedules && Object.keys(teacherProfile.schedules).length > 0 ? (
-                  Object.entries(teacherProfile.schedules).map(([sub, rows]) =>
-                    rows.map((row, rIdx) => (
-                      <div key={`${sub}-${rIdx}`} className="bg-[#1f2937] border border-gray-700 rounded-lg p-3 space-y-1.5 shadow-sm">
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-sm text-white">{sub}</span>
-                          <span className="text-amber-300 font-semibold text-xs px-2 py-0.5 rounded bg-amber-950/60 border border-amber-800/50">
-                            {row.className}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between text-xs pt-1 border-t border-gray-800">
-                          <span className="text-gray-300 font-medium">🗓️ {row.day}</span>
-                          <span className="font-mono text-emerald-400 font-bold">⏰ {row.startTime} - {row.endTime}</span>
-                        </div>
+                  if (subjects.length === 0 || allClasses.length === 0) {
+                    return (
+                      <div className="p-6 text-center text-slate-500 italic bg-white rounded-xl border border-slate-200 text-xs">
+                        No class schedule assigned yet by administrator for this school ID.
                       </div>
-                    ))
-                  )
-                ) : (
-                  <div className="p-6 text-center text-gray-500 italic bg-[#1f2937] rounded-lg border border-gray-800">
-                    No class schedule assigned yet by administrator for this school ID.
-                  </div>
-                )}
+                    );
+                  }
+
+                  return (
+                    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-2xs">
+                      <table className="w-full text-center text-xs border-collapse min-w-[480px]">
+                        <thead>
+                          <tr className="bg-slate-900 text-white font-extrabold uppercase text-[10px] tracking-wider">
+                            <th className="p-2.5 border-b border-r border-slate-800 text-left w-32 bg-slate-950 text-slate-100 sticky left-0 z-10 shadow-r">
+                              Subjects
+                            </th>
+                            {allClasses.map((cls) => (
+                              <th key={cls} className="p-2.5 border-b border-r border-slate-800 last:border-r-0 min-w-[110px]">
+                                {cls}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200 bg-white">
+                          {subjects.map((sub) => {
+                            const subSlots = schedules[sub] || [];
+                            return (
+                              <tr key={sub} className="hover:bg-slate-50/60">
+                                <td className="p-2.5 border-r border-slate-200 text-left font-black text-slate-900 bg-slate-50 text-[11px] sticky left-0 z-10 shadow-r">
+                                  {sub}
+                                </td>
+                                {allClasses.map((cls) => {
+                                  const matchedSlot = subSlots.find((s) => s.className === cls);
+                                  return (
+                                    <td key={cls} className="p-2 border-r border-slate-200 last:border-r-0 align-middle">
+                                      {matchedSlot ? (
+                                        <div className="border border-emerald-700 bg-emerald-50 rounded-lg p-1.5 text-center shadow-2xs">
+                                          <div className="text-[11px] font-black text-emerald-900">
+                                            {matchedSlot.day}
+                                          </div>
+                                          <div className="text-[10px] font-mono font-extrabold text-emerald-700 mt-0.5">
+                                            {matchedSlot.startTime} - {matchedSlot.endTime}
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <span className="text-slate-300 font-bold text-xs">—</span>
+                                      )}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+              </div>
               </div>
             </div>
-          </div>
         )}
 
         {/* LESSON NOTES & TEST BANK TAB */}
@@ -1842,7 +1954,7 @@ export default function TeacherDashboardPage() {
 
         {/* ATTENDANCE TAB */}
         {activeTab === 'attendance' && (
-          <div className="bg-slate-800/90 border border-slate-700 p-8 rounded-xl max-w-4xl mx-auto shadow-2xl space-y-6">
+          <div className="bg-slate-800/90 border border-slate-700 p-3 sm:p-6 rounded-xl w-full max-w-full shadow-2xl space-y-6">
             <h2 className="text-lg font-bold text-white border-b border-slate-700 pb-3">Class Attendance — {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' })}</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -1895,33 +2007,42 @@ export default function TeacherDashboardPage() {
                   </thead>
                   <tbody className="divide-y divide-gray-800">
                     {classStudents.map((stu, index) => {
-                      const currentStatus = attendanceRecords[stu.id] || 'Present';
-                      return (
-                        <tr key={stu.id} className="hover:bg-gray-800/40">
-                          <td className="p-3 border border-gray-700 font-mono text-amber-400">{index + 1}</td>
-                          <td className="p-3 border border-gray-700 font-semibold text-white">{stu.fullName}</td>
-                          <td className="p-3 border border-gray-700 font-mono text-xs text-amber-300">{stu.unique_code || stu.matricule || stu.id || '-'}</td>
-                          <td className="p-3 border border-gray-700 text-center">
-                            <div className="inline-flex rounded-lg overflow-hidden border border-gray-700">
-                              {['Present', 'Absent', 'Late'].map((st) => (
-                                <button
-                                  key={st}
-                                  type="button"
-                                  onClick={() => handleAttendanceChange(stu.id, st)}
-                                  className={`px-3 py-1 text-xs font-semibold transition-colors ${
-                                    currentStatus === st
-                                      ? st === 'Present' ? 'bg-emerald-600 text-white' : st === 'Absent' ? 'bg-red-600 text-white' : 'bg-amber-600 text-white'
-                                      : 'bg-[#1f2937] text-gray-400 hover:text-white'
-                                  }`}
-                                >
-                                  {st}
-                                </button>
-                              ))}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                        const currentStatus = attendanceRecords[stu.id] || 'Present';
+                        return (
+                          <tr key={stu.id} className="hover:bg-slate-800/50 border-b border-slate-700/60 transition-colors">
+                            <td className="p-2.5 border border-slate-700 font-mono text-slate-300 text-center text-xs font-bold w-10">
+                              {index + 1}
+                            </td>
+                            <td className="p-2.5 border border-slate-700 font-semibold text-white text-xs whitespace-normal min-w-[130px]">
+                              {stu.fullName || stu.full_name || stu.name}
+                            </td>
+                            <td className="p-2.5 border border-slate-700 font-mono text-xs whitespace-nowrap">
+                              <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-600 text-[11px] text-emerald-300 font-semibold tracking-wide inline-block shadow-sm">
+                                {stu.unique_code || stu.matricule || stu.id || '-'}
+                              </span>
+                            </td>
+                            <td className="p-2.5 border border-slate-700 text-center whitespace-nowrap">
+                              <div className="inline-flex rounded-md overflow-hidden border border-slate-600 shadow-sm bg-slate-900">
+                                {['Present', 'Absent', 'Late'].map((st) => (
+                                  <button
+                                    key={st}
+                                    type="button"
+                                    onClick={() => handleAttendanceChange(stu.id, st)}
+                                    className={`px-2.5 py-1 text-[11px] font-bold transition-all active:scale-95 ${
+                                      currentStatus === st
+                                        ? st === 'Present' ? 'bg-emerald-600 text-white shadow-inner' : st === 'Absent' ? 'bg-rose-600 text-white shadow-inner' : 'bg-amber-500 text-slate-950 shadow-inner'
+                                        : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                                    }`}
+                                  >
+                                    {st}
+                                  </button>
+                                ))}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    
                   </tbody>
                 </table>
               </div>
