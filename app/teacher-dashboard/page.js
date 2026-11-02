@@ -783,7 +783,7 @@ export default function TeacherDashboardPage() {
         setIsMarkEntryAuthorized(!teacherData.is_marks_locked);
       }
 
-      // 2. Fetch school details strictly matching activeSchoolId
+     // 2. Fetch school details strictly matching activeSchoolId
       const { data: schoolData, error: schoolErr } = await supabase
         .from('school_details')
         .select('*')
@@ -792,9 +792,10 @@ export default function TeacherDashboardPage() {
 
       if (schoolData && !schoolErr) {
         setSchoolDetails(schoolData);
-        setSchoolName(schoolData.name || schoolData.school_name || 'Assigned School');
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('active_school_name', schoolData.name || schoolData.school_name || '');
+        const resolvedName = schoolData.name || schoolData.school_name || 'Assigned School';
+        setSchoolName(resolvedName);
+        if (typeof window !== 'undefined' && activeSchoolId) {
+          localStorage.setItem(`active_school_name_${activeSchoolId}`, resolvedName);
         }
       }
 
@@ -1194,20 +1195,13 @@ export default function TeacherDashboardPage() {
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 font-sans">
-      <header className="bg-white border-b-2 border-slate-200 px-4 sm:px-8 py-4 shadow-md sticky top-0 z-30">
+      <header className="bg-white border-b-2 border-slate-200 px-4 sm:px-8 py-4 shadow-md relative z-30">
       <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
         
         {/* Top / Left Row: Navigation & Institutional Branding */}
         <div className="flex items-center justify-between w-full md:w-auto gap-4">
           <div className="flex items-center gap-3">
-            {navigationHistory.length > 1 && (
-              <button
-                onClick={handleGoBack}
-                className="bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 text-xs px-3 py-1.5 rounded-lg font-semibold transition-all active:scale-95 flex items-center gap-1 shadow-2xs"
-              >
-                ← Back
-              </button>
-            )}
+
 
             <div className="w-11 h-11 bg-slate-900 rounded-xl border-2 border-slate-700 flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
               {schoolDetails?.logo_url ? (
@@ -1232,9 +1226,10 @@ export default function TeacherDashboardPage() {
 
         {/* Center Section: Full School Title Display */}
         <div className="text-center w-full md:w-auto px-2">
-          <h1 className="text-lg sm:text-xl md:text-2xl font-black text-slate-900 tracking-tight leading-snug uppercase">
-            {schoolDetails?.name || schoolName || teacherProfile?.school_name || 'Assigned School'}
-          </h1>
+
+        <h1 className="text-lg sm:text-xl md:text-2xl font-black text-slate-900 tracking-tight leading-snug uppercase">
+  {schoolDetails?.name || schoolName || (typeof window !== 'undefined' ? localStorage.getItem(`active_school_name_${localStorage.getItem('active_school_id')}`) : '') || 'Assigned School'}
+</h1>
         </div>
 
         {/* Right Section: Status Badges */}
@@ -1289,7 +1284,7 @@ export default function TeacherDashboardPage() {
         ))}
       </nav>
 
-      <main className="p-6 max-w-7xl mx-auto space-y-8">
+      <main className="w-full px-3 sm:px-8 py-6 space-y-6">
         {/* OVERVIEW TAB */}
         {activeTab === 'overview' && (
           <div className="space-y-6">
@@ -2310,79 +2305,7 @@ export default function TeacherDashboardPage() {
                             <th className="p-2 border-t border-emerald-900/40 text-center w-28">{label2}</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-200 bg-[#fefcf8] text-slate-900 font-sans">
-                          {classStudents && classStudents.length > 0 ? (
-                            classStudents.map((student, idx) => {
-                              const studentMarks = marksRecords[student.id] || {};
-                              return (
-                                <tr key={student.id || idx} className="hover:bg-amber-50/60 transition-colors">
-                                  <td className="p-3 border-r border-slate-200 text-center font-bold text-slate-400">
-                                    {idx + 1}
-                                  </td>
-                                  <td className="p-3 border-r border-slate-200 text-center">
-                                    <span className="px-2.5 py-1 rounded-md border border-slate-300 bg-white font-mono text-xs text-slate-700">
-                                      {student.unique_code || student.matricule || student.id || '-'}
-                                    </span>
-                                  </td>
-                                  <td className="p-3 border-r border-slate-200 font-bold text-slate-900">
-                                    {student.full_name || student.fullName || student.name}
-                                  </td>
-                                  <td className="p-3 border-r border-slate-200 text-center text-xs font-semibold text-slate-600">
-                                    {student.trades_series || student.trade || student.series || student.specialty || '-'}
-                                  </td>
-                                  <td className="p-2 border-r border-slate-200 text-center">
-                                    <input
-                                      type="number"
-                                      step="0.25"
-                                      min="0"
-                                      max="20"
-                                      disabled={!isMarkEntryAuthorized}
-                                      value={studentMarks[key1] ?? ''}
-                                      onChange={(e) => handleMarkChange(student.id, key1, e.target.value)}
-                                      className="w-full text-center font-extrabold bg-transparent text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-500 rounded px-1"
-                                      placeholder="-"
-                                    />
-                                  </td>
-                                  <td className="p-2 border-r border-slate-200 text-center">
-                                    <input
-                                      type="number"
-                                      step="0.25"
-                                      min="0"
-                                      max="20"
-                                      disabled={!isMarkEntryAuthorized}
-                                      value={studentMarks[key2] ?? ''}
-                                      onChange={(e) => handleMarkChange(student.id, key2, e.target.value)}
-                                      className="w-full text-center font-extrabold bg-transparent text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-500 rounded px-1"
-                                      placeholder="-"
-                                    />
-                                  </td>
-                                  {(() => {
-                                    const termScoreVal = getDynamicTermScore(student.id, key1, key2);
-                                    const rankMap = getDynamicRankMap(key1, key2);
-                                    const rankVal = rankMap[student.id] || '-';
-
-                                    return (
-                                      <>
-                                        <td className="p-3 border-r border-slate-200 text-center font-bold text-slate-700 bg-slate-50">
-                                          {termScoreVal}
-                                        </td>
-                                        <td className="p-3 text-center font-bold text-emerald-700 bg-slate-50">
-                                          {rankVal}
-                                        </td>
-                                      </>
-                                    );
-                                  })()}
-                                </tr>
-                              );
-                            })
-                          ) : (
-                            <tr>
-                              <td colSpan="5" className="p-6 text-center text-slate-500 italic bg-white">
-                                No students enrolled in {selectedClassForAction || 'this class'}.
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
+                        
                         {classStudents && classStudents.length > 0 && (
                           <tfoot className="bg-[#0b192c] text-white font-medium text-xs">
                             <tr className="border-t border-emerald-900/40">
@@ -2524,12 +2447,11 @@ export default function TeacherDashboardPage() {
                           const calculatedRank = rankMap[student.id] || '-';
 
                           return (
-                            <div key={student.id || idx} className="bg-slate-900 border border-slate-700 rounded-lg p-3 shadow-lg">
+                            <div key={student.id || idx} className="w-full bg-[#FAF6EE] border border-slate-300 rounded-none p-3 shadow-sm my-1">
                               <div className="flex flex-wrap items-center justify-between gap-1.5 mb-2 pb-2 border-b border-slate-800">
                                 <div className="flex items-center gap-1.5 flex-wrap">
                                   <span className="text-[11px] font-bold text-slate-500">#{idx + 1}</span>
-                                  <span className="font-bold text-xs text-slate-100">{student.full_name || student.fullName || student.name}</span>
-                                  
+                                 <span className="font-bold text-xs text-emerald-900">{student.full_name || student.fullName || student.name}</span>                                  
                                   <span className="px-1.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-800/60 text-[10px] font-semibold text-emerald-300">
                                     <span className="text-emerald-500 font-bold">Trade/Series: </span>
                                     {student.trades_series || student.trade_series || student.series || student.trade || student.speciality || student.specialty || student.option || '-'}
@@ -2548,8 +2470,8 @@ export default function TeacherDashboardPage() {
                                 </span>
                               </div>
 
-                              <div className="grid grid-cols-2 gap-2">
-                                <div className="bg-slate-800/60 p-2 rounded border border-slate-700/50">
+                              <div className="grid grid-cols-2 gap-2"> 
+                                <div className="bg-white p-2 rounded border border-slate-300 shadow-sm">
                                   <label className="block text-[11px] font-bold text-emerald-400 mb-1">{label1}</label>
                                   <input
                                     type="number"
@@ -2564,7 +2486,7 @@ export default function TeacherDashboardPage() {
                                   />
                                 </div>
 
-                                <div className="bg-slate-800/60 p-2 rounded border border-slate-700/50">
+                                <div className="bg-white p-2 rounded border border-slate-300 shadow-sm">
                                   <label className="block text-[11px] font-bold text-emerald-400 mb-1">{label2}</label>
                                   <input
                                     type="number"
