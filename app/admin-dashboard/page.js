@@ -325,6 +325,8 @@ export const ALL_SUBJECTS_LIST = [
   { name: "Electrical Tests & Measurements", category: "Industrial Subjects" },
   { name: "Engineering Drawing", category: "Industrial Subjects" },
   { name: "Engineering Science", category: "Industrial Subjects" },
+  { name: "Fashion and Fabric Design", category: "Industrial Subjects" },
+  { name: "Garment Construction", category: "Industrial Subjects" },
   { name: "Industrial Computing", category: "Industrial Subjects" },
   { name: "Material Technology and Workshop Process", category: "Industrial Subjects" },
   { name: "Materials", category: "Industrial Subjects" },
@@ -900,7 +902,7 @@ return {
   dob: birthDateStr,
   age: calculatedAge,
   residence: row.residence || row["Residence"] || "",
-  guardian_name: row.guardian_name || row["Guardian Name"] || "Parent",
+  guardian_name: row.guardian_name || row["Guardian Name"] || row["Parent Name"] || row["Guardian"] || "Parent",
   guardian_phone: guardianPhone,
   academic_year: getCurrentAcademicYear(),
 };
@@ -1163,25 +1165,25 @@ const handleRowClick = async (student) => {
     console.warn('Financial records fetch skipped:', err);
   }
 
-  setEditFormData({
-    ...student,
-    original_section: student.section || '',
-    original_fullName: currentFullName,
-    fullName: currentFullName,
-    section: student.section || '',
-    classLevel: student.classLevel || student.class_level || '',
-    trades_series: student.trades_series || student.trade || '',
-    residence: student.residence || '',
-    dob: (student.dob || student.date_of_birth) ? String(student.dob || student.date_of_birth).split('T')[0] : '',
-    gender: student.gender || 'Male',
-    guardian_name: student.guardian_name || student.guardianName || student.parent_name || '',
-    guardian_phone: rawGuardianPhone,
-    student_phone: rawStudentPhone,
-    medical_history: (student.medical_history === 'None' || student.medicalNotes === 'None') ? 'None / No Known Medical Conditions' : (student.medical_history || student.medicalNotes || 'None / No Known Medical Conditions'),
-    amount_due,
-    amount_paid,
-    balance
-  });
+ setEditFormData({
+  ...student,
+  original_section: student.section || '',
+  original_fullName: currentFullName,
+  fullName: currentFullName,
+  section: student.section || '',
+  classLevel: student.classLevel || student.class_level || '',
+  trades_series: student.trades_series || student.trade || '',
+  residence: student.residence || student.quarter || student.address || '',
+  dob: (student.dob || student.date_of_birth) ? String(student.dob || student.date_of_birth).split('T')[0] : '',
+  gender: student.gender || student.sex || 'Male',
+  guardian_name: student.guardian_name || student.guardianName || student.parent_name || student["Guardian Name"] || student["Parent Name"] || student["Guardian"] || 'Parent',
+  guardian_phone: student.guardian_phone || student.guardianPhone || student.phone || '',
+  student_phone: student.student_phone || student.studentPhone || '',
+  medical_history: student.medical_history || student.medicalNotes || 'None',
+  amount_due,
+  amount_paid,
+  balance
+});
 };
 
  const handleSaveStudent = async (e) => {
@@ -1213,43 +1215,60 @@ if (!editFormData?.residence || !editFormData.residence.trim()) {
    const cleanStudentPhone = String(editFormData?.student_phone || editFormData?.phone || '').trim() || 'N/A';
 
     // Strip read-only financial & baseline properties
-const { updated_at, trade, class_level, phone, student_phone, amount_due, amount_paid, balance, original_section, original_fullName, ...sanitizedFormData } = editFormData;    
-// Detect if Section OR Name changed to generate a new Unique Code
-    const targetName = editFormData?.fullName?.trim() || editFormData?.full_name?.trim() || editFormData?.name?.trim() || '';
-    const sectionChanged = original_section && original_section !== editFormData.section;
-    const nameChanged = original_fullName && original_fullName !== targetName;
+// Strip read-only financial & baseline properties
+    const { updated_at, trade, class_level, phone, student_phone, amount_due, amount_paid, balance, original_section, original_classLevel, original_fullName, ...sanitizedFormData } = editFormData || {};
 
-   if (sectionChanged || nameChanged) {
-      const activeSchoolName = activeSchool?.school_name || activeSchool?.name || 'School';
-      const targetClassForCode = editFormData?.classLevel || editFormData?.class_level || '';
-      const targetSectionForCode = editFormData?.section || '';
-      const targetGenderForCode = editFormData?.gender || 'Male';
+    const getForcedUniqueCode = (data, school) => {
+      const currentCode = data?.unique_code || '';
+      const targetClass = data?.classLevel || data?.class_level || '';
+      const targetSec = data?.section || '';
+      const targetName = data?.fullName?.trim() || data?.full_name?.trim() || data?.name?.trim() || 'Student';
+      const targetGender = data?.gender || 'Male';
 
-      sanitizedFormData.unique_code = generateStudentId(
-        activeSchoolName,
-        targetSectionForCode,
-        targetName,
-        targetClassForCode,
-        targetGenderForCode
-      );
-    }
+      const origSec = data?.original_section || '';
+      const origClass = data?.original_classLevel || data?.original_class_level || '';
 
+      const classToken = targetClass.match(/\(([^)]+)\)/)?.[1] || targetClass.substring(0, 3).toUpperCase();
+      const hasClassInCode = currentCode.toUpperCase().includes(classToken.toUpperCase());
+
+      const classChanged = (origClass && origClass !== targetClass) || !hasClassInCode;
+      const sectionChanged = origSec && origSec !== targetSec;
+
+      if (!currentCode || classChanged || sectionChanged) {
+        return generateStudentId(
+          school?.school_name || school?.name || 'School',
+          targetSec,
+          targetName,
+          targetClass,
+          data?.age || 15,
+          targetGender
+        );
+      }
+      return currentCode;
+    };
+
+    sanitizedFormData.unique_code = getForcedUniqueCode(editFormData, activeSchool);
     const targetClass = editFormData?.classLevel || editFormData?.class_level || '';
     const targetTrade = GENERAL_LOWER_CLASSES.includes(targetClass) ? 'N/A' : (editFormData?.trades_series || 'N/A');
 
-    const payloadToSave = {
-      ...sanitizedFormData,              
-      fullName: targetName,                   
-      section: editFormData?.section || '',     
-      classLevel: targetClass,                
-      trades_series: targetTrade,                                   
-      residence: editFormData?.residence?.trim() || 'N/A',
+ const targetName = editFormData?.fullName?.trim() || editFormData?.full_name?.trim() || editFormData?.name?.trim() || 'Student';
+ const payloadToSave = {
+      id: editFormData?.id,
+      school_id: currentSchoolId || editFormData?.school_id || activeSchool?.id || activeSchool?.school_id,
+      unique_code: sanitizedFormData.unique_code,
+      fullName: targetName,                     
+      section: editFormData?.section || '',      
+      classLevel: targetClass,                    
+      trades_series: targetTrade,                                                                 
+      residence: editFormData?.residence?.trim() || editFormData?.quarter?.trim() || 'N/A',
       dob: (editFormData?.dob || editFormData?.date_of_birth) ? String(editFormData?.dob || editFormData?.date_of_birth).split('T')[0] : '',
-      gender: editFormData?.gender || 'Male',
-      guardian_name: editFormData?.guardian_name?.trim() || editFormData?.guardianName?.trim() || 'Parent',
+      gender: editFormData?.gender || editFormData?.sex || 'Male',
+      guardian_name: editFormData?.guardian_name?.trim() || editFormData?.guardianName?.trim() || editFormData?.parent_name?.trim() || editFormData?.["Parent Name"]?.trim() || editFormData?.["Guardian Name"]?.trim() || editFormData?.["Guardian"]?.trim() || 'Parent',
       guardian_phone: cleanGuardianPhone,
-      medical_history: editFormData?.medical_history?.trim() || 'None',
-      
+      medical_history: editFormData?.medical_history?.trim() || editFormData?.medicalNotes?.trim() || 'None',
+      academic_year: editFormData?.academic_year || getCurrentAcademicYear(),
+      age: editFormData?.age || null,
+      picture: editFormData?.picture || null
     };
 
     const studentId = editFormData?.id;
@@ -1281,7 +1300,30 @@ const { updated_at, trade, class_level, phone, student_phone, amount_due, amount
           .eq('id', studentId)
           .eq('school_id', targetSchoolId)
           .select();
+const targetClass = editFormData?.classLevel || editFormData?.class_level || '';
+    const targetSec = editFormData?.section || '';
+    const targetTrade = GENERAL_LOWER_CLASSES.includes(targetClass) ? 'N/A' : (editFormData?.trades_series || 'N/A');
 
+    // 1. Strict Sixth Class Trade Validation Guard
+    const isSixthClass = targetClass.includes('Sixth') || targetClass.includes('L6') || targetClass.includes('U6');
+    if (isSixthClass && (!targetTrade || targetTrade === 'N/A' || targetTrade === '-- Select Trade / Series --')) {
+      alert(`Update Rejected: Student "${editFormData?.fullName}" is in class "${targetClass}" which is a sixth class. You MUST select a valid Trade or Series!`);
+      return;
+    }
+
+    // 2. Dynamic Unique Code Regeneration if Section or Class changes
+    let finalUniqueCode = editFormData?.unique_code || '';
+    const originalSec = editFormData?.original_section || '';
+    if (!finalUniqueCode || originalSec !== targetSec || !finalUniqueCode.includes(targetClass.substring(0, 3).toUpperCase())) {
+      finalUniqueCode = generateStudentId(
+        activeSchool?.school_name || activeSchool?.name || "School",
+        targetSec,
+        editFormData?.fullName || 'Student',
+        targetClass,
+        editFormData?.age || 15,
+        editFormData?.gender || 'Male'
+      );
+    }
         if (!error && data && data.length > 0) {
           // Clear queue item if cloud update succeeded
           await db.pendingSyncQueue
@@ -1844,6 +1886,7 @@ const handleExportExcel = async () => {
         ...cleanExportData.map((row) => String(row[key] || '').length)
       );
       return { wch: maxLen + 4 };
+    
     });
 
     const workbook = excelLib.utils.book_new();
@@ -4093,7 +4136,7 @@ const handleUpdatePersonnel = async (e) => {
 </td>
                 <td className="p-3"><span className="text-amber-200 font-medium">{stu.gender}</span>, {stu.age} yrs</td>
                 <td className="p-3">
-                  <div className="font-semibold text-white">{stu.guardianName}</div>
+                  <div className="font-semibold text-white">{stu.guardian_name || stu.guardianName || stu["Guardian Name"] || stu["Parent Name"] || stu["Guardian"] || 'Parent'}</div>
                   <div className="text-amber-200 font-mono text-xs">{stu.guardian_phone || stu.guardianPhone || 'N/A'}</div>
                 </td>
                 <td className="p-3">
