@@ -4398,28 +4398,33 @@ const handleUpdatePersonnel = async (e) => {
     <div className="flex items-center gap-1">
       <button
         type="button"
+        
         onClick={async () => {
-          const targetId = teacher.teacher_id || teacher.id;
-          const currentSchoolId = localStorage.getItem('active_school_id') || localStorage.getItem('activeSchoolId');
+      const targetId = teacher.teacher_id || teacher.id;
+      const currentSchoolId = localStorage.getItem('active_school_id') || localStorage.getItem('activeSchoolId');
 
-          const { error } = await supabase
-            .from('teachers')
-            .delete()
-            .eq('teacher_id', targetId)
-            .eq('school_id', currentSchoolId);
+      const { error } = await supabase
+        .from('teachers')
+        .delete()
+        .eq('teacher_id', targetId)
+        .eq('school_id', currentSchoolId);
 
-          if (error) {
-            setDeleteBanner({ type: 'error', message: `Error deleting teacher: ${error.message}` });
-            setConfirmDeleteId(null);
-            return;
-          }
+      if (error) {
+        setDeleteBanner({ type: 'error', message: `Error: ${error.message}` });
+        setConfirmDeleteId(null);
+        return;
+      }
 
-          setTeachersList((prev) => prev.filter((t) => (t.teacher_id || t.id) !== targetId));
-          setDeleteBanner({ type: 'success', message: `${teacher.name} has been permanently deleted.` });
-          setConfirmDeleteId(null);
+      setTeachersList((prev) => {
+        const updated = prev.filter((t) => (t.teacher_id || t.id) !== targetId);
+        localStorage.setItem('teachers_list_cache', JSON.stringify(updated));
+        return updated;
+      });
 
-          setTimeout(() => setDeleteBanner(null), 4000);
-        }}
+      setDeleteBanner({ type: 'success', message: `${teacher.name} has been permanently deleted.` });
+      setConfirmDeleteId(null);
+      setTimeout(() => setDeleteBanner(null), 4000);
+    }}                                                                                                                                                                                                                                                                                                                 
         className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs py-1 px-2.5 rounded transition-all"
       >
         Yes, Delete

@@ -277,7 +277,30 @@ useEffect(() => {
 
     return `${schoolCode}-${secCode}${initials}${phoneSuffix}${yearSuffix}${randomLetter}`;
   };
+  // --- DELETE TEACHER FROM SUPABASE ---
+const handleDeleteTeacher = async (teacherIdToDelete) => {
+  if (!window.confirm("Are you sure you want to delete this teacher assignment? This action cannot be undone.")) return;
 
+  try {
+    let activeSchoolId = activeSchool?.school_id || activeSchool?.id || localStorage.getItem('active_school_id') || localStorage.getItem('activeSchoolId');
+
+    const { error } = await supabase
+      .from('teachers')
+      .delete()
+      .eq('teacher_id', teacherIdToDelete)
+      .eq('school_id', activeSchoolId);
+
+    if (error) throw error;
+
+    setTeachersList((prev) => prev.filter((t) => t.teacher_id !== teacherIdToDelete && t.id !== teacherIdToDelete));
+    
+    alert("Teacher assignment deleted successfully.");
+    if (typeof onClose === 'function') onClose();
+  } catch (err) {
+    console.error("Error deleting teacher:", err.message);
+    alert("Failed to delete teacher: " + err.message);
+  }
+};
   // --- MAIN SUBMISSION HANDLER ---
   const handleTeacherAssignment = async (e) => {
     if (e) e.preventDefault();
