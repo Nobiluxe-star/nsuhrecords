@@ -21,14 +21,18 @@ export default function SchoolParametersConfig({ activeSchool, deleteBanner, set
  // --- Fail-Safe Hydration Engine ---
   useEffect(() => {
     let isMounted = true;
-    const CACHE_KEY = 'cached_school_details_v1';
+    const CACHE_KEY = activeSchool?.id 
+  ? `cached_school_details_${activeSchool.id}` 
+  : activeSchool?.school_id 
+  ? `cached_school_details_${activeSchool.school_id}`
+  : null;
 
     const sanitize = (val) => (val && val !== 'EMPTY' && val !== 'NULL' ? val : '');
 
     // 1. Instant Cache Load (0ms speed)
     const loadFromCache = () => {
       try {
-        const localData = localStorage.getItem(CACHE_KEY) || localStorage.getItem('active_school_details');
+        const localData = CACHE_KEY ? localStorage.getItem(CACHE_KEY) : null;
         if (localData) {
           const parsed = JSON.parse(localData);
           setSchoolMotto(sanitize(parsed.motto));
@@ -56,7 +60,7 @@ export default function SchoolParametersConfig({ activeSchool, deleteBanner, set
 
     // 3. Silent Supabase Background Fetch
     async function syncWithSupabase() {
-      const hasCachedData = typeof window !== 'undefined' && (localStorage.getItem(CACHE_KEY) || localStorage.getItem('active_school_details'));
+      const hasCachedData = typeof window !== 'undefined' && CACHE_KEY ? localStorage.getItem(CACHE_KEY) : null;
       if (!hasCachedData) setIsLoading(true);
 
       try {

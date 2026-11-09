@@ -313,6 +313,80 @@ const handleDeleteTeacher = async (teacherIdToDelete) => {
       return;
     }
 
+    // --- 1. SIMPLE AM / PM INVERSION CHECK ---
+    for (const [subjectKey, slots] of Object.entries(subjectClassSchedules || {})) {
+      if (Array.isArray(slots)) {
+        for (const slot of slots) {
+          const start = String(slot.startTime || '').trim().toUpperCase();
+          const end = String(slot.endTime || '').trim().toUpperCase();
+          if (start.endsWith('PM') && end.endsWith('AM')) {
+            alert(`Time Conflict in ${subjectKey}: Start time (${slot.startTime}) cannot be PM when End time (${slot.endTime}) is AM.`);
+            setIsSubmittingTeacher(false);
+            return;
+          }
+        }
+      }
+    }
+
+    // --- 2. DUPLICATE & CLASS SUBJECT ASSIGNMENT CHECKS ---
+    const currentSchoolId = activeSchool?.school_id || activeSchool?.id || (typeof window !== 'undefined' ? localStorage.getItem('active_school_id') : null);
+    if (currentSchoolId) {
+      const currentSchoolTeachers = (teachersList || []).filter(t => String(t.school_id || t.schoolId) === String(currentSchoolId));
+      const editingId = teacherToEdit?.teacher_id || teacherToEdit?.id;
+
+      // Duplicate Teacher Name / Phone / Email Check
+      const existingTeacher = currentSchoolTeachers.find(t => {
+        const isSelf = editingId && (t.teacher_id === editingId || t.id === editingId);
+        if (isSelf) return false;
+        const sameName = t.name?.trim().toLowerCase() === teacherName.trim().toLowerCase();
+        const samePhone = (t.contact || t.phone) === teacherPhone.trim();
+        const sameEmail = t.email?.trim().toLowerCase() === teacherEmail.trim().toLowerCase();
+        return sameName || samePhone || sameEmail;
+      });
+
+      if (existingTeacher) {
+        const confirmDuplicate = window.confirm(
+          `A teacher matching '${teacherName}' is already assigned in this school. Do you want to duplicate this teacher entry?`
+        );
+        if (!confirmDuplicate) {
+          setIsSubmittingTeacher(false);
+          return;
+        }
+      }
+
+      // Subject for Class Already Assigned Warning
+      for (const [subjectKey, slots] of Object.entries(subjectClassSchedules || {})) {
+        if (Array.isArray(slots)) {
+          for (const slot of slots) {
+            const targetClass = slot.className || slot.classLevel;
+            if (!targetClass) continue;
+
+            const conflictTeacher = currentSchoolTeachers.find(t => {
+              const isSelf = editingId && (t.teacher_id === editingId || t.id === editingId);
+              if (isSelf) return false;
+
+              const tSchedules = t.schedules || {};
+              const tSlots = tSchedules[subjectKey];
+              if (Array.isArray(tSlots)) {
+                return tSlots.some(s => (s.className || s.classLevel) === targetClass);
+              }
+              return false;
+            });
+
+            if (conflictTeacher) {
+              const confirmClassConflict = window.confirm(
+                `Notice: '${subjectKey}' for '${targetClass}' is already assigned to ${conflictTeacher.name}. Do you want to assign it to ${teacherName} as well?`
+              );
+              if (!confirmClassConflict) {
+                setIsSubmittingTeacher(false);
+                return;
+              }
+            }
+          }
+        }
+      }
+    }
+
     const currentSchoolTitle = activeSchool?.name || schoolName || 'Virgin Island';
     const teacherId = teacherToEdit?.teacher_id || teacherToEdit?.id || generateTeacherId(
       currentSchoolTitle,
@@ -648,14 +722,14 @@ return (
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-amber-100 mb-1">Email Address (Mandatory)</label>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Email Address (Optional)</label>
                   <input 
                     type="email" 
                     value={teacherEmail} 
                     onChange={(e) => setTeacherEmail(e.target.value)} 
                     required 
                     placeholder="teacher@wisdomcollege.cm"
-                    className="w-full bg-[#1f2937] border border-amber-500/50 rounded-lg px-4 py-2.5 text-sm text-white"
+                    className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white"
                   />
                 </div>
                 <div>
@@ -674,15 +748,14 @@ return (
 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4 w-full max-w-full">
   {/* Qualification Dropdown + Manual Entry */}
   <div>
-    <label className="block text-xs font-semibold uppercase tracking-wider text-amber-100 mb-1">
-      Teacher Qualification (Mandatory) *
-    </label>
-    <select
-      value={teacherQualification}
-      onChange={(e) => setTeacherQualification(e.target.value)}
-      required
-      className="w-full bg-[#1f2937] border border-amber-500/50 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500"
-    >
+    <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
+  Teacher Qualification (Optional)
+</label>
+<select
+  value={teacherQualification}
+  onChange={(e) => setTeacherQualification(e.target.value)}
+  className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500"
+>
       <option value="">-- Select Qualification --</option>
       <optgroup label="Professional Teaching Diplomas (ENS / ENSET)">
         <option value="DIPES I">DIPES I (Secondary - 1st Cycle)</option>
@@ -722,8 +795,7 @@ return (
         value={customTeacherQualification}
         onChange={(e) => setCustomTeacherQualification(e.target.value)}
         placeholder="Type qualification manually..."
-        required
-        className="mt-2 w-full bg-[#1f2937] border border-amber-500 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none"
+        className="mt-2 w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500"
       />
     )}
   </div>

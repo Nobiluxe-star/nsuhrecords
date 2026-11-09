@@ -680,63 +680,135 @@ export default function TechnicalCommercialMarkSheet({
         <p className="text-gray-400 text-sm py-4">Loading Technical Commercial mark sheet records...</p>
       ) : (
        <div className="overflow-x-auto touch-pan-x max-h-[600px] border border-gray-800 rounded-lg relative">
-        {/* MOBILE VIEW: Touch Cards for Technical Commercial Marks */}
-          <div className="block md:hidden space-y-3 p-2">
-            {filteredStudents.length === 0 ? (
-              <p className="text-center text-gray-400 text-xs py-4">
-                No Technical Commercial student records found for {currentClassLevel}.
-              </p>
-            ) : (
-              studentsWithMetrics.map((st, idx) => (
-                <div key={st.id || idx} className="bg-slate-900 border border-gray-800 rounded-xl p-3 space-y-2">
-                  <div className="flex items-center justify-between border-b border-gray-800 pb-2">
-                    <div>
-                      <p className="text-xs font-bold text-white">{idx + 1}. {st.fullName}</p>
-                      <p className="text-[10px] text-emerald-400 font-semibold">{st.trades_series || 'FOUNDATIONAL'} • <span className="text-gray-400 font-mono">{st.uniqueCode}</span></p>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-[10px] text-emerald-400 font-bold block">Avg: {st.formattedAvg}</span>
-                      <span className="text-[10px] text-purple-300">Rank: {st.rank}</span>
-                    </div>
-                  </div>
+        
+         {/* MOBILE-OPTIMIZED LANDSCAPE MARK ENTRY (FOREST GREEN & WHITE BEIGE THEME) */}
+          <div className="block md:hidden overflow-x-auto bg-[#FDFBF7] rounded-xl border-2 border-[#064e3b] p-2 text-slate-900 shadow-sm mb-4">
+            <div className="text-[10px] text-[#064e3b] font-bold pb-1.5 text-center border-b border-[#064e3b]/30 mb-2">
+              💡 Rotate phone to landscape for optimal multi-student view
+            </div>
 
-                  <div className="grid grid-cols-2 gap-2 pt-1">
-                    {subjectsList.map((sub, subIdx) => {
-                      const sName = sub.subject_name || sub.subject_code;
-                      const mRecord = st.marks?.find((m) => m.subject_name === sName) || {};
+            <table className="w-full text-left border-collapse text-xs bg-[#FDFBF7] text-slate-900 min-w-[650px]">
+              <thead>
+                <tr className="bg-[#064e3b] text-[#FDFBF7]">
+                  <th className="p-2 border border-[#064e3b] text-center w-[30px] font-bold">N°</th>
+                  <th className="p-2 border border-[#064e3b] font-bold min-w-[130px]">Student Name</th>
+                  <th className="p-2 border border-[#064e3b] text-center min-w-[80px]">Matricule</th>
+                  <th className="p-2 border border-[#064e3b] text-center min-w-[100px]">Trade/Specialty</th>
+                  {subjectsList.map((sub, idx) => (
+                    <th key={sub.id || sub.subject_name || `mob-sub-${idx}`} className="p-1.5 border border-[#064e3b] text-center text-[11px] min-w-[90px]">
+                      <div className="font-bold truncate text-white">{sub.subject_name || sub.subject_code}</div>
+                      <div className="text-[9px] text-emerald-200 font-normal">Coef: {sub.coefficient || 1}</div>
+                    </th>
+                  ))}
+                  <th className="p-2 border border-[#064e3b] text-center font-bold min-w-[60px] text-amber-300">Avg</th>
+                  <th className="p-2 border border-[#064e3b] text-center font-bold min-w-[50px] text-amber-200">Rank</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredStudents.length === 0 ? (
+                  <tr>
+                    <td colSpan={6 + subjectsList.length} className="p-4 text-center text-slate-500 italic">
+                      No Technical Commercial student records found for {currentClassLevel}.
+                    </td>
+                  </tr>
+                ) : (
+                  studentsWithMetrics.map((st, idx) => (
+                    <tr key={st.id || idx} className="border-b border-[#064e3b]/20 hover:bg-[#064e3b]/5">
+                      <td className="p-1.5 border border-[#064e3b]/30 text-center text-slate-600 font-mono text-[10px]">
+                        {idx + 1}
+                      </td>
+                      <td className="p-1.5 border border-[#064e3b]/30 font-bold text-[#064e3b] truncate max-w-[130px]">
+                        {st.fullName}
+                      </td>
+                      <td className="p-1.5 border border-[#064e3b]/30 text-center text-slate-500 font-mono text-[10px]">
+                        {st.uniqueCode}
+                      </td>
+                      <td className="p-1.5 border border-[#064e3b]/30 text-center text-[#064e3b] font-bold text-[10px]">
+                        {st.trades_series || 'FOUNDATIONAL'}
+                      </td>
 
-                      return (
-                        <div key={sub.id || sName || `tc-mob-sub-${subIdx}`} className="bg-gray-900/80 p-1.5 rounded border border-gray-800 text-[11px]">
-                          <span className="text-gray-300 font-medium block truncate">{sName}</span>
-                          <div className="flex items-center gap-1 mt-1">
-                            <input
-                              type="number"
-                              min="0"
-                              max="20"
-                              step="0.5"
-                              placeholder={currentTerm === 'Term 1' ? 'S1' : currentTerm === 'Term 2' ? 'S3' : 'S5'}
-                              value={mRecord[seqA] ?? ''}
-                              onChange={(e) => handleMarkChange(st, sName, seqA, e.target.value)}
-                              className="w-10 p-1 bg-gray-950 border border-gray-700 rounded text-center text-white text-xs focus:border-[#10B981] outline-none"
-                            />
-                            <input
-                              type="number"
-                              min="0"
-                              max="20"
-                              step="0.5"
-                              placeholder={currentTerm === 'Term 1' ? 'S2' : currentTerm === 'Term 2' ? 'S4' : 'S6'}
-                              value={mRecord[seqB] ?? ''}
-                              onChange={(e) => handleMarkChange(st, sName, seqB, e.target.value)}
-                              className="w-10 p-1 bg-gray-950 border border-gray-700 rounded text-center text-white text-xs focus:border-[#10B981] outline-none"
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))
-            )}
+                      {/* Marks Input Cells */}
+                      {subjectsList.map((sub, subIdx) => {
+                        const sName = sub.subject_name || sub.subject_code;
+                        const mRecord = st.marks?.find((m) => m.subject_name === sName) || {};
+
+                        return (
+                          <td key={sub.id || sName || `tc-mob-cell-${subIdx}`} className="p-1 border border-[#064e3b]/30 text-center">
+                            <div className="flex space-x-1 justify-center">
+                              <input
+                                type="number"
+                                min="0"
+                                max="20"
+                                step="0.5"
+                                placeholder={currentTerm === 'Term 1' ? 'S1' : currentTerm === 'Term 2' ? 'S3' : 'S5'}
+                                value={mRecord[seqA] ?? ''}
+                                onChange={(e) => handleMarkChange(st, sName, seqA, e.target.value)}
+                                className="w-9 p-1 bg-[#FDFBF7] border border-[#064e3b]/60 rounded text-center text-[#064e3b] font-bold focus:ring-2 focus:ring-[#064e3b] outline-none text-xs"
+                              />
+                              <input
+                                type="number"
+                                min="0"
+                                max="20"
+                                step="0.5"
+                                placeholder={currentTerm === 'Term 1' ? 'S2' : currentTerm === 'Term 2' ? 'S4' : 'S6'}
+                                value={mRecord[seqB] ?? ''}
+                                onChange={(e) => handleMarkChange(st, sName, seqB, e.target.value)}
+                                className="w-9 p-1 bg-[#FDFBF7] border border-[#064e3b]/60 rounded text-center text-[#064e3b] font-bold focus:ring-2 focus:ring-[#064e3b] outline-none text-xs"
+                              />
+                            </div>
+                          </td>
+                        );
+                      })}
+                      <td className="p-1 border border-[#064e3b]/30 text-center font-black text-[#064e3b] bg-[#064e3b]/5">
+                        {st.formattedAvg}
+                      </td>
+                      <td className="p-1 border border-[#064e3b]/30 text-center font-bold text-slate-700 bg-[#064e3b]/5">
+                        {st.rank}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+
+              {/* Live Summary Footer */}
+              <tfoot className="bg-[#064e3b] font-bold text-[#FDFBF7] border-t-2 border-[#064e3b]">
+                <tr>
+                  <td colSpan={4} className="p-2 border border-[#064e3b] text-right text-emerald-100">
+                    Subject Average
+                  </td>
+                  {subjectsList.map((sub, idx) => {
+                    const sName = sub.subject_name || sub.subject_code;
+                    return (
+                      <td key={sub.id || idx} className="p-2 border border-[#064e3b] text-center font-mono">
+                        {subjectStats[sName]?.avg || '-'}
+                      </td>
+                    );
+                  })}
+                  <td colSpan={2} className="p-2 border border-[#064e3b]"></td>
+                </tr>
+
+                <tr>
+                  <td colSpan={4} className="p-2 border border-[#064e3b] text-right text-emerald-100">
+                    % Passed (&ge;10/20)
+                  </td>
+                  {subjectsList.map((sub, idx) => {
+                    const sName = sub.subject_name || sub.subject_code;
+                    return (
+                      <td key={sub.id || idx} className="p-2 border border-[#064e3b] text-center text-amber-300 font-mono">
+                        {subjectStats[sName]?.passPct || '-'}
+                      </td>
+                    );
+                  })}
+                  <td colSpan={2} className="p-2 border border-[#064e3b]"></td>
+                </tr>
+
+                <tr className="bg-[#043e2f] text-white">
+                  <td colSpan={6 + subjectsList.length} className="p-2.5 border border-[#064e3b] text-center text-xs font-black text-emerald-200 uppercase tracking-wide">
+                    Overall Class Average: {classAvg} / 20
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
           </div>
        <table className="hidden md:table w-full text-left border-collapse text-xs">
             <thead className="sticky top-0 bg-[#1E293B] text-[#10B981] z-20">

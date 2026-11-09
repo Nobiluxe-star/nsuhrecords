@@ -274,57 +274,70 @@ export default function BulkTechnicalIndustrialReportCard({
         return rClass === targetClassClean;
       });
 
-      // STRICT CLASS & TRADE SCOPED TEACHER RESOLVER
-      const getTeacherForSubject = (subjectName) => {
+      
+     // STRICT SCHEDULES & CLASS-AWARE TEACHER MAPPING FUNCTION (EXACT GENERAL BULK ENGINE)
+      const getTeacherForSubject = (subjectName, tradeName = null) => {
         if (!subjectName) return '—';
-
         const cleanSub = subjectName.toLowerCase().trim();
-        const cleanTrade = selectedTrade && selectedTrade !== 'ALL' ? selectedTrade.toLowerCase().trim() : null;
+        const targetTrade = tradeName 
+          ? tradeName.toLowerCase().trim() 
+          : (selectedTrade && selectedTrade !== 'ALL' && selectedTrade !== 'N/A' 
+              ? selectedTrade.toLowerCase().trim() 
+              : null);
 
-        const matchedTeacher = teachersData.find((t) => {
-          const tClass = (t.classLevel || t.class_level || t.class_name || t.class || '').trim().toLowerCase();
-          const matchesClass = !tClass || tClass === targetClassClean;
+        const match = teachersData.find((t) => {
+          // 1. Strict Schedule/Timetable Slot Check
+          const schedules = t.schedules || t.schedule || t.timetable || {};
+          for (const [key, slots] of Object.entries(schedules)) {
+            const keySub = key.toLowerCase().trim();
+            if (keySub === cleanSub || cleanSub.includes(keySub) || keySub.includes(cleanSub)) {
+              if (Array.isArray(slots)) {
+                const hasMatchingClassSlot = slots.some((slot) => {
+                  const slotClass = normalizeClass(slot.className || slot.classLevel || slot.class || slot.class_name || '');
+                  const slotTrade = String(slot.trade || slot.trades_series || slot.series || slot.specialty || '').toLowerCase().trim();
+                  
+                  const classMatch = slotClass && (slotClass === targetClassClean || slotClass.includes(targetClassClean) || targetClassClean.includes(slotClass));
+                  if (!classMatch) return false;
 
-          if (!matchesClass) return false;
+                  if (targetTrade && targetTrade !== 'all' && targetTrade !== 'n/a') {
+                    if (slotTrade && slotTrade !== targetTrade) return false;
+                  }
 
-          const assignments = t.assignments || t.class_assignments || t.assigned_classes || [];
-
-          if (Array.isArray(assignments) && assignments.length > 0) {
-            return assignments.some((item) => {
-              const itemSub = String(item.subject || item.subject_name || '').toLowerCase().trim();
-              const itemClass = String(item.class || item.class_level || item.classLevel || '').toLowerCase().trim();
-              const itemTrade = String(item.trade || item.trades_series || item.specialty || '').toLowerCase().trim();
-
-              const subMatch = itemSub === cleanSub;
-              const classMatch = !itemClass || itemClass === targetClassClean;
-              const tradeMatch = !cleanTrade || !itemTrade || itemTrade === cleanTrade;
-
-              return subMatch && classMatch && tradeMatch;
-            });
+                  return true;
+                });
+                if (hasMatchingClassSlot) return true;
+              }
+            }
           }
 
-          const teacherSubjects = Array.isArray(t.subjects)
-            ? t.subjects.map((s) => String(s).toLowerCase().trim())
-            : typeof t.subjects === 'string'
-            ? [t.subjects.toLowerCase().trim()]
-            : [];
+          // 2. Strict Assignments Array Check
+          const assignments = t.assignments || t.class_assignments || t.assigned_classes || [];
+          if (Array.isArray(assignments) && assignments.length > 0) {
+            const hasValidAssignment = assignments.some((item) => {
+              if (typeof item === 'string') return false;
+              const itemSub = String(item.subject || item.subject_name || item.name || '').toLowerCase().trim();
+              const itemClass = normalizeClass(item.class || item.class_level || item.classLevel || '');
+              const itemTrade = String(item.trade || item.trades_series || item.series || item.specialty || '').toLowerCase().trim();
 
-          const teacherClasses = Array.isArray(t.classes || t.class_levels || t.assigned_class_levels)
-            ? (t.classes || t.class_levels || t.assigned_class_levels).map((c) => String(c).toLowerCase().trim())
-            : [];
+              const subMatch = itemSub === cleanSub || cleanSub.includes(itemSub);
+              const classMatch = itemClass && (itemClass === targetClassClean || itemClass.includes(targetClassClean) || targetClassClean.includes(itemClass));
+              
+              if (!subMatch || !classMatch) return false;
 
-          const teacherTrades = Array.isArray(t.trades || t.trades_series)
-            ? (t.trades || t.trades_series).map((tr) => String(tr).toLowerCase().trim())
-            : [];
+              if (targetTrade && targetTrade !== 'all' && targetTrade !== 'n/a') {
+                if (itemTrade && itemTrade !== targetTrade) return false;
+              }
 
-          const subMatch = teacherSubjects.includes(cleanSub);
-          const classMatch = teacherClasses.length === 0 || teacherClasses.includes(targetClassClean);
-          const tradeMatch = !cleanTrade || teacherTrades.length === 0 || teacherTrades.includes(cleanTrade);
+              return true;
+            });
 
-          return subMatch && classMatch && tradeMatch;
+            if (hasValidAssignment) return true;
+          }
+
+          return false;
         });
 
-        return matchedTeacher ? (matchedTeacher.name || matchedTeacher.fullName || matchedTeacher.full_name || '—') : '—';
+        return match ? (match.name || match.fullName || match.full_name || '—') : '—';
       };
 
       if (matchedCoeffRow) {
@@ -338,7 +351,7 @@ export default function BulkTechnicalIndustrialReportCard({
             const sName = item.name || item.subject_name || item.subject_code || `Subject ${idx + 1}`;
             const coefVal = Number(item.coefficient || item.coeff || item.coef || item.weight || 1);
             const categoryVal = item.category || item.group || 'Industrial Practical & Theory';
-            const instructorName = item.instructor || item.teacher_name || getTeacherForSubject(sName);
+            const instructorName = getTeacherForSubject(sName);
 
             loadedSubjects.push({
               id: item.id || `sub_${idx}`,

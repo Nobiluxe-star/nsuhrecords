@@ -2305,7 +2305,65 @@ export default function TeacherDashboardPage() {
                             <th className="p-2 border-t border-emerald-900/40 text-center w-28">{label2}</th>
                           </tr>
                         </thead>
-                        
+                        {(() => {
+                          const rankMap = getDynamicRankMap(key1, key2);
+                          return (
+                            <tbody className="divide-y divide-emerald-900/30 bg-[#063321] text-white">
+                              {classStudents && classStudents.length > 0 ? (
+                                classStudents.map((student, idx) => {
+                                  const studentMarks = marksRecords[student.id] || {};
+                                  const calculatedScore = getDynamicTermScore(student.id, key1, key2);
+                                  const calculatedRank = rankMap[student.id] || '-';
+
+                                  return (
+                                    <tr key={student.id || student.unique_code || idx} className="hover:bg-[#0b422c] transition-colors">
+                                      <td className="p-3 border-r border-emerald-900/40 text-center font-bold text-gray-300">{idx + 1}</td>
+                                      <td className="p-3 border-r border-emerald-900/40 text-center font-mono text-emerald-300 text-xs">{student.unique_code || student.matricule || '-'}</td>
+                                      <td className="p-3 border-r border-emerald-900/40 font-extrabold text-white">{student.full_name || student.fullName || student.name}</td>
+                                      <td className="p-3 border-r border-emerald-900/40 text-center text-xs font-semibold text-amber-200">
+                                        {student.trades_series || student.trade_series || student.series || student.trade || '-'}
+                                      </td>
+                                      <td className="p-2 border-r border-emerald-900/40 text-center w-28">
+                                        <input
+                                          type="number"
+                                          step="0.25"
+                                          min="0"
+                                          max="20"
+                                          disabled={!isMarkEntryAuthorized}
+                                          value={studentMarks[key1] ?? ''}
+                                          onChange={(e) => handleMarkChange(student.id, key1, e.target.value)}
+                                          className="w-full text-center font-bold text-sm bg-slate-900 border border-slate-700 rounded p-1.5 text-emerald-300 focus:outline-none focus:border-amber-400 disabled:opacity-50"
+                                          placeholder="-"
+                                        />
+                                      </td>
+                                      <td className="p-2 border-r border-emerald-900/40 text-center w-28">
+                                        <input
+                                          type="number"
+                                          step="0.25"
+                                          min="0"
+                                          max="20"
+                                          disabled={!isMarkEntryAuthorized}
+                                          value={studentMarks[key2] ?? ''}
+                                          onChange={(e) => handleMarkChange(student.id, key2, e.target.value)}
+                                          className="w-full text-center font-bold text-sm bg-slate-900 border border-slate-700 rounded p-1.5 text-emerald-300 focus:outline-none focus:border-amber-400 disabled:opacity-50"
+                                          placeholder="-"
+                                        />
+                                      </td>
+                                      <td className="p-3 border-l border-emerald-900/40 text-center font-bold text-amber-300 bg-[#0b3d28]">{calculatedScore}</td>
+                                      <td className="p-3 border-l border-emerald-900/40 text-center font-bold text-emerald-200 bg-[#0b3d28]">{calculatedRank}</td>
+                                    </tr>
+                                  );
+                                })
+                              ) : (
+                                <tr>
+                                  <td colSpan="8" className="p-6 text-center text-emerald-200 italic">
+                                    No enrolled students found for {selectedClassForAction || 'this class'}.
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          );
+                        })()}
                         {classStudents && classStudents.length > 0 && (
                           <tfoot className="bg-[#0b192c] text-white font-medium text-xs">
                             <tr className="border-t border-emerald-900/40">

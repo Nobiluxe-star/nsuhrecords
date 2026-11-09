@@ -68,13 +68,13 @@ export const GENERAL_CLASSES_CATALOG = [
 ];
 
 export const TECHNICAL_COMMERCIAL_CATALOG = [
-  'First Year Commercial (Y1Com)',
-  'Second Year Commercial (Y2Com)',
-  'Third Year Commercial (Y3Com)',
-  'Fourth Year Commercial (CAPCom)',
-  'Fifth Year Commercial  (Y5Com)',
-  'Lower Sixth Commercial (L6Com)',
-  'Upper Sixth Commercial (U6Com)',
+  'Form One Commercial (F1COM)',
+  'Form Two Commercial (F2COM)',
+  'Form Three Commercial (F3COM)',
+  'Form Four Commercial (F4COM)',
+  'Form Five Cpmmercial (F5COM)',
+  'Lower Sixth Commercial (L6COM)',
+  'Upper Sixth Commercial (U6COM)',
 ];
 
 export const TECHNICAL_INDUSTRIAL_CATALOG = [
@@ -391,7 +391,7 @@ const MONTHS_LIST = [
 const YEARS_LIST = Array.from({ length: 21 }, (_, i) => String(2020 - i));
 export default function AdminDashboardPage() {
   const [activeSchool, setActiveSchool] = useState(null);
-
+const customClasses = activeSchool?.customClasses || activeSchool?.custom_classes || {};
   const [activeTab, setActiveTab] = useState('overview');
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [deleteBanner, setDeleteBanner] = useState(null);
@@ -404,6 +404,12 @@ export default function AdminDashboardPage() {
   const [isEditingSchedule, setIsEditingSchedule] = useState(false);
   const [teacherToEdit, setTeacherToEdit] = useState(null);
   const [selectedSection, setSelectedSection] = useState('');
+  // Timetable Day Filter State (Defaults to current day of the week)
+const [activeTimetableDay, setActiveTimetableDay] = useState(() => {
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const todayName = days[new Date().getDay()];
+  return todayName === 'Sunday' ? 'Monday' : todayName;
+});
   const [selectedTeacherForLogs, setSelectedTeacherForLogs] = useState(null);
   const [fetchedLessonLogs, setFetchedLessonLogs] = useState([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
@@ -1543,7 +1549,7 @@ if (!active.has_onboarded) {
   // Student Specific State Fields
   const [section, setSection] = useState(draft.section || 'General Education'); 
   const [classLevel, setClassLevel] = useState(draft.classLevel || GENERAL_CLASSES_CATALOG[0]);
-  const [gender, setGender] = useState('Male');
+  const [gender, setGender] = useState('Female');
   const [age, setAge] = useState('');
   const [dob, setDob] = useState('');
   const [guardianName, setGuardianName] = useState('');
@@ -1678,10 +1684,18 @@ const [studentsRes, teachersRes, personnelRes] = await Promise.all([
       if (studentsRes.error) console.warn('Students fetch notice:', studentsRes.error);
       if (teachersRes.error) console.warn('Teachers fetch notice:', teachersRes.error);
 
-        if (studentsRes.data) {
-          setStudentsList(studentsRes.data);
-          localStorage.setItem(studentCacheKey, JSON.stringify(studentsRes.data));
-        }
+       const pendingRaw = localStorage.getItem('nsuh_pending_students') || '[]';
+      const pendingStudents = JSON.parse(pendingRaw);
+
+      if (studentsRes.data) {
+        const merged = [...pendingStudents, ...studentsRes.data.filter(s => !pendingStudents.some(p => p.unique_code === s.unique_code || p.id === s.id))];
+        setStudentsList(merged);
+        localStorage.setItem(studentCacheKey, JSON.stringify(merged));
+      } else {
+        const cachedRaw = localStorage.getItem(studentCacheKey) || '[]';
+        const cachedStudents = JSON.parse(cachedRaw);
+        setStudentsList([...pendingStudents, ...cachedStudents]);
+      }
 
        if (teachersRes.data) {
         console.log("FETCHED TEACHERS FROM SUPABASE:", teachersRes.data);
@@ -1744,6 +1758,7 @@ try {
 
       if (remainingQueue.length < pendingQueue.length) {
         console.log('Successfully synced offline students!');
+        if (typeof setSuccessMessage === 'function') setSuccessMessage('📶 Internet restored! Offline student registrations synced to your School database.');
         fetchAllSchoolData(); 
       }
     };
@@ -2254,7 +2269,7 @@ const academicYearVal = typeof getCurrentAcademicYear === 'function'
       'Form 2A (F2A)', 'Form 2B (F2B)', 'Form 2C (F2C)', 'Form 2D (F2D)',
       'Form 3A (F3A)', 'Form 3B (F3B)', 'Form 3C (F3C)',
       'Form 4A (F4A)', 'Form 4B (F4B)',
-      'Form 5 Arts (F5A)', 'Form 5 Science (F5B)'
+      'Form 5A (F5A)', 'Form 5B (F5B)'
     ];
 
 const isGeneralLower = GENERAL_LOWER_CLASSES.some(cls => classLevel === cls || classLevel?.includes(cls));
@@ -2406,9 +2421,17 @@ if (typeof db !== 'undefined' && db?.pendingSyncQueue) {
       }
     }
 
-    // 3. UPDATE UI & CLEAR FORM
-    setStudentsList((prev) => [newStudentRecord, ...prev]);
-    setSuccessPopup(uniqueStudentId);
+    // 3. UPDATE UI, SAVE TO OFFLINE LOCALSTORAGE & CLEAR FORM
+setStudentsList((prev) => {
+  const updated = [newStudentRecord, ...prev];
+  try {
+    localStorage.setItem('offline_registered_students', JSON.stringify(updated));
+  } catch (e) {
+    console.warn('LocalStorage save failed:', e);
+  }
+  return updated;
+});
+setSuccessPopup(uniqueStudentId);
 
     setFullName('');
     setPhone('');
@@ -2416,12 +2439,12 @@ if (typeof db !== 'undefined' && db?.pendingSyncQueue) {
     setPicturePreview(null);
     setAge('');
     setDob('');
-    setGender('Male');
+    setGender('Female');
     setGuardianName('');
     setGuardianPhone('');
     setMedicalHistory('');
-    setSelectedSeries('');
-    setSelectedTechnicalSubject('');
+      // setSelectedSeries('');
+      // setSelectedTechnicalSubject('');
     setIsSubmitting(false);
   };
 
@@ -2691,9 +2714,9 @@ const handleUpdatePersonnel = async (e) => {
   const generalStudentsCount = studentsList.filter(s => s.section?.toLowerCase().includes('general')).length;
 
   return (
-    <div className="min-h-screen bg-[#0b0f19] text-white font-sans">
+    <div className="min-h-screen bg-[#FDFBF7] text-[#1e293b] font-sans">
    {/* Modern International Header Presentation */}
-      <header className="w-full bg-[#0d1527] border-b border-slate-800 px-4 py-3 sm:px-6">
+      <header className="w-full bg-[#1b4332] text-white border-b-2 border-[#2d6a4f] px-4 py-4 sm:px-8 shadow-md">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
 
           {/* LEFT: School Logo */}
@@ -2719,37 +2742,32 @@ const handleUpdatePersonnel = async (e) => {
                   )}
         </div>
           </div>
+        
+{/* DYNAMIC CREAM-YELLOW DOUBLE-FRAMED SCHOOL HEADER */}
+            <div className="flex-1 min-w-0 px-3.5 py-2.5 bg-[#043e2f] rounded-xl border-2 border-amber-100/90 outline outline-2 outline-amber-100/60 outline-offset-2 shadow-lg flex items-center justify-between gap-3 my-1 mx-1">
+              
+              {/* Dynamic Active School Name & Metadata */}
+              <div className="text-left min-w-0 flex-1">
+                <h1 className="text-sm sm:text-lg md:text-xl font-extrabold tracking-tight text-amber-100 truncate drop-shadow-sm">
+                  {hasMounted
+                    ? (activeSchool?.name || activeSchool?.school_name || localStorage.getItem('active_school_name') || localStorage.getItem('activeSchoolName') || 'School Admin Portal')
+                    : 'School Admin Portal'}
+                </h1>
+                
+                <div className="flex items-center gap-2 text-[10px] sm:text-xs text-amber-100/90 font-medium mt-0.5">
+                  <span>Academic Year: <strong className="text-white font-mono">{getCurrentAcademicYear()}</strong></span>
+                  <span className="hidden sm:inline text-amber-100/50">•</span>
+                  <span className="hidden sm:inline text-amber-100/80 font-semibold">Active Session</span>
+                </div>
+              </div>
 
-          {/* CENTER: Centralized Title, Academic Year & Mobile Active Session Pill */}
-          <div className="text-center flex-1 min-w-0 px-2">
-            <h1 className="text-xs sm:text-base md:text-xl font-extrabold tracking-tight text-amber-100 uppercase truncate">
-              {hasMounted
-                ? (localStorage.getItem('active_school_name') || localStorage.getItem('activeSchoolName') || activeSchool?.name || 'ADMINISTRATOR PORTAL')
-                : 'LOADING...'}
-            </h1>
-            
-            <div className="flex items-center justify-center gap-2 flex-wrap mt-0.5">
-              <p className="text-[10px] sm:text-xs text-slate-400 font-medium">
-                Academic Year: <span className="text-amber-100 font-semibold">{getCurrentAcademicYear()}</span>
-                <span className="hidden sm:inline"> | Administrator Portal</span>
-              </p>
+              {/* Cream-Yellow Active Status Badge */}
+              <div className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 bg-[#022c22] border border-amber-100/60 text-amber-100 text-[10px] sm:text-xs font-bold rounded-lg shadow-inner">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>Active</span>
+              </div>
 
-              {/* Compact Mobile Active Session Badge */}
-              <span className="sm:hidden inline-flex items-center gap-1 text-[9px] font-bold bg-emerald-950/90 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/40 shrink-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                Active
-              </span>
             </div>
-          </div>
-
-          {/* RIGHT: Desktop Active Session Badge */}
-          <div className="hidden sm:flex items-center justify-end shrink-0">
-            <span className="text-xs font-semibold bg-emerald-950/90 text-emerald-400 border border-emerald-500/40 px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-sm">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              Active Session
-            </span>
-          </div>
-
         </div>
       </header>
 
@@ -2827,10 +2845,34 @@ const handleUpdatePersonnel = async (e) => {
             </div>
 
             {/* General Teacher Timetable Collected Summary */}
-            <div className="bg-[#111827] border border-gray-800 p-6 rounded-xl shadow-xl space-y-4">
-              <h3 className="text-sm font-bold uppercase tracking-wider text-amber-100 border-b border-gray-800 pb-3">
-                General School Master Timetable & Teacher Subject Allocation Summary
-              </h3>
+            <div className="bg-[#1b4332] border border-emerald-800 p-6 rounded-xl shadow-xl space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-700/60 pb-3">
+  <div>
+    <h3 className="text-sm font-bold uppercase tracking-wider text-amber-100">
+      General School Master Timetable & Teacher Subject Allocation Summary
+    </h3>
+    <p className="text-[11px] text-emerald-200 mt-0.5 font-medium">
+      Showing Schedule For: <strong className="text-amber-300 font-bold">{activeTimetableDay}</strong>
+    </p>
+  </div>
+  
+  <div className="flex items-center gap-1 overflow-x-auto">
+    {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((day) => (
+      <button
+        key={day}
+        type="button"
+        onClick={() => setActiveTimetableDay(day)}
+        className={`px-3 py-1 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
+          activeTimetableDay === day
+            ? 'bg-amber-400 text-slate-950 shadow font-black'
+            : 'bg-emerald-900/80 text-emerald-100 hover:bg-emerald-800 border border-emerald-700'
+        }`}
+      >
+        {day.substring(0, 3)}
+      </button>
+    ))}
+  </div>
+</div>
               {teachersList.length === 0 ? (
                 <div className="text-center py-8 text-gray-500 text-xs">
                   No teacher timetables collected yet. Assign teachers to build the master schedule.
@@ -2840,19 +2882,31 @@ const handleUpdatePersonnel = async (e) => {
                <>
   {/* DESKTOP VIEW (2-COLUMN STREAMLINED LAYOUT) */}
   <div className="hidden md:block overflow-x-auto w-full">
-    <table className="w-full text-left text-xs text-gray-300 border border-gray-800 rounded-xl overflow-hidden">
-      <thead className="bg-[#1f2937] text-amber-100 uppercase font-semibold text-[11px] tracking-wider border-b border-gray-800">
+    <table className="w-full text-left text-xs text-gray-300 border border-emerald-800 rounded-xl overflow-hidden">
+<thead className="bg-[#143628] text-amber-100 uppercase font-semibold text-[11px] tracking-wider border-b border-emerald-800/80">       
         <tr>
           <th className="p-3.5 border-r border-gray-800 w-1/3">Teacher Name (ID)</th>
           <th className="p-3.5 w-2/3">Class & Schedule Summary</th>
         </tr>
       </thead>
       <tbody className="divide-y divide-gray-800">
-        {teachersList.map((t, i) => (
-          <tr key={i} className="hover:bg-gray-800/40 transition-colors">
+
+       {teachersList.map((t, i) => {
+  const filteredSchedules = {};
+  Object.entries(t.schedules || {}).forEach(([sub, rows]) => {
+    const dayRows = (rows || []).filter(
+      (r) => (r.day || '').toLowerCase() === activeTimetableDay.toLowerCase()
+    );
+    if (dayRows.length > 0) filteredSchedules[sub] = dayRows;
+  });
+
+  if (Object.keys(filteredSchedules).length === 0) return null;
+
+  return (
+          <tr key={i} className="hover:bg-[#143628]/60 transition-colors">
             
             {/* Column 1: Teacher Details */}
-            <td className="p-4 align-top border-r border-gray-800 space-y-1">
+            <td className="p-4 align-top border-r border-emerald-800 space-y-1">
               <div className="font-bold text-sm text-white">{t.name}</div>
               <div className="font-mono text-[11px] text-amber-100/80">
                 {t.id || t.teacher_id}
@@ -2869,9 +2923,9 @@ const handleUpdatePersonnel = async (e) => {
               {Object.entries(t.schedules || {}).length === 0 ? (
                 <span className="text-gray-500 italic text-[11px]">No active schedule entries set</span>
               ) : (
-                Object.entries(t.schedules || {}).map(([sub, rows], rIdx) => (
-                  <div key={rIdx} className="bg-[#1f2937]/70 border border-gray-800/80 p-3 rounded-xl space-y-2">
-                    <div className="font-bold text-amber-100 text-xs tracking-wide border-b border-gray-800 pb-1 flex justify-between items-center">
+               Object.entries(filteredSchedules).map(([sub, rows], rIdx) => (
+                  <div key={rIdx} className="bg-[#143628] border border-emerald-800/80 p-3 rounded-xl space-y-2">
+                    <div className="font-bold text-amber-100 text-xs tracking-wide border-b border-emerald-800/80 pb-1 flex justify-between items-center">
                       <span>{sub}</span>
                       <span className="text-[10px] font-mono text-amber-200/80 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
                         {rows.length} Period Slot(s)
@@ -2879,10 +2933,10 @@ const handleUpdatePersonnel = async (e) => {
                     </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 pt-1">
-                      {rows.map((row, rowIdx) => (
-                        <div key={rowIdx} className="flex items-center justify-between bg-gray-950/80 border border-gray-800/80 px-2.5 py-1.5 rounded-lg text-[11px]">
+                      {rows.filter(r => (r.day || '').toLowerCase() === activeTimetableDay.toLowerCase()).map((row, rowIdx) => (
+                        <div key={rowIdx} className="flex items-center justify-between bg-[#1b4332] border border-emerald-800/80 px-3 py-1.5 rounded-lg text-xs">
                           <span className="font-semibold text-gray-200">{row.className}</span>
-                          <span className="font-mono text-amber-200/90 text-[10px] bg-slate-900 px-2 py-0.5 rounded border border-slate-700/60">
+                          <span className="font-mono text-amber-200/90 text-[10px] bg-[#143628] px-2 py-0.5 rounded border border-emerald-800/80">
                             {row.day} | {row.startTime} - {row.endTime}
                           </span>
                         </div>
@@ -2894,47 +2948,59 @@ const handleUpdatePersonnel = async (e) => {
             </td>
 
           </tr>
-        ))}
+       );
+  })}
       </tbody>
     </table>
   </div>
 
   {/* MOBILE STACKED CARDS VIEW */}
-  <div className="block md:hidden space-y-4">
-    {teachersList.map((t, i) => (
-      <div key={i} className="bg-[#1f2937]/80 border border-gray-800 rounded-xl p-4 space-y-3 shadow-lg">
-        <div className="flex justify-between items-start border-b border-gray-800 pb-2">
-          <div>
-            <h4 className="font-bold text-white text-sm">{t.name}</h4>
-            <p className="font-mono text-[11px] text-amber-100/80">{t.id || t.teacher_id}</p>
-          </div>
-          <span className="bg-blue-900/40 text-blue-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-700/50">
-            {(t.subjects || []).length} Subject(s)
-          </span>
-        </div>
+      <div className="block md:hidden space-y-4">
+        {teachersList.map((t, i) => {
+          const filteredSchedules = {};
+          Object.entries(t.schedules || {}).forEach(([sub, rows]) => {
+            const dayRows = (rows || []).filter(
+              (r) => (r.day || '').toLowerCase() === activeTimetableDay.toLowerCase()
+            );
+            if (dayRows.length > 0) filteredSchedules[sub] = dayRows;
+          });
+          if (Object.keys(filteredSchedules).length === 0) return null;
 
-        <div className="space-y-2.5 pt-1">
-          {Object.entries(t.schedules || {}).map(([sub, rows], rIdx) => (
-            <div key={rIdx} className="bg-gray-950/90 border border-gray-800 p-2.5 rounded-lg space-y-1.5">
-              <h5 className="font-bold text-amber-100 text-xs border-b border-gray-800 pb-1">
-                {sub}
-              </h5>
-              <div className="space-y-1">
-                {rows.map((row, rowIdx) => (
-                  <div key={rowIdx} className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-[#111827] p-1.5 rounded text-[11px] gap-1">
-                    <span className="font-medium text-gray-300">• {row.className}</span>
-                    <span className="font-mono text-amber-200 text-[10px] bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
-                      {row.day} ({row.startTime} - {row.endTime})
-                    </span>
+          return (
+            <div key={i} className="bg-[#143628]/80 border border-emerald-800/80 rounded-xl p-4 space-y-3 shadow-lg">
+              <div className="flex justify-between items-start border-b border-emerald-800/80 pb-2">
+                <div>
+                  <h4 className="font-bold text-white text-sm">{t.name}</h4>
+                  <p className="font-mono text-[11px] text-amber-100/80">{t.id || t.teacher_id}</p>
+                </div>
+                <span className="bg-blue-900/40 text-blue-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-700/50">
+                  {Object.keys(filteredSchedules).length} Active Subject(s)
+                </span>
+              </div>
+
+              <div className="space-y-2.5 pt-1">
+                {Object.entries(filteredSchedules).map(([sub, rows], rIdx) => (
+                  <div key={rIdx} className="bg-[#143628] border border-emerald-800/80 p-2.5 rounded-lg space-y-1.5">
+                    <h5 className="font-bold text-amber-100 text-xs border-b border-emerald-800/80 pb-1">
+                      {sub}
+                    </h5>
+                    <div className="space-y-1">
+                      {rows.map((row, rowIdx) => (
+                        <div key={rowIdx} className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-xs bg-[#1b4332] px-2.5 py-1.5 rounded border border-emerald-800/60">
+                          <span className="font-medium text-emerald-100">{row.className}</span>
+                          <span className="font-mono text-amber-200/90 text-[10px] bg-[#143628] px-2 py-0.5 rounded border border-emerald-800/80">
+                            {row.day} | {row.startTime} - {row.endTime}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>
             </div>
-          ))}
-        </div>
+          );
+        })}
       </div>
-    ))}
-  </div>
 </>  
                   
                 </div>
@@ -2945,16 +3011,15 @@ const handleUpdatePersonnel = async (e) => {
 
         {/* REGISTER NEW MEMBER TAB */}
         {activeTab === 'register' && (
-          <div className="bg-[#111827] border border-gray-800 p-4 md:p-5 rounded-xl w-full max-w-6xl mx-auto shadow-2xl relative">
-            <h2 className="text-lg font-bold text-white mb-3 pb-2 border-b border-gray-800 pb-3">Register New Member</h2>
-            
+<div className="bg-[#FDFBF7] border border-[#E6E1D5] p-4 md:p-5 rounded-xl w-full max-w-6xl mx-auto text-slate-800 shadow-sm">
+  <h2 className="text-lg font-bold text-[#064e3b] mb-3 pb-2 border-b border-[#E6E1D5]">Register New Member</h2>
             <div className="space-y-2.5">
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Select Role</label>
                 <select 
                   value={regRole} 
                   onChange={(e) => setRegRole(e.target.value)}
-                  className="w-full bg-[#1f2937] border border-gray-700 rounded-lg p-3 text-sm text-white focus:outline-none focus:border-amber-500"
+                 className="w-full bg-[#064e3b] border border-emerald-600/50 rounded-lg p-3 text-sm text-emerald-100 focus:outline-none focus:border-emerald-400"
                 >
                   <option value="student">Student</option>
                   <option value="administrator">Administrator</option>
@@ -2967,14 +3032,15 @@ const handleUpdatePersonnel = async (e) => {
               {/* REGISTRATION MODE TOGGLE BUTTONS */}
 {regRole === 'student' && (
   <div className="space-y-4 mb-6">
+
    {/* MODE TOGGLE BUTTONS */}
-          <div className="flex items-center gap-3 p-1.5 bg-[#141d2b] border border-gray-700/60 rounded-lg w-fit">
+   <div className="flex items-center gap-3 p-1.5 bg-[#FDFBF7] border border-[#064e3b]/20 rounded-lg">
             <button
               type="button"
               onClick={() => setRegistrationMode('single')}
               className={`px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all ${
                 registrationMode === 'single'
-                  ? 'bg-amber-500 text-black shadow-md'
+                  ? 'bg-[#064e3b] text-white shadow-sm'
                   : 'text-gray-400 hover:text-white'
               }`}
             >
@@ -2985,7 +3051,7 @@ const handleUpdatePersonnel = async (e) => {
               onClick={() => setRegistrationMode('bulk')}
               className={`px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all ${
                 registrationMode === 'bulk'
-                  ? 'bg-amber-500 text-black shadow-md'
+                  ? 'bg-[#064e3b] text-white shadow-sm'
                   : 'text-gray-400 hover:text-white'
               }`}
             >
@@ -2995,106 +3061,105 @@ const handleUpdatePersonnel = async (e) => {
 
           {/* 1. TARGET CLASS CONTEXT (ONLY SHOWS UNDER BULK IMPORT MODE) */}
           {registrationMode === 'bulk' && (
-            <div className="bg-[#141d2b] p-4 rounded-xl border border-amber-500/30 shadow-md">
-              <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider mb-3">
-                1. Select Target Class Context
-              </h4>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-[#FDFBF7] p-4 rounded-xl border border-[#064e3b]/20 shadow-sm">
+          <h4 className="text-xs font-bold text-[#064e3b] uppercase tracking-wider mb-3">
+            1. Select Target Class Context
+          </h4>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 
-                {/* 1. SECTION SELECT */}
-                <div>
-                  <label className="block text-xs font-semibold text-gray-300 mb-1">
-                    Section <span className="text-red-400">*</span>
-                  </label>
-                  <select
-                    value={typeof section !== 'undefined' ? section : ''}
-                    onChange={(e) => {
-                      const newSec = e.target.value;
-                      if (typeof setSection === 'function') setSection(newSec);
-                      if (typeof setClassLevel === 'function') setClassLevel('');
-                      
-                      if (newSec === 'Technical Commercial (STT)' && typeof COMMERCIAL_TRADE_SERIES !== 'undefined' && COMMERCIAL_TRADE_SERIES.length > 0) {
-                        if (typeof setMasterClass === 'function') setMasterClass(COMMERCIAL_TRADE_SERIES[0]);
-                      } else if (newSec === 'Technical Industrial (IND)' && typeof INDUSTRIAL_TRADE_SERIES !== 'undefined' && INDUSTRIAL_TRADE_SERIES.length > 0) {
-                        if (typeof setMasterClass === 'function') setMasterClass(INDUSTRIAL_TRADE_SERIES[0]);
-                      } else {
-                        if (typeof setMasterClass === 'function') setMasterClass('');
-                      }
-                    }}
-                    className="w-full bg-slate-900 border border-gray-700 text-white rounded-lg px-3 py-2 text-xs focus:ring-2"
-                  >
-                    <option value="">-- Select Section --</option>
-                    <option value="General Education">General Education</option>
-                    <option value="Technical Commercial (STT)">Technical Commercial (STT)</option>
-                    <option value="Technical Industrial (IND)">Technical Industrial (IND)</option>
-                  </select>
-                </div>
+            {/* 1. SECTION SELECT */}
+            <div>
+              <label className="block text-xs font-semibold text-[#064e3b] uppercase tracking-wider mb-1">
+                Section <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={typeof section !== 'undefined' ? section : ''}
+                onChange={(e) => {
+                  const newSec = e.target.value;
+                  if (typeof setSection === 'function') setSection(newSec);
+                  if (typeof setClassLevel === 'function') setClassLevel('');
 
-                {/* 2. CLASS LEVEL SELECT */}
-                <div>
-                  <label className="block text-xs font-semibold text-gray-300 mb-1">
-                    Class Level <span className="text-red-400">*</span>
-                  </label>
-                  <select
-                    value={typeof classLevel !== 'undefined' ? classLevel : ''}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      if (typeof setClassLevel === 'function') setClassLevel(val);
-                      if (section === 'General Education') {
-                        const isLower = typeof GENERAL_LOWER_CLASSES !== 'undefined' && Array.isArray(GENERAL_LOWER_CLASSES) && GENERAL_LOWER_CLASSES.includes(val);
-                        if (isLower) {
-                          if (typeof setMasterClass === 'function') setMasterClass('N/A');
-                        } else {
-                          if (typeof setMasterClass === 'function') setMasterClass('');
-                        }
-                      }
-                    }}
-                    className="w-full bg-slate-900 border border-gray-700 text-white rounded-lg px-3 py-2 text-xs focus:ring-2"
-                    disabled={!section}
-                  >
-                    <option value="">-- Select Class Level --</option>
-                    
-       {/* General Education Classes */}
-          {(section === 'General Education' || !section) &&
-            (registrationClasses || []).map((cls, idx) => {
-              const className = typeof cls === 'string' ? cls : cls.name;
-              return (
-                <option key={idx} value={className}>
-                  {className}
-                </option>
-              );
-            })}
+                  if (newSec === 'Technical Commercial (STT)' && typeof COMMERCIAL_TRADE_SERIES !== 'undefined') {
+                    if (typeof setMasterClass === 'function') setMasterClass(COMMERCIAL_TRADE_SERIES[0]);
+                  } else if (newSec === 'Technical Industrial (IND)' && typeof INDUSTRIAL_TRADE_SERIES !== 'undefined') {
+                    if (typeof setMasterClass === 'function') setMasterClass(INDUSTRIAL_TRADE_SERIES[0]);
+                  } else {
+                    if (typeof setMasterClass === 'function') setMasterClass('');
+                  }
+                }}
+                className="w-full bg-white border border-[#064e3b]/30 text-slate-800 rounded-lg px-3 py-2.5 focus:outline-none focus:border-[#064e3b]"
+              >
+                <option value="">-- Select Section --</option>
+                <option value="General Education">General Education</option>
+                <option value="Technical Commercial (STT)">Technical Commercial (STT)</option>
+                <option value="Technical Industrial (IND)">Technical Industrial (IND)</option>
+              </select>
+            </div>
 
-          {/* Technical Commercial Classes */}
-          {section === 'Technical Commercial (STT)' &&
-            (typeof TECHNICAL_COMMERCIAL_CATALOG !== 'undefined' ? TECHNICAL_COMMERCIAL_CATALOG : []).map((cls, idx) => {
-              const className = typeof cls === 'string' ? cls : cls.name;
-              return (
-                <option key={idx} value={className}>
-                  {className}
-                </option>
-              );
-            })}
+            {/* 2. CLASS LEVEL SELECT */}
+            <div>
+              <label className="block text-xs font-semibold text-[#064e3b] uppercase tracking-wider mb-1">
+                Class Level <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={typeof classLevel !== 'undefined' ? classLevel : ''}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (typeof setClassLevel === 'function') setClassLevel(val);
+                  if (section === 'General Education') {
+                    const isLower = typeof GENERAL_LOWER_CLASSES !== 'undefined' && Array.isArray(GENERAL_LOWER_CLASSES) && GENERAL_LOWER_CLASSES.includes(val);
+                    if (isLower) {
+                      if (typeof setMasterClass === 'function') setMasterClass('N/A');
+                    } else {
+                      if (typeof setMasterClass === 'function') setMasterClass('');
+                    }
+                  }
+                }}
+                className="w-full bg-white border border-[#064e3b]/30 text-slate-800 rounded-lg px-3 py-2.5 focus:outline-none focus:border-[#064e3b]"
+                disabled={!section}
+              >
+                <option value="">-- Select Class Level --</option>
 
-          {/* Technical Industrial Classes */}
-          {section === 'Technical Industrial (IND)' &&
-            (typeof TECHNICAL_INDUSTRIAL_CATALOG !== 'undefined' ? TECHNICAL_INDUSTRIAL_CATALOG : []).map((cls, idx) => {
-              const className = typeof cls === 'string' ? cls : cls.name;
-              return (
-                <option key={idx} value={className}>
-                  {className}
-                </option>
-              );
-            })}
-                  </select>
-                </div>
+                {/* General Education Classes */}
+                {(section === 'General Education' || !section) &&
+                  (registrationClasses || []).map((cls, idx) => {
+                    const className = typeof cls === 'string' ? cls : cls.name;
+                    return (
+                      <option key={idx} value={className}>
+                        {className}
+                      </option>
+                    );
+                  })}
 
-                {/* 3. DYNAMIC TRADE / SERIES DROPDOWN */}
-                <div>
-                  <label className="block text-xs font-semibold text-gray-300 mb-1">
-                    Trade / Series
-                  </label>
+                {/* Technical Commercial Classes */}
+                {section === 'Technical Commercial (STT)' &&
+                  (typeof TECHNICAL_COMMERCIAL_CATALOG !== 'undefined' ? TECHNICAL_COMMERCIAL_CATALOG : []).map((cls, idx) => {
+                    const className = typeof cls === 'string' ? cls : cls.name;
+                    return (
+                      <option key={idx} value={className}>
+                        {className}
+                      </option>
+                    );
+                  })}
 
+                {/* Technical Industrial Classes */}
+                {section === 'Technical Industrial (IND)' &&
+                  (typeof TECHNICAL_INDUSTRIAL_CATALOG !== 'undefined' ? TECHNICAL_INDUSTRIAL_CATALOG : []).map((cls, idx) => {
+                    const className = typeof cls === 'string' ? cls : cls.name;
+                    return (
+                      <option key={idx} value={className}>
+                        {className}
+                      </option>
+                    );
+                  })}
+              </select>
+            </div>
+
+            {/* 3. DYNAMIC TRADE / SERIES DROPDOWN */}
+            <div>
+              <label className="block text-xs font-semibold text-[#064e3b] uppercase tracking-wider mb-1">
+                Trade / Series
+              </label>
                   {section === 'General Education' && typeof classLevel !== 'undefined' && classLevel && (classLevel.includes('Sixth') || classLevel.startsWith('L6') || classLevel.startsWith('U6')) ? (
                     <select
                       value={typeof masterClass !== 'undefined' ? masterClass : ''}
@@ -3103,7 +3168,7 @@ const handleUpdatePersonnel = async (e) => {
                         if (typeof setMasterClass === 'function') setMasterClass(val);
                         if (typeof setSelectedSeries === 'function') setSelectedSeries(val);
                       }}
-                      className="w-full bg-slate-900 border border-gray-700 text-white rounded-lg px-3 py-2 text-xs focus:ring-2"
+                      className="w-full bg-white border border-[#064e3b]/30 text-slate-800 rounded-lg px-3 py-2.5 text-xs focus:outline-none focus:border-[#064e3b]"
                     >
                       <option value="">-- Select Series --</option>
                       {((classLevel.includes('Arts') || classLevel.includes('L6A') || classLevel.includes('U6A'))
@@ -3129,7 +3194,7 @@ const handleUpdatePersonnel = async (e) => {
                         const val = e.target.value;
                         if (typeof setMasterClass === 'function') setMasterClass(val);
                       }}
-                      className="w-full bg-slate-900 border border-gray-700 text-white rounded-lg px-3 py-2 text-xs focus:ring-2"
+                      className="w-full bg-white border border-[#064e3b]/30 text-slate-800 rounded-lg px-3 py-2.5 text-xs focus:outline-none focus:border-[#064e3b]"
                     >
                       {typeof COMMERCIAL_TRADE_SERIES !== 'undefined' && Array.isArray(COMMERCIAL_TRADE_SERIES) && COMMERCIAL_TRADE_SERIES.map((trade) => (
                         <option key={trade} value={trade}>{trade}</option>
@@ -3142,7 +3207,7 @@ const handleUpdatePersonnel = async (e) => {
                         const val = e.target.value;
                         if (typeof setMasterClass === 'function') setMasterClass(val);
                       }}
-                      className="w-full bg-slate-900 border border-gray-700 text-white rounded-lg px-3 py-2 text-xs focus:ring-2"
+                      className="w-full bg-white border border-[#064e3b]/30 text-slate-800 rounded-lg px-3 py-2.5 text-xs focus:outline-none focus:border-[#064e3b]"
                     >
                       {typeof INDUSTRIAL_TRADE_SERIES !== 'undefined' && Array.isArray(INDUSTRIAL_TRADE_SERIES) && INDUSTRIAL_TRADE_SERIES.map((trade) => (
                         <option key={trade} value={trade}>{trade}</option>
@@ -3168,7 +3233,8 @@ const handleUpdatePersonnel = async (e) => {
 {regRole === 'student' && registrationMode === 'bulk' && (
   <div className="bg-[#1f2937]/60 border border-amber-500/40 rounded-xl p-5 mb-5 space-y-4 shadow-xl">
     <div className="border-b border-gray-700 pb-3">
-      <h3 className="text-sm font-bold text-amber-400 uppercase tracking-wider">
+      <h3 className="text-sm font-bold text-[#064e3b]
+       uppercase tracking-wider">
         Bulk Student Spreadsheet Registration
       </h3>
       <p className="text-xs text-gray-300 mt-1">
@@ -3235,7 +3301,7 @@ const handleUpdatePersonnel = async (e) => {
     {bulkParsedData.length > 0 && (
       <div className="mt-4 pt-4 border-t border-gray-700 space-y-3">
         <div className="flex justify-between items-center">
-          <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">
+          <span className="text-xs font-bold text-[#064e3b] uppercase tracking-wider">
             Parsed Preview ({bulkParsedData.length} Students Ready)
           </span>
           <div className="flex items-center gap-3">
@@ -3299,7 +3365,7 @@ const handleUpdatePersonnel = async (e) => {
           </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
                     <div>
-  <label className="block text-xs font-semibold uppercase tracking-wider text-amber-400 mb-1">SECTION</label>
+  <label className="block text-xs font-semibold uppercase tracking-wider text-[#064e3b] mb-1">SECTION</label>
   <select
     value={section}
    onChange={(e) => {
@@ -3328,7 +3394,7 @@ const handleUpdatePersonnel = async (e) => {
 </div>
 
 <div>
-  <label className="block text-xs font-semibold uppercase tracking-wider text-amber-400 mb-1">
+  <label className="block text-xs font-semibold uppercase tracking-wider text-[#064e3b] mb-1">
     CLASS LEVEL
   </label>
   <select
@@ -3362,7 +3428,7 @@ const handleUpdatePersonnel = async (e) => {
 {/* Conditional Series Selector for Upper / Lower Sixth General Education */}
 {['Lower Sixth Arts (L6A)', 'Upper Sixth Arts (U6A)', 'Lower Sixth Science (L6S)', 'Upper Sixth Science (U6S)'].includes(classLevel) && (
   <div className="mt-3">
-    <label className="block text-xs font-semibold uppercase tracking-wider text-amber-400 mb-1">SELECT SERIES</label>
+    <label className="block text-xs font-semibold uppercase tracking-wider text-[#064e3b] mb-1">SELECT SERIES</label>
     <select
             value={selectedSeries}
             onChange={(e) => {
@@ -3382,7 +3448,7 @@ const handleUpdatePersonnel = async (e) => {
                   </div>
                   {(section?.includes('Commercial') || section?.includes('Industrial')) && (
         <div>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-amber-400 mb-1">
+          <label className="block text-xs font-semibold uppercase tracking-wider text-[#064e3b] mb-1">
             TRADE / SERIES
           </label>
         <select
@@ -3412,24 +3478,25 @@ const handleUpdatePersonnel = async (e) => {
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
                       required
-                      placeholder="e.g. Ngo Cecilia Taku"
+                      placeholder="Student Full Name"
                       className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white"
                     />
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
-                      <label className="block text-xs font-semibold uppercase tracking-wider text-amber-400 mb-1">Gender</label>
-                      <select 
-                        value={gender} 
-                        onChange={(e) => setGender(e.target.value)}
-                        required
-                        className="w-full bg-[#1f2937] border border-amber-500/50 rounded-lg px-4 py-2.5 text-sm text-amber-300 focus:outline-none"
-                      >
-                        <option value="Male">Male</option>
-                        <option value="Female">Female</option>
-                      </select>
-                    </div>
+  <label className="block text-xs font-bold text-[#043e2f] uppercase mb-1">
+    GENDER *
+  </label>
+  <select
+    value={gender}
+    onChange={(e) => setGender(e.target.value)}
+    className="w-full bg-white text-slate-900 font-extrabold text-sm rounded-lg p-2.5 border-2 border-emerald-600 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+  >
+    <option value="Female" className="bg-white text-slate-900 font-bold">Female</option>
+    <option value="Male" className="bg-white text-slate-900 font-bold">Male</option>
+  </select>
+</div>
                     <div>
                       <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Age</label>
                    <input
@@ -3441,7 +3508,7 @@ const handleUpdatePersonnel = async (e) => {
             />
                     </div>
                     <div>
-  <label className="block text-xs font-semibold uppercase tracking-wider text-amber-400 mb-1">
+  <label className="block text-xs font-semibold uppercase tracking-wider text-[#064e3b] mb-1">
     Date of Birth
   </label>
   <div className="grid grid-cols-3 gap-2">
@@ -3507,7 +3574,7 @@ const handleUpdatePersonnel = async (e) => {
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-amber-400 mb-1">Quarter / Residence *</label>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-[#064e3b] mb-1">Quarter / Residence *</label>
                       <input 
                         type="text" 
                         value={residence}
@@ -3517,18 +3584,18 @@ const handleUpdatePersonnel = async (e) => {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Student Phone (Opt.)</label>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-[#064e3b] mb-1">Student Phone (Opt.)</label>
                    <input
                 type="text"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                onBlur={(e) => { const v = e.target.value.trim(); if (v && (!v.startsWith('6') || v.length !== 9 || !/^\d+$/.test(v))) alert("Wrong phone number"); }}
+                onBlur={(e) => { const v = e.target.value.trim(); if (v && (!v.startsWith('6') || v.length !== 9 || !/\d+$/.test(v))) alert("Wrong phone number"); }}
                 placeholder="682491189"
                 className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white"
               />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Guardian Name</label>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-[#064e3b] mb-1">Guardian Name</label>
                       <input 
                         type="text" 
                         value={guardianName}
@@ -3568,7 +3635,7 @@ const handleUpdatePersonnel = async (e) => {
 
         {/* Guardian Phone Number */}
        <div>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-amber-400 mb-1">
+          <label className="block text-xs font-semibold uppercase tracking-wider text-[#064e3b] mb-1">
             Guardian Phone Number
           </label>
           <input
@@ -3594,14 +3661,14 @@ const handleUpdatePersonnel = async (e) => {
           </div>
 
                   <div>
-                    <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Student Picture (Camera or File)</label>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-[#064e3b] mb-2">Student Picture (Camera or File)</label>
                     <div className="flex items-center gap-4">
                       {picturePreview ? (
-                        <div className="relative w-20 h-20 rounded-lg overflow-hidden border border-amber-500">
+                        <div className="relative w-20 h-20 rounded-lg overflow-hidden border border-[#064e3b]">
                           <img src={picturePreview} alt="" className="w-full h-full object-cover" />
                         </div>
                       ) : (
-                        <div className="w-20 h-20 rounded-lg bg-[#1f2937] border border-gray-700 flex items-center justify-center text-xs text-gray-500">
+                        <div className="w-20 h-20 rounded-lg bg-[#1f2937] border border-[#064e3b]/50 flex items-center justify-center text-xs text-[#064e3b]">
                           No Image
                         </div>
                       )}
@@ -3610,8 +3677,8 @@ const handleUpdatePersonnel = async (e) => {
                           Upload From Device
                           <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
                         </label>
-                        <button type="button" onClick={startCamera} className="bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/50 text-xs text-blue-300 py-2 px-3 rounded-lg font-medium">
-                          Snap With Phone Camera
+                        <button type="button" onClick={startCamera} className="w-full bg-[#043e2f] hover:bg-[#065642] text-white font-bold text-xs py-2.5 px-4 rounded-lg border border-emerald-600 shadow-sm transition-all">
+                         Snap With Your Phone Camera
                         </button>
                       </div>
                     </div>
@@ -3635,11 +3702,11 @@ const handleUpdatePersonnel = async (e) => {
                 <form onSubmit={handlePersonnelRegistration} className="space-y-4">
                   <div className="bg-amber-500/10 border border-amber-500/30 p-3 rounded-lg text-xs text-amber-300">
                   Registering for role: <strong className="uppercase">
-{regRole.replace('_', ' ')}</strong>. Name and Contact Number are mandatory. A unique Personnel ID and signup link will be generated.
+          {regRole.replace('_', ' ')}</strong>. Name and Contact Number are mandatory. A unique Personnel ID and signup link will be generated.
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold uppercase tracking-wider text-amber-400 mb-1">Full Name (Mandatory)</label>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-[#064e3b] mb-1">Full Name (Mandatory)</label>
                     <input 
                       type="text" 
                       value={fullName}
@@ -3651,7 +3718,7 @@ const handleUpdatePersonnel = async (e) => {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold uppercase tracking-wider text-amber-400 mb-1">Contact Number (Mandatory)</label>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-[#064e3b] mb-1">Contact Number (Mandatory)</label>
                     <input 
                       type="text" 
                       value={phone}
@@ -3706,7 +3773,7 @@ const handleUpdatePersonnel = async (e) => {
             </button>
                   <div className="w-12 h-12 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center mx-auto text-xl font-bold">✓</div>
                   <h3 className="text-lg font-bold text-white">Student Registered Successfully!</h3>
-                  <div className="bg-[#1f2937] border border-dashed border-amber-500/60 p-3 rounded-xl text-amber-400 font-mono text-lg font-bold select-all">
+                  <div className="bg-[#1f2937] border border-dashed border-[#064e3b]/60 p-3 rounded-xl text-[#064e3b] font-mono text-lg font-bold select-all">
                     {successPopup}
                   </div>
                   <button 
@@ -3747,14 +3814,14 @@ const handleUpdatePersonnel = async (e) => {
 
         {/* ALL STUDENT LIST TAB */}
         {activeTab === 'students' && (
-          <div className="bg-[#111827] border border-gray-800 p-6 rounded-xl shadow-xl space-y-4">
+          <div className="bg-[#1b4332] border-2 border-amber-400/80 p-6 rounded-xl shadow-2xl space-y-4">
            <div className="flex justify-between items-center border-b border-gray-800 pb-3 gap-2">
     <h2 className="text-base sm:text-lg font-bold text-white">
       All Registered Students
     </h2>
-    <span className="text-[11px] sm:text-xs bg-amber-500/20 text-amber-400 px-2.5 py-1 rounded-full border border-amber-500/30 whitespace-nowrap">
-      Total: {studentsList.length} (TE: {studentsList.filter(s => s.section === 'Technical Commercial (STT)' || s.section === 'Technical Industrial (STI)').length} | General: {studentsList.filter(s => s.section === 'General Education').length})
-    </span>
+    <span className="text-[11px] sm:text-xs bg-[#043e2f] text-amber-100 font-mono font-bold px-3 py-1 rounded-full border border-amber-300/40 shadow-inner">
+                Total: {studentsList.length} (TE: {studentsList.filter(s => s.section?.toLowerCase().includes('technical') || s.section?.toLowerCase().includes('stt') || s.section?.toLowerCase().includes('ind')).length} | General: {studentsList.filter(s => s.section?.toLowerCase().includes('general') || s.section?.toLowerCase().includes('gen')).length})
+              </span>
   </div>
 
   {/* Smart Search Bar - Broad and full-width on mobile */}
@@ -3776,7 +3843,7 @@ const handleUpdatePersonnel = async (e) => {
       </button>
     )}
   {/* International Command & Action Hub */}
-      <div className="bg-[#0f172a] border border-slate-800 p-4 rounded-2xl shadow-2xl mb-6 space-y-4">
+      <div className="bg-[#FDFBF7] border-2 border-[#064e3b] p-4 rounded-2xl shadow-lg mb-6 space-y-4">
         {/* Top Title & Filter Badge Bar */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
           <div className="flex items-center gap-2">
@@ -3784,17 +3851,17 @@ const handleUpdatePersonnel = async (e) => {
               📂
             </span>
             <div>
-              <h3 className="text-sm sm:text-base font-bold text-white tracking-wide">
+              <h3 className="text-sm sm:text-base font-bold text-[#064e3b] tracking-wide">
                 Student Directory Control Panel
               </h3>
-              <p className="text-[11px] text-slate-400">
+              <p className="text-[11px] text-slate-600">
                 Filter catalog or trigger batch print and exports
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="bg-amber-500/20 text-amber-400 border border-amber-500/40 px-3 py-1 rounded-full text-xs font-bold font-mono">
+            <span className="bg-[#043e2f] text-amber-100 font-mono font-bold border border-amber-300/40 px-3 py-1 rounded-full text-xs shadow-inner">
               Filtered: {studentsList.filter((stu) => {
                 if (printSection !== 'All' && printSection !== 'All Sections') {
                   const pSec = printSection.toLowerCase();
@@ -3847,7 +3914,7 @@ const handleUpdatePersonnel = async (e) => {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {/* Section Filter */}
           <div className="space-y-1">
-            <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">
+            <label className="text-[10px] uppercase font-bold tracking-wider text-[#064e3b] block">
               Section
             </label>
             <select
@@ -3857,7 +3924,7 @@ const handleUpdatePersonnel = async (e) => {
                 setPrintClass('All');
                 setPrintTrade('All');
               }}
-              className="w-full bg-[#1e293b] text-white text-xs px-3 py-2.5 rounded-xl border border-slate-700 focus:border-amber-400 focus:outline-none transition-colors"
+              className="w-full bg-[#FDFBF7] text-[#064e3b] font-bold text-xs px-3 py-2.5 rounded-xl border-2 border-[#064e3b]/40 focus:outline-none"
             >
               <option value="All">All Sections</option>
               <option value="General Education">General Education</option>
@@ -3868,13 +3935,13 @@ const handleUpdatePersonnel = async (e) => {
 
           {/* Class Filter */}
           <div className="space-y-1">
-            <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">
+            <label className="text-[10px] uppercase font-bold tracking-wider text-[#064e3b] block">
               Class
             </label>
             <select
               value={printClass}
               onChange={(e) => setPrintClass(e.target.value)}
-              className="w-full bg-[#1e293b] text-white text-xs px-3 py-2.5 rounded-xl border border-slate-700 focus:border-amber-400 focus:outline-none transition-colors"
+              className="w-full bg-[#FDFBF7] text-[#064e3b] font-bold text-xs px-3 py-2.5 rounded-xl border-2 border-[#064e3b]/40 focus:outline-none"
             >
               <option value="All">All Classes</option>
 
@@ -3902,13 +3969,13 @@ const handleUpdatePersonnel = async (e) => {
 
           {/* Trade / Series Filter */}
           <div className="space-y-1">
-            <label className="text-[10px] uppercase font-bold tracking-wider text-amber-400 block">
+            <label className="text-[10px] uppercase font-bold tracking-wider text-[#043e2f] block">
               Trade / Series
             </label>
             <select
               value={printTrade}
               onChange={(e) => setPrintTrade(e.target.value)}
-              className="w-full bg-[#1e293b] text-amber-400 border border-slate-700 text-xs px-3 py-2.5 rounded-xl focus:border-amber-400 focus:outline-none transition-colors"
+              className="w-full bg-[#FDFBF7] text-[#043e2f] font-bold border-2 border-[#043e2f]/40 text-xs px-3 py-2.5 rounded-xl focus:outline-none"
             >
               <option value="All">
                 {printSection === 'General Education' ? 'All Series' : 'All Trades / Series'}
@@ -4048,9 +4115,9 @@ const handleUpdatePersonnel = async (e) => {
                 No students registered yet. Use the "Register New Member" tab to add students.
               </div>
             ) : (
-              <div className="w-full overflow-x-auto rounded-xl border border-gray-800 bg-[#0f172a] shadow-lg">
+              <div className="w-full overflow-x-auto rounded-xl border-2 border-[#043e2f] bg-[#FDFBF7] shadow-lg">
         <table className="w-full text-left border-collapse min-w-[700px]">
-          <thead className="bg-[#1e293b] text-gray-400 uppercase text-[10px] tracking-wider font-bold">
+          <thead className="bg-[#043e2f] text-amber-100 uppercase text-[10px] tracking-wider font-bold border-b border-amber-300/30">
             <tr>
               <th className="py-2.5 px-3">ID</th>
               <th className="py-2.5 px-2">Photo</th>
@@ -4063,7 +4130,7 @@ const handleUpdatePersonnel = async (e) => {
               <th className="py-2.5 px-2 hidden lg:table-cell">Reg. Date / Time</th>
                   </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-800">
+                  <tbody className="divide-y divide-slate-200 bg-[#FDFBF7] text-slate-800">
                     
  
     
@@ -4101,67 +4168,90 @@ const handleUpdatePersonnel = async (e) => {
                   })
                   .sort((a, b) => (a.fullName || '').localeCompare(b.fullName || ''))
                   .map((stu, i) => (
-              <tr 
-                key={i} 
-                onClick={() => handleRowClick(stu)}
-                className="hover:bg-gray-800/60 cursor-pointer transition"
-              >
-                <td className="py-2 px-3 font-mono text-[10px] font-bold text-amber-100 whitespace-nowrap">
-  {stu.unique_code || stu.id}
-</td>
-<td className="p-3"> 
-  {stu.picture ? (
-    <img src={stu.picture} alt="" className="w-12 h-12 rounded-lg object-cover border border-amber-500/50 shadow-sm" />
-  ) : (
-    <div className="w-12 h-12 rounded-lg bg-gray-700 flex items-center justify-center text-[10px] text-gray-400">No Photo</div>
-  )}
-</td>
-<td className="py-2.5 px-3 font-semibold text-amber-100 text-[10.5px] sm:text-xs md:text-sm whitespace-nowrap">
-  {stu.fullName || stu.fullname || stu.full_name}
-</td>
-<td className="py-1 px-2 whitespace-nowrap">
-  <div className="flex flex-col gap-0.5 leading-none">
-    <span className="text-[11px] font-semibold bg-blue-900/40 text-blue-300 px-1.7 py-0.7 rounded border border-blue-700/40 w-fit whitespace-nowrap">
-      {stu.section}
-    </span>
-    <span className="text-[10px] text-gray-300 font-medium whitespace-nowrap">
-      {stu.classLevel}
-    </span>
-  </div>
-</td>
-  <td className="p-2 max-w-[160px] truncate">
-  <div className="font-semibold text-xs text-amber-100 truncate" title={stu.trades_series || stu.trade}>
-    {stu.section?.toLowerCase() === 'general' ? 'N/A' : (stu.trades_series || stu.trade || stu.trade_series || 'N/A')}
-  </div>
-</td>
-                <td className="p-3"><span className="text-amber-200 font-medium">{stu.gender}</span>, {stu.age} yrs</td>
-                <td className="p-3">
-                  <div className="font-semibold text-white">{stu.guardian_name || stu.guardianName || stu["Guardian Name"] || stu["Parent Name"] || stu["Guardian"] || 'Parent'}</div>
-                  <div className="text-amber-200 font-mono text-xs">{stu.guardian_phone || stu.guardianPhone || 'N/A'}</div>
-                </td>
-                <td className="p-3">
-  <div className="font-semibold text-white">{stu.residence || 'N/A'}</div>
-</td>
-               {/* REG DATE / TIME CELL */}
-          <td className="p-3 text-[11px] leading-tight text-amber-200/90 whitespace-nowrap">
-            <div className="font-semibold text-[11px] text-amber-200">
-              {stu.created_at ? new Date(stu.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}
-            </div>
-            <div className="text-[10px] text-blue-300/80 font-mono mt-0.5">
-              {stu.created_at ? new Date(stu.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : ''}
-            </div>
-          </td>
-                <td className="p-3 text-right">
-                  <button
-                    type="button"
-                    onClick={(e) => { e.preventDefault(); setStudentToDelete(stu); }}
-                    className="bg-red-500/20 hover:bg-red-600 text-red-400 hover:text-white p-2 rounded-lg text-xs font-semibold border border-red-500/30 transition flex items-center justify-center gap-1 ml-auto"
-                    title="Delete Student"
+             <tr
+                    key={i}
+                    onClick={() => handleRowClick(stu)}
+                    className="hover:bg-[#043e2f]/10 cursor-pointer transition-colors border-b border-[#043e2f]/15 odd:bg-[#FDFBF7] even:bg-[#F5F2EA]"
                   >
-                    🗑️ <span className="hidden sm:inline">Delete</span>
-                  </button>
-                </td>
-              </tr>
+                    {/* ID CELL */}
+                    <td className="py-2.5 px-3 font-mono text-[11px] font-extrabold text-[#043e2f] whitespace-nowrap">
+                      {stu.unique_code || stu.id}
+                    </td>
+
+                    {/* PHOTO CELL */}
+                    <td className="p-2.5">
+                      {stu.picture ? (
+                        <img src={stu.picture} alt="" className="w-10 h-10 rounded-lg object-cover border border-[#043e2f]/30 shadow-sm" />
+                      ) : (
+                        <div className="w-10 h-10 rounded-lg bg-[#043e2f]/10 border border-[#043e2f]/20 flex items-center justify-center text-[9px] text-[#043e2f] font-bold">
+                          No Photo
+                        </div>
+                      )}
+                    </td>
+
+                    {/* FULL NAME CELL */}
+                    <td className="py-2.5 px-3 font-extrabold text-slate-900 text-xs sm:text-sm whitespace-nowrap">
+                      {stu.fullName || stu.fullname || stu.full_name}
+                    </td>
+
+                    {/* SECTION / CLASS CELL */}
+                    <td className="py-2 px-2 whitespace-nowrap">
+                      <div className="flex flex-col gap-0.5 leading-none">
+                        <span className="text-[11px] font-bold bg-[#043e2f]/10 text-[#043e2f] px-2 py-0.5 rounded border border-[#043e2f]/20 inline-block w-fit">
+                          {stu.section}
+                        </span>
+                        <span className="text-[10px] text-slate-600 font-semibold mt-0.5">
+                          {stu.classLevel}
+                        </span>
+                      </div>
+                    </td>
+
+                    {/* TRADE / SERIES CELL */}
+                    <td className="p-2.5 max-w-[160px] truncate">
+                      <div className="font-bold text-xs text-[#043e2f] truncate" title={stu.trades_series || stu.trade}>
+                        {stu.section?.toLowerCase() === 'general' ? 'N/A' : (stu.trades_series || stu.trade || stu.trade_series || 'N/A')}
+                      </div>
+                    </td>
+
+                    {/* GENDER / AGE CELL */}
+                    <td className="p-2.5">
+                      <span className="text-slate-900 font-bold text-xs">{stu.gender}</span>
+                      {stu.age && <span className="text-slate-500 text-[10px] font-semibold ml-1">({stu.age} yrs)</span>}
+                    </td>
+
+                    {/* GUARDIAN CONTACT CELL */}
+                    <td className="p-2.5">
+                      <div className="font-bold text-xs text-slate-900">{stu.guardian_name || stu.guardianName || 'Parent'}</div>
+                      <div className="text-[#043e2f] font-mono text-xs font-bold">{stu.guardian_phone || stu.guardianPhone || 'N/A'}</div>
+                    </td>
+
+                    {/* RESIDENCE CELL */}
+                    <td className="p-2.5">
+                      <div className="font-semibold text-xs text-slate-700">{stu.residence || 'N/A'}</div>
+                    </td>
+
+                    {/* REG DATE / TIME CELL */}
+                    <td className="p-2.5 text-[11px] leading-tight text-slate-600 whitespace-nowrap">
+                      <div className="font-semibold text-slate-800">
+                        {stu.created_at ? new Date(stu.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                        {stu.created_at ? new Date(stu.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : ''}
+                      </div>
+                    </td>
+
+                    {/* DELETE ACTION BUTTON */}
+                    <td className="p-2.5 text-right">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setStudentToDelete(stu); }}
+                        className="bg-rose-100 hover:bg-rose-600 text-rose-700 hover:text-white border border-rose-300 font-bold text-xs px-2.5 py-1 rounded-lg transition-all"
+                        title="Delete Student"
+                      >
+                        🗑️ <span className="hidden sm:inline ml-1">Delete</span>
+                      </button>
+                    </td>
+                  </tr>
             ))}
             </tbody>
                 </table>
@@ -5050,18 +5140,18 @@ const handleUpdatePersonnel = async (e) => {
         </div>
 
                 <div>
-                  <label className="block text-xs text-gray-400 mb-1">Gender</label>
-                  <select
-                    value={editFormData.gender || ""}
-                    onChange={(e) =>
-                      setEditFormData({ ...editFormData, gender: e.target.value })
-                    }
-                    className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-sm focus:border-amber-500 outline-none"
-                  >
-                    <option value="Male">Male</option>
-                    <option value="Female">Female</option>
-                  </select>
-                </div>
+  <label className="block text-xs font-bold text-[#043e2f] uppercase mb-1">
+    GENDER *
+  </label>
+  <select
+    value={gender}
+    onChange={(e) => setGender(e.target.value)}
+    className="w-full bg-white text-slate-900 font-extrabold text-sm rounded-lg p-2.5 border-2 border-emerald-600 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+  >
+    <option value="Female">Female</option>
+    <option value="Male">Male</option>
+  </select>
+              </div>
 
                 <div>
                   <label className="block text-xs text-gray-400 mb-1">Guardian Name</label>

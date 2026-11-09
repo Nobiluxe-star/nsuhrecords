@@ -119,15 +119,27 @@ const getBase64ImageFromUrl = async (imageUrl) => {
 export default function BulkGeneralReportCard({
   isOpen,
   onClose,
-  activeClass = 'Form 1A (F1A)',
+  activeClass = '',
   activeTerm = 'Term 1',
   schoolInfo = {}
 }) {
-  const [selectedClass, setSelectedClass] = useState(activeClass || 'Form 1A (F1A)');
-  const [selectedTerm, setSelectedTerm] = useState(activeTerm || 'Term 1');
+  const [selectedClass, setSelectedClass] = useState(activeClass);
+  const [selectedTerm, setSelectedTerm] = useState(activeTerm);
   const [selectedSeries, setSelectedSeries] = useState('ALL');
   const [viewMode, setViewMode] = useState('all');
   const [currentIndex, setCurrentIndex] = useState(0);
+
+  useEffect(() => {
+    if (activeClass) {
+      setSelectedClass(activeClass);
+    }
+  }, [activeClass]);
+
+  useEffect(() => {
+    if (activeTerm) {
+      setSelectedTerm(activeTerm);
+    }
+  }, [activeTerm]);
 
   const [studentsList, setStudentsList] = useState([]);
   const [subjectsList, setSubjectsList] = useState([]);
@@ -155,13 +167,16 @@ export default function BulkGeneralReportCard({
     return schoolInfo?.school_id || schoolInfo?.id || schoolInfo?.active_school_id || '';
   }, [schoolInfo]);
 
-  useEffect(() => {
-    if (isOpen) {
-      if (activeClass) setSelectedClass(activeClass);
-      if (activeTerm) setSelectedTerm(activeTerm);
-      setCurrentIndex(0);
-    }
-  }, [isOpen, activeClass, activeTerm]);
+useEffect(() => {
+  if (activeClass) {
+    setSelectedClass(activeClass);
+  }
+  if (activeTerm) {
+    setSelectedTerm(activeTerm);
+  }
+  setSelectedSeries('ALL');
+  setCurrentIndex(0);
+}, [isOpen, activeClass, activeTerm]);
 
   const availableSeriesList = useMemo(() => {
     const clsLower = selectedClass.toLowerCase();
