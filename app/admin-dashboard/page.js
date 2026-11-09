@@ -4802,7 +4802,7 @@ const handleUpdatePersonnel = async (e) => {
                   return (
                     <button
                       type="button"
-                      onClick={() => handleOpenBulkReportCards('commercial', 'First Year Commercial (Y1Com)', 'Term 1')}
+                      onClick={() => handleOpenBulkReportCards('commercial', 'Form One Commercial (F1COM)', 'Term 1')}
                       className="w-full sm:w-auto px-4 py-2 bg-[#1b4332] hover:bg-[#2d6a4f] text-amber-300 font-bold text-xs rounded-xl shadow-md transition active:scale-95 flex items-center justify-center gap-2 border border-emerald-600/50"
                     >
                       <span>🖨️</span> Technical Commercial Report Cards Preview & Bulk Printing
@@ -4825,7 +4825,7 @@ const handleUpdatePersonnel = async (e) => {
                 return (
                   <button
                     type="button"
-                    onClick={() => handleOpenBulkReportCards('general', masterClass || selectedClassLevel || 'Form 1A (F1A)', 'ALL', 'Term 1')}
+                    onClick={() => handleOpenBulkReportCards('general', 'Form 1A (F1A)', 'ALL', 'Term 1')}
                     className="w-full sm:w-auto px-4 py-2 bg-blue-700 hover:bg-blue-600 text-white font-bold text-xs rounded-xl shadow-md transition active:scale-95 flex items-center justify-center gap-2 border border-blue-500/50"
                   >
                     <span>📘</span> General Education Report Cards Preview & Bulk Printing

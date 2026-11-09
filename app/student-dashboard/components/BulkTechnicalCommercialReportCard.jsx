@@ -106,13 +106,13 @@ const getBase64ImageFromUrl = async (imageUrl) => {
 export default function BulkTechnicalCommercialReportCard({
   isOpen,
   onClose,
-  activeClass = 'First Year Commercial (Y1Com)',
+  activeClass = 'Form One Commercial (F1COM)', 
   activeTrade = 'ALL',
   activeTerm = 'Term 1',
   schoolInfo = {},
   onTrackChange = () => {}
 }) {
-  const [selectedClass, setSelectedClass] = useState(activeClass || 'First Year Commercial (Y1Com)');
+  const [selectedClass, setSelectedClass] = useState(activeClass || 'Form One Commercial (F1COMS)');
   const [selectedTrade, setSelectedTrade] = useState(
     activeTrade && !activeTrade.startsWith('Term') ? activeTrade : 'ALL'
   );
