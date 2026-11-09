@@ -4825,7 +4825,7 @@ const handleUpdatePersonnel = async (e) => {
                 return (
                   <button
                     type="button"
-                    onClick={() => handleOpenBulkReportCards('general', classLevel || 'Form 1', 'ALL', 'Term 1')}
+                    onClick={() => handleOpenBulkReportCards('general', masterClass || selectedClassLevel || 'Form 1A (F1A)', 'ALL', 'Term 1')}
                     className="w-full sm:w-auto px-4 py-2 bg-blue-700 hover:bg-blue-600 text-white font-bold text-xs rounded-xl shadow-md transition active:scale-95 flex items-center justify-center gap-2 border border-blue-500/50"
                   >
                     <span>📘</span> General Education Report Cards Preview & Bulk Printing
