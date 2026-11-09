@@ -307,8 +307,8 @@ const handleDeleteTeacher = async (teacherIdToDelete) => {
     if (isSubmittingTeacher) return;
     setIsSubmittingTeacher(true);
 
-    if (!teacherName || !teacherPhone || !teacherEmail || selectedTeacherSubjects.length === 0) {
-      alert('Please provide teacher name, mandatory email, phone number, and select at least one subject with class schedules.');
+    if (!teacherName || !teacherPhone || selectedTeacherSubjects.length === 0) {
+      alert('Please provide teacher name, contact phone number, and select at least one subject with class schedules.');
       setIsSubmittingTeacher(false);
       return;
     }
@@ -727,7 +727,6 @@ return (
                     type="email" 
                     value={teacherEmail} 
                     onChange={(e) => setTeacherEmail(e.target.value)} 
-                    required 
                     placeholder="teacher@wisdomcollege.cm"
                     className="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white"
                   />
