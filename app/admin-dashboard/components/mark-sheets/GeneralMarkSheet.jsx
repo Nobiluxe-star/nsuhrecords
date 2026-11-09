@@ -738,7 +738,7 @@ export default function GeneralMarkSheet({
   <div className="overflow-x-auto touch-pan-x max-h-[600px] border border-gray-800 rounded-lg relative">
 
          {/* MOBILE-OPTIMIZED LANDSCAPE-FRIENDLY MARK ENTRY (FOREST GREEN & WHITE BEIGE) */}
-          <div className="block md:hidden overflow-x-auto bg-[#FDFBF7] rounded-xl border-2 border-[#064e3b] p-2 shadow-sm">
+         <div className="block md:hidden overflow-x-auto bg-[#FDFBF7] -mx-4 w-[calc(100%+2rem)] border-y border-[#064e3b]">
             <div className="text-[10px] text-[#064e3b] font-bold pb-1.5 text-center border-b border-[#064e3b]/20 mb-2">
               💡 Rotate phone to landscape for optimal multi-student view
             </div>
