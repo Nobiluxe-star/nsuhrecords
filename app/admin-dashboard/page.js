@@ -3818,13 +3818,13 @@ const handleUpdatePersonnel = async (e) => {
 
   {/* ALL STUDENT LIST TAB */}
      {activeTab === 'students' && (
-      <div className="-mx-4 sm:mx-0 w-[calc(100%+2rem)] sm:w-full bg-[#043e2f] sm:bg-[#043e2f] p-0 sm:p-6 rounded-none sm:rounded-2xl shadow-none sm:shadow-2xl space-y-4 border-0 sm:border border-[#064e3b]">
-  <div className="flex justify-between items-center border-b border-slate-300 sm:border-gray-800 p-3 sm:pb-3 gap-2 bg-[#043e2f] sm:bg-transparent">
+      <div className="bg-[#1b4332] border-2 border-amber-400/80 p-3 sm:p-6 rounded-2xl shadow-2xl space-y-4 overflow-hidden">
+  <div className="flex justify-between items-center border-b border-gray-800 pb-3 gap-2">
     <h2 className="text-base sm:text-lg font-bold text-white">
       All Registered Students
     </h2>
-    <span className="text-[11px] sm:text-xs bg-[#1b4332] text-amber-100 font-mono font-bold px-3 py-1 rounded">
-      Total: {studentsList.length}
+    <span className="text-[11px] sm:text-xs bg-[#043e2f] text-amber-200 font-mono font-bold px-3.5 py-1 rounded-full border border-amber-400/50">
+      Total: {studentsList.length} (TE: {studentsList.filter(s => s.section?.toLowerCase().includes('technical') || s.section?.toLowerCase().includes('ind') || s.section?.toLowerCase().includes('comm') || s.education_type?.toLowerCase().includes('technical')).length} | General: {studentsList.filter(s => s.section?.toLowerCase().includes('general') || s.education_type?.toLowerCase().includes('general')).length})
     </span>
   </div>
 
@@ -4119,8 +4119,8 @@ const handleUpdatePersonnel = async (e) => {
                 No students registered yet. Use the "Register New Member" tab to add students.
               </div>
             ) : (
-      <div className="-mx-4 sm:mx-0 w-[calc(100%+2rem)] sm:w-full overflow-x-auto bg-[#FDFBF7] border-y sm:border-2 border-x-0 border-[#043e2f] rounded-none sm:rounded-xl shadow-none">
-        <table className="w-full text-left border-collapse min-w-[700px]">
+      <div className="w-full max-w-full overflow-x-auto touch-pan-x overscroll-x-contain rounded-xl border-2 border-[#043e2f] bg-[#FDFBF7] shadow-xl">
+     <table className="w-full text-left border-collapse min-w-[1000px]">
           <thead className="bg-[#043e2f] text-amber-100 uppercase text-[10px] tracking-wider font-bold border-b border-amber-300/30">
             <tr>
               <th className="py-2.5 px-3">ID</th>
