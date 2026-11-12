@@ -3818,7 +3818,7 @@ const handleUpdatePersonnel = async (e) => {
 
   {/* ALL STUDENT LIST TAB */}
      {activeTab === 'students' && (
-      <div className="bg-[#1b4332] border-2 border-amber-400/80 p-3 sm:p-6 rounded-2xl shadow-2xl space-y-4 overflow-hidden">
+      <div className="-mx-4 sm:mx-0 bg-[#FDFBF7] sm:bg-[#1b4332] border-0 sm:border-2 sm:border-amber-400/80 p-0 sm:p-6 rounded-none sm:rounded-2xl shadow-none sm:shadow-2xl space-y-4">
   <div className="flex justify-between items-center border-b border-gray-800 pb-3 gap-2">
     <h2 className="text-base sm:text-lg font-bold text-white">
       All Registered Students
@@ -4119,7 +4119,7 @@ const handleUpdatePersonnel = async (e) => {
                 No students registered yet. Use the "Register New Member" tab to add students.
               </div>
             ) : (
-      <div className="w-full max-w-full overflow-x-auto touch-pan-x overscroll-x-contain rounded-xl border-2 border-[#043e2f] bg-[#FDFBF7] shadow-xl">
+        <div className="w-full overflow-x-auto rounded-none sm:rounded-xl border-y sm:border-2 border-x-0 border-[#043e2f] bg-[#FDFBF7] shadow-none sm:shadow-xl">
      <table className="w-full text-left border-collapse min-w-[1000px]">
           <thead className="bg-[#043e2f] text-amber-100 uppercase text-[10px] tracking-wider font-bold border-b border-amber-300/30">
             <tr>
