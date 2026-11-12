@@ -3816,16 +3816,16 @@ const handleUpdatePersonnel = async (e) => {
           </div>
         )}
 
-        {/* ALL STUDENT LIST TAB */}
-        {activeTab === 'students' && (
-          <div className="bg-[#1b4332] border-2 border-amber-400/80 p-6 rounded-xl shadow-2xl space-y-4">
-           <div className="flex justify-between items-center border-b border-gray-800 pb-3 gap-2">
+  {/* ALL STUDENT LIST TAB */}
+     {activeTab === 'students' && (
+      <div className="-mx-4 sm:mx-0 w-[calc(100%+2rem)] sm:w-full bg-[#043e2f] sm:bg-[#043e2f] p-0 sm:p-6 rounded-none sm:rounded-2xl shadow-none sm:shadow-2xl space-y-4 border-0 sm:border border-[#064e3b]">
+  <div className="flex justify-between items-center border-b border-slate-300 sm:border-gray-800 p-3 sm:pb-3 gap-2 bg-[#043e2f] sm:bg-transparent">
     <h2 className="text-base sm:text-lg font-bold text-white">
       All Registered Students
     </h2>
-    <span className="text-[11px] sm:text-xs bg-[#043e2f] text-amber-100 font-mono font-bold px-3 py-1 rounded-full border border-amber-300/40 shadow-inner">
-                Total: {studentsList.length} (TE: {studentsList.filter(s => s.section?.toLowerCase().includes('technical') || s.section?.toLowerCase().includes('stt') || s.section?.toLowerCase().includes('ind')).length} | General: {studentsList.filter(s => s.section?.toLowerCase().includes('general') || s.section?.toLowerCase().includes('gen')).length})
-              </span>
+    <span className="text-[11px] sm:text-xs bg-[#1b4332] text-amber-100 font-mono font-bold px-3 py-1 rounded">
+      Total: {studentsList.length}
+    </span>
   </div>
 
   {/* Smart Search Bar - Broad and full-width on mobile */}
@@ -3847,7 +3847,7 @@ const handleUpdatePersonnel = async (e) => {
       </button>
     )}
   {/* International Command & Action Hub */}
-      <div className="bg-[#FDFBF7] border-2 border-[#064e3b] p-4 rounded-2xl shadow-lg mb-6 space-y-4">
+  <div className="w-full bg-[#FDFBF7] border-y sm:border-2 border-x-0 border-[#064e3b] p-2 sm:p-4 rounded-none sm:rounded-2xl shadow-none sm:shadow-lg mb-6 space-y-4">
         {/* Top Title & Filter Badge Bar */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
           <div className="flex items-center gap-2">
@@ -4119,7 +4119,7 @@ const handleUpdatePersonnel = async (e) => {
                 No students registered yet. Use the "Register New Member" tab to add students.
               </div>
             ) : (
-              <div className="w-full overflow-x-auto rounded-xl border-2 border-[#043e2f] bg-[#FDFBF7] shadow-lg">
+      <div className="-mx-4 sm:mx-0 w-[calc(100%+2rem)] sm:w-full overflow-x-auto bg-[#FDFBF7] border-y sm:border-2 border-x-0 border-[#043e2f] rounded-none sm:rounded-xl shadow-none">
         <table className="w-full text-left border-collapse min-w-[700px]">
           <thead className="bg-[#043e2f] text-amber-100 uppercase text-[10px] tracking-wider font-bold border-b border-amber-300/30">
             <tr>
