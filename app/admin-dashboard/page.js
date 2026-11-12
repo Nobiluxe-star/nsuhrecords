@@ -256,7 +256,7 @@ export const ALL_SUBJECTS_LIST = [
   { name: "Biology", category: "General Core Subjects" },
   { name: "Chemistry", category: "General Core Subjects" },
   { name: "Citizenship Education / Moral Education", category: "General Core Subjects" },
-  { name: "Computer Science", category: "General Core Subjects" },
+  { name: "Computer Sciences", category: "General Core Subjects" },
   { name: "Information & Communication Technology/ICT", category: "General Core Subjects" },
   { name: "Economics", category: "General Core Subjects" },
   { name: "Economic Geography", category: "General Core Subjects" },
@@ -340,14 +340,18 @@ export const ALL_SUBJECTS_LIST = [
   { name: "Sewing", category: "Industrial Subjects" },
   { name: "Site Management", category: "Industrial Subjects" },
   { name: "Soils & Mechanics", category: "Industrial Subjects" },
-  { name: "Soils and Materials (Lab Tests)", category: "Industrial Subjects" },
+  { name: "Materials and Soils ", category: "Industrial Subjects" },
   { name: "Surveys", category: "Industrial Subjects" },
   { name: "Technical Drawing", category: "Industrial Subjects" },
   { name: "Technology", category: "Industrial Subjects" },
   { name: "Technology of Materials", category: "Industrial Subjects" },
   { name: "Textile and Hardware Technology", category: "Industrial Subjects" },
   { name: "Work Organization", category: "Industrial Subjects" },
-  { name: "Workshop Practicals", category: "Industrial Subjects" }
+  { name: "Workshop Practicals", category: "Industrial Subjects" },
+  { name: "Building Practicals", category: "Industrial Subjects" },
+  { name: "Mechanical Practicals", category: "Industrial Subjects" },
+  { name: "Trade and Training", category: "Industrial Subjects" },
+  { name: "Electrical Practicals", category: "Industrial Subjects" }
 ];
 
 // Helper to dynamically organize subjects based on selected section
