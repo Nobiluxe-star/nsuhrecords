@@ -72,7 +72,7 @@ export const TECHNICAL_COMMERCIAL_CATALOG = [
   'Form Two Commercial (F2COM)',
   'Form Three Commercial (F3COM)',
   'Form Four Commercial (F4COM)',
-  'Form Five Cpmmercial (F5COM)',
+  'Form Five Commercial (F5COM)',
   'Lower Sixth Commercial (L6COM)',
   'Upper Sixth Commercial (U6COM)',
 ];
