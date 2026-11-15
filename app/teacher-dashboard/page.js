@@ -282,7 +282,13 @@ export default function TeacherDashboardPage() {
     }
 
     const className = selectedClassForAction.toLowerCase();
+   if (className.includes('comm') || className.includes('stt') || className.includes('account')) {
+      return COMMERCIAL_TRADE_SERIES || TECHNICAL_COMMERCIAL_CATALOG || [];
+    }
 
+    if (className.includes('industrial') || className.includes('tech') || className.includes('ind')) {
+      return INDUSTRIAL_TRADE_SERIES || TECHNICAL_INDUSTRIAL_SERIES || TECHNICAL_INDUSTRIAL_CATALOG || [];
+    }
     if (className.includes('sixth') || className.includes('form') || className.includes('l6') || className.includes('u6')) {
       if (!GENERAL_SERIES_CATALOG) return [];
 
@@ -304,14 +310,6 @@ export default function TeacherDashboardPage() {
 
       return [...rawArts, ...rawScience];
     }
-
-    if (className.includes('comm') || className.includes('market') || className.includes('account')) {
-      return COMMERCIAL_TRADE_SERIES || TECHNICAL_COMMERCIAL_CATALOG || [];
-    }
-
-  if (className.includes('industrial') || className.includes('tech') || className.includes('ind')) {
-  return INDUSTRIAL_TRADE_SERIES || TECHNICAL_INDUSTRIAL_SERIES || TECHNICAL_INDUSTRIAL_CATALOG || [];
-}
 
     const rawArts = GENERAL_SERIES_CATALOG?.ARTS || [];
     const rawScience = GENERAL_SERIES_CATALOG?.SCIENCE || [];
