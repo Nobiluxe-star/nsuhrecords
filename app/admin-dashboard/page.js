@@ -285,6 +285,7 @@ export const ALL_SUBJECTS_LIST = [
 
 // Commercial Subjects
   { name: "Application of Management Software", category: "Commercial Subjects" },
+  { name: "Accounting", category: "Commercial Subjects" },
   { name: "Business Communication", category: "Commercial Subjects" },
   { name: "Business Management", category: "Commercial Subjects" },
   { name: "Business Mathematics", category: "Commercial Subjects" },
@@ -302,6 +303,7 @@ export const ALL_SUBJECTS_LIST = [
   { name: "Introductory Accounting", category: "Commercial Subjects" },
   { name: "Legislation", category: "Commercial Subjects" },
   { name: "Management Accounting", category: "Commercial Subjects" },
+  { name: "Marketing", category: "Commercial Subjects" },
   { name: "Office Practice", category: "Commercial Subjects" },
   { name: "OHADA Financial Accounting", category: "Commercial Subjects" },
   { name: "OHADA Fin. Reporting - Year-End Accounting", category: "Commercial Subjects" },
