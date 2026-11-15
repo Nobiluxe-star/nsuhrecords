@@ -291,6 +291,7 @@ export const ALL_SUBJECTS_LIST = [
   { name: "Commerce", category: "Commercial Subjects" },
   { name: "Computer-Aided Accounting", category: "Commercial Subjects" },
   { name: "Corporate Accounting", category: "Commercial Subjects" },
+  { name: "Cost and Management Accounting", category: "Commercial Subjects" },
   { name: "Digital Marketing", category: "Commercial Subjects" },
   { name: "Entrepreneurship", category: "Commercial Subjects" },
   { name: "Family Life Education and Gerontology", category: "Commercial Subjects" },
@@ -303,6 +304,7 @@ export const ALL_SUBJECTS_LIST = [
   { name: "Management Accounting", category: "Commercial Subjects" },
   { name: "Office Practice", category: "Commercial Subjects" },
   { name: "OHADA Financial Accounting", category: "Commercial Subjects" },
+  { name: "OHADA Fin. Reporting - Year-End Accounting", category: "Commercial Subjects" },
   { name: "Principles of Accounts", category: "Commercial Subjects" },
   { name: "Product Mastery", category: "Commercial Subjects" },
   { name: "Professional Communication Techniques", category: "Commercial Subjects" },
@@ -313,6 +315,7 @@ export const ALL_SUBJECTS_LIST = [
 
   // Industrial Subjects
   { name: "Applied Mechanics", category: "Industrial Subjects" },
+  { name: "Building Technology", category: "Industrial Subjects" },
   { name: "Construction Drawing", category: "Industrial Subjects" },
   { name: "Construction Processes", category: "Industrial Subjects" },
   { name: "Construction Technology", category: "Industrial Subjects" },
