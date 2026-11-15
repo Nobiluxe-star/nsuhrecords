@@ -868,70 +868,6 @@ export default function TeacherDashboardPage() {
       }
     }));
   };
-
-  useEffect(() => {
-    const fetchClassStudents = async () => {
-      const activeSchoolId = localStorage.getItem('active_school_id') || teacherProfile?.school_id;
-      
-      if (!activeSchoolId || !selectedClassForAction) {
-        setClassStudents([]);
-        return;
-      }
-
-      const cacheKey = `nsuh_students_${activeSchoolId}_${selectedClassForAction.trim()}_${selectedTrade}`;
-      
-      const cachedStudents = localStorage.getItem(cacheKey);
-      if (cachedStudents) {
-        try {
-          setClassStudents(JSON.parse(cachedStudents));
-        } catch (e) {
-          console.warn('Failed to parse cached students:', e);
-        }
-      }
-
-      setIsLoadingStudents(true);
-
-      try {
-        let studentQuery = supabase
-          .from('students')
-          .select('*')
-          .eq('school_id', activeSchoolId)
-          .eq('classLevel', selectedClassForAction.trim());
-
-        if (selectedTrade && selectedTrade !== 'ALL' && selectedTrade !== 'N/A') {
-          studentQuery = studentQuery.eq('trades_series', selectedTrade);
-        }
-
-        const { data, error } = await studentQuery.order('fullName', { ascending: true });
-
-        if (error) throw error;
-
-        if (data && data.length > 0) {
-          setClassStudents(data);
-          localStorage.setItem(cacheKey, JSON.stringify(data));
-
-          const extractedTrades = Array.from(
-            new Set(
-              data
-                .map(s => s.trades_series || s.trade || s.series)
-                .filter(t => t && t.trim() !== '' && t !== 'N/A' && !t.toLowerCase().includes('year industrial') && !t.toLowerCase().includes('form'))
-            )
-          );
-          if (extractedTrades.length > 0) {
-            setDatabaseTrades(extractedTrades);
-          }
-        }
-
-      } catch (err) {
-        console.warn('Network issue detected, using cached student list:', err.message || err);
-      } finally {
-        setIsLoadingStudents(false);
-      }
-    };
-
-    fetchClassStudents();
-  }, [selectedClassForAction, selectedTrade, selectedSubjectForAction, teacherProfile?.school_id]);
-
   useEffect(() => {
     let isCancelled = false;
 
@@ -1031,7 +967,18 @@ export default function TeacherDashboardPage() {
     return () => {
       isCancelled = true;
     };
+
   }, [selectedClassForAction, selectedSubjectForAction, selectedTerm, selectedTrade, teacherProfile]);
+const visibleStudents = useMemo(() => {
+    if (!selectedTrade || selectedTrade === 'ALL' || selectedTrade === 'N/A') {
+      return classStudents;
+    }
+    const target = selectedTrade.trim().toLowerCase();
+    return (classStudents || []).filter((s) => {
+      const val = (s.trades_series || s.trade_series || s.series || s.trade || '').trim().toLowerCase();
+      return val === target || val.startsWith(`${target} -`) || val.startsWith(`${target}-`);
+    });
+  }, [classStudents, selectedTrade]);
 
   if (!isMounted) {
     return null;
@@ -1368,24 +1315,31 @@ export default function TeacherDashboardPage() {
         </tr>
       </thead>
                   <tbody className="divide-y divide-gray-800">
-                    {teacherProfile.schedules && Object.keys(teacherProfile.schedules).length > 0 ? (
-                      Object.entries(teacherProfile.schedules).map(([sub, rows]) =>
-                        rows.map((row, rIdx) => (
-                          <tr key={`${sub}-${rIdx}`} className="hover:bg-slate-50 transition-colors">
-                <td className="p-3.5 border-r border-b border-slate-200 font-extrabold text-slate-900">{sub}</td>
-                <td className="p-3.5 border-r border-b border-slate-200 text-slate-800 font-bold">{row.className}</td>
-                <td className="p-3.5 border-r border-b border-slate-200 text-slate-600 font-medium">{row.day}</td>
-                <td className="p-3.5 border-b border-slate-200 font-mono text-emerald-700 font-bold">{row.startTime} - {row.endTime}</td>
-              </tr>
-                        ))
-                      )
-                    ) : (
-                      <tr>
-                        <td colSpan="4" className="p-6 text-center text-gray-500 italic">
-                          No class schedule assigned yet by administrator for this school ID.
-                        </td>
-                      </tr>
-                    )}
+                    {(() => {
+                        const scheduledEntries = Object.entries(teacherProfile?.schedules || {}).flatMap(([sub, rows]) =>
+                          (Array.isArray(rows) ? rows : [])
+                            .filter((row) => row.day && row.day !== 'Not Allocated Yet')
+                            .map((row, rIdx) => ({ sub, row, rIdx }))
+                        );
+                        return scheduledEntries.length > 0 ? (
+                          scheduledEntries.map(({ sub, row, rIdx }) => (
+                            <tr key={`${sub}-${rIdx}`} className="hover:bg-slate-50 transition-colors">
+                              <td className="p-3.5 border-r border-b border-slate-200 font-extrabold text-slate-900">{sub}</td>
+                              <td className="p-3.5 border-r border-b border-slate-200 text-slate-800 font-bold">{row.className || row.classLevel}</td>
+                              <td className="p-3.5 border-r border-b border-slate-200 text-slate-600 font-medium">{row.day}</td>
+                              <td className="p-3.5 border-b border-slate-200 font-mono text-emerald-700 font-bold">
+                                {row.startTime && row.endTime ? `${row.startTime} - ${row.endTime}` : (row.startTime || 'Time TBD')}
+                              </td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan="4" className="p-6 text-center text-gray-500 italic">
+                              No schedule allocated yet. Your assigned classes are active—check back once the administrator allocates your timetable.
+                            </td>
+                          </tr>
+                        );
+                      })()}
                   </tbody>
                 </table>
               </div>
@@ -1393,7 +1347,16 @@ export default function TeacherDashboardPage() {
              {/* Mobile Matrix Table View */}
               <div className="block md:hidden">
                 {(() => {
-                  const schedules = teacherProfile?.schedules || {};
+                 const schedules = Object.fromEntries(
+                          Object.entries(teacherProfile?.schedules || {})
+                            .map(([sub, rows]) => [
+                              sub,
+                              (Array.isArray(rows) ? rows : []).filter(
+                                (r) => r.day && r.day !== 'Not Allocated Yet'
+                              ),
+                            ])
+                            .filter(([, rows]) => rows.length > 0)
+                        );
                   const subjects = Object.keys(schedules);
                   const allClasses = Array.from(
                     new Set(
@@ -1407,7 +1370,7 @@ export default function TeacherDashboardPage() {
                   if (subjects.length === 0 || allClasses.length === 0) {
                     return (
                       <div className="p-6 text-center text-slate-500 italic bg-white rounded-xl border border-slate-200 text-xs">
-                        No class schedule assigned yet by administrator for this school ID.
+                        No schedule allocated yet. Your assigned classes are active—check back once the administrator allocates your timetable.
                       </div>
                     );
                   }
@@ -2233,9 +2196,9 @@ export default function TeacherDashboardPage() {
                   };
 
                   const getDynamicRankMap = (k1, k2) => {
-                    if (!Array.isArray(classStudents) || classStudents.length === 0) return {};
+                    if (!Array.isArray(visibleStudents) || visibleStudents.length === 0) return {};
 
-                    const scores = classStudents.map(student => {
+                    const scores = visibleStudents.map(student => {
                       const ts = getDynamicTermScore(student.id, k1, k2);
                       return {
                         id: student.id,
@@ -2309,8 +2272,8 @@ export default function TeacherDashboardPage() {
                           const rankMap = getDynamicRankMap(key1, key2);
                           return (
                             <tbody className="divide-y divide-emerald-900/30 bg-[#063321] text-white">
-                              {classStudents && classStudents.length > 0 ? (
-                                classStudents.map((student, idx) => {
+                              {visibleStudents && visibleStudents.length > 0 ? (
+                                visibleStudents.map((student, idx) => {
                                   const studentMarks = marksRecords[student.id] || {};
                                   const calculatedScore = getDynamicTermScore(student.id, key1, key2);
                                   const calculatedRank = rankMap[student.id] || '-';
@@ -2453,9 +2416,9 @@ export default function TeacherDashboardPage() {
                   };
 
                   const getDynamicRankMap = (k1, k2) => {
-                    if (!Array.isArray(classStudents) || classStudents.length === 0) return {};
+                    if (!Array.isArray(visibleStudents) || visibleStudents.length === 0) return {};
 
-                    const scores = classStudents.map(student => {
+                    const scores = visibleStudents.map(student => {
                       const ts = getDynamicTermScore(student.id, k1, k2);
                       return {
                         id: student.id,
@@ -2498,8 +2461,8 @@ export default function TeacherDashboardPage() {
                         </div>
                       )}
 
-                      {classStudents && classStudents.length > 0 ? (
-                        classStudents.map((student, idx) => {
+                      {visibleStudents && visibleStudents.length > 0 ? (
+                        visibleStudents.map((student, idx) => {
                           const studentMarks = marksRecords[student.id] || {};
                           const calculatedScore = getDynamicTermScore(student.id, key1, key2);
                           const calculatedRank = rankMap[student.id] || '-';

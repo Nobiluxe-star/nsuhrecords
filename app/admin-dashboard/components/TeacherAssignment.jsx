@@ -154,7 +154,7 @@ useEffect(() => {
       setSubjectSchedules(prev => ({
         ...prev,
         [sub]: [
-          { className: getDefaultClassForSection(teacherSection || selectedSection), day: 'Monday', startTime: '07:30 AM', endTime: '09:00 AM' }
+          { className: getDefaultClassForSection(teacherSection || selectedSection), day: 'Not Allocated Yet', startTime: '', endTime: '' }
         ]
       }));
     } else {
@@ -183,9 +183,9 @@ useEffect(() => {
         ...(prev[subject] || []),
         { 
           className: getDefaultClassForSection(teacherSection || selectedSection), 
-          day: 'Monday', 
-          startTime: '07:30 AM', 
-          endTime: '09:00 AM' 
+          day: 'Not Allocated Yet', 
+          startTime: '', 
+          endTime: '' 
         }
       ]
     }));
@@ -203,7 +203,7 @@ useEffect(() => {
     setSubjectSchedules((prev) => {
       const list = [...(prev[subject] || [])];
       const defaultClass = getDefaultClassForSection(teacherSection || selectedSection);
-      const existingRow = list[index] || { className: defaultClass, day: '', startTime: '', endTime: '' };
+      const existingRow = list[index] || { className: defaultClass, day: 'Not Allocated Yet', startTime: '', endTime: '' };
       list[index] = {
         ...existingRow,
         [field]: value
@@ -579,7 +579,7 @@ const END_TIME_OPTIONS = [
   "08:45 AM", "09:30 AM", "10:15 AM", "11:00 AM", "11:45 AM",
   "01:00 PM", "01:45 PM", "02:30 PM", "03:15 PM", "04:00 PM", "04:45 PM"
 ];
-  const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const DAYS_OF_WEEK = ['Not Allocated Yet', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const [selectedSection, setSelectedSection] = useState('General Education');
 
 const getFilteredSubjects = (section) => {
@@ -666,9 +666,9 @@ useEffect(() => {
             ...r,
             className: r.className || r.classLevel || r.class || r.form || '',
             classLevel: r.classLevel || r.className || r.class || r.form || '',
-            day: r.day || 'Monday',
-            startTime: r.startTime || '07:30 AM',
-            endTime: r.endTime || '09:00 AM'
+            day: r.day || 'Not Allocated Yet',
+            startTime: r.day && r.day !== 'Not Allocated Yet' ? (r.startTime || '8:00 AM') : '',
+            endTime: r.day && r.day !== 'Not Allocated Yet' ? (r.endTime || '09:30 AM') : ''
           }));
         }
       });
@@ -1018,7 +1018,7 @@ return (
                                 <input
                                   type="text"
                                   placeholder="07:30 AM"
-                                  value={schedulerData[subject]?.[rIdx]?.startTime ?? row.startTime ?? '07:30 AM'}
+                                 value={row.day === 'Not Allocated Yet' ? '' : (schedulerData[subject]?.[rIdx]?.startTime ?? row.startTime ?? '')}
                                   onChange={(e) => handleSchedulerRowChange(subject, rIdx, 'startTime', e.target.value)}
                                   className="w-full bg-[#1f2937] border border-gray-700 rounded p-2 text-xs text-white pr-6 focus:outline-none focus:border-amber-500"
                                 />
@@ -1049,7 +1049,7 @@ return (
                                 <input
                                   type="text"
                                   placeholder="09:00 AM"
-                                  value={schedulerData[subject]?.[rIdx]?.endTime ?? row.endTime ?? '09:00 AM'}
+                                  value={row.day === 'Not Allocated Yet' ? '' : (schedulerData[subject]?.[rIdx]?.endTime ?? row.endTime ?? '')}
                                   onChange={(e) => handleSchedulerRowChange(subject, rIdx, 'endTime', e.target.value)}
                                   className="w-full bg-[#1f2937] border border-gray-700 rounded p-2 text-xs text-white pr-6 focus:outline-none focus:border-amber-500"
                                 />
