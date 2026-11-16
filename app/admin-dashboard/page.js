@@ -317,6 +317,7 @@ export const ALL_SUBJECTS_LIST = [
 
   // Industrial Subjects
   { name: "Applied Mechanics", category: "Industrial Subjects" },
+  { name: "Automobile Electricity", category: "Industrial Subjects" },
   { name: "Building Technology", category: "Industrial Subjects" },
   { name: "Construction Drawing", category: "Industrial Subjects" },
   { name: "Construction Processes", category: "Industrial Subjects" },
@@ -330,12 +331,14 @@ export const ALL_SUBJECTS_LIST = [
   { name: "Electrical Tests & Measurements", category: "Industrial Subjects" },
   { name: "Engineering Drawing", category: "Industrial Subjects" },
   { name: "Engineering Science", category: "Industrial Subjects" },
+  { name: "Fashion Drawing", category: "Industrial Subjects" },
   { name: "Fashion and Fabric Design", category: "Industrial Subjects" },
   { name: "Garment Construction", category: "Industrial Subjects" },
   { name: "Industrial Computing", category: "Industrial Subjects" },
   { name: "Material Technology and Workshop Process", category: "Industrial Subjects" },
   { name: "Materials", category: "Industrial Subjects" },
   { name: "Mech. Const. Tech. & Drawing", category: "Industrial Subjects" },
+  { name: "Mechanical Construction Drawing", category: "Industrial Subjects" },
   { name: "Mechanical Technology", category: "Industrial Subjects" },
   { name: "Mechanical Technology Practice", category: "Industrial Subjects" },
   { name: "Pattern Drafting", category: "Industrial Subjects" },
