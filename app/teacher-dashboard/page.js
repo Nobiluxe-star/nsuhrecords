@@ -374,10 +374,36 @@ export default function TeacherDashboardPage() {
   };
 
   const quotesList = [
-    { quote: "Education is the most powerful weapon which you can use to change the world.", author: "Nelson Mandela" },
-    { quote: "The art of teaching is the art of assisting discovery.", author: "Mark Van Doren" },
-    { quote: "It is the supreme art of the teacher to awaken joy in creative expression and knowledge.", author: "Albert Einstein" },
-    { quote: "Teaching kids to count is fine, but teaching them what counts is best.", author: "Bob Talbert" }
+  { quote: "Education is the most powerful weapon which you can use to change the world.", author: "Nelson Mandela" },
+  { quote: "The art of teaching is the art of assisting discovery.", author: "Mark Van Doren" },
+  { quote: "Education is the master key that unlocks doors no force on earth can close.", author: "Norbert Che Nsuh" },
+  { quote: "When you enlighten one mind in the classroom, you illuminate an entire generation.", author: "Norbert Che Nsuh" },
+  { quote: "True prosperity begins when we share knowledge freely and lift every learner beside us.", author: "Norbert Che Nsuh" },
+  { quote: "A great teacher does not merely deliver lessons; they awaken a lifelong hunger for discovery.", author: "Mark Van Doren" },
+  { quote: "The highest art of teaching is sparking joy in both creative expression and deep understanding.", author: "Albert Einstein" },
+  { quote: "Teaching students how to count is essential, but teaching them what truly counts shapes humanity.", author: "Bob Talbert" },
+  { quote: "Every child deserves a champion who refuses to give up on them and insists they reach their peak.", author: "Rita Pierson" },
+  { quote: "Knowledge is the only treasure that multiplies every time you give it away.", author: "African Proverb" },
+  { quote: "We rise highest as a community when we measure our wealth by how many others we help succeed.", author: "Booker T. Washington" },
+  { quote: "To teach is to touch a life forever and plant seeds of greatness you may never live to see bloom.", author: "Nelson Mandela" },
+  { quote: "An investment in education always pays the richest dividends to both the individual and society.", author: "Benjamin Franklin" },
+  { quote: "Leadership in the classroom means turning self-doubt into curiosity and potential into excellence.", author: "Marva Collins" },
+  { quote: "When we educate a youth with purpose and character, we build a nation that cannot be shaken.", author: "Kofi Annan" },
+  { quote: "No one becomes truly prosperous alone; every enduring triumph is built on shared wisdom and mutual support.", author: "Chinua Achebe" },
+  { quote: "The mind is not a vessel to be filled, but a fire to be kindled with courage and discipline.", author: "Plutarch" },
+  { quote: "Excellence is never an accident; it is the result of high intention, sincere effort, and wise guidance.", author: "Aristotle" },
+  { quote: "A teacher affects eternity; you can never tell where their positive influence stops.", author: "Henry Adams" },
+  { quote: "Give a learner the tools to think critically, and they will build prosperity wherever they stand.", author: "John Dewey" },
+  { quote: "Helping another person prosper is the noblest architecture of a meaningful life.", author: "Maya Angelou" },
+  { quote: "Education transforms mirrors into windows, allowing students to see possibilities beyond their horizon.", author: "Sydney J. Harris" },
+  { quote: "Unity and shared knowledge turn ordinary classrooms into engines of community transformation.", author: "Julius Nyerere" },
+  { quote: "Patience, passion, and clarity in teaching can turn the most reluctant learner into a future leader.", author: "Jaime Escalante" },
+  { quote: "The future belongs to those who prepare for it today through relentless learning and generosity of spirit.", author: "Malcolm X" },
+  { quote: "Wisdom grows in the soil of humility, hard work, and a willingness to uplift those coming behind us.", author: "Wangari Maathai" },
+  { quote: "Great educators build bridges between where students are today and who the world needs them to be tomorrow.", author: "George Washington Carver" },
+  { quote: "If we want a peaceful and thriving world, we must first cultivate excellence and empathy in our schools.", author: "Malala Yousafzai" },
+  { quote: "It is the supreme art of the teacher to awaken joy in creative expression and knowledge.", author: "Albert Einstein" },
+  { quote: "Teaching kids to count is fine, but teaching them what counts is best.", author: "Bob Talbert" }
   ];
 
   const insertSymbolIntoContent = (symbol) => {
@@ -2016,22 +2042,55 @@ const visibleStudents = useMemo(() => {
         {/* GRADES & MARKS TAB */}
         {activeTab === 'grades' && (
           <div className="bg-[#111827] rounded-xl border border-gray-800 p-4 sm:p-6 w-full max-w-full overflow-hidden shadow-lg space-y-6">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-gray-800">
-              <div>
-                <h2 className="text-lg sm:text-xl font-bold text-white tracking-wide">
-                  Fill Student Marks
-                </h2>
-                <p className="text-xs sm:text-sm text-gray-400 mt-1">
-                  Marks entered are automatically sent to Student Report cards and School Administrators for checking. Make sure marks are properly filled.
-                </p>
-              </div>
+            <div className="mb-6">
+  {/* Top Row: French Editorial Header + Gold-Trimmed Context Pill */}
+  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-gray-800/80">
+    <div className="min-w-0 flex-1">
+      <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px] font-semibold uppercase tracking-widest mb-2">
+        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+        Academic Assessment Portal
+      </div>
+      <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">
+        Fill Student Marks
+      </h2>
+    </div>
 
-              <div className="w-full sm:w-auto flex flex-wrap items-center gap-2 bg-[#1f2937] px-3 py-2 rounded-lg border border-gray-700 text-xs text-amber-100 font-medium shrink-0">
-  <span className="truncate max-w-[140px] sm:max-w-none">{selectedSubjectForAction || 'No Subject Assigned'}</span>
-  <span>•</span>
-  <span className="truncate max-w-[140px] sm:max-w-none">{selectedClassForAction || 'No Class Assigned'}</span>
+    {/* Gold-Accented Subject & Class Badge */}
+    <div className="inline-flex flex-wrap items-center gap-2.5 bg-gradient-to-r from-[#1a2234] to-[#1f2937] px-4 py-2.5 rounded-xl border border-amber-500/30 shadow-[0_0_20px_rgba(245,158,11,0.08)] self-start lg:self-center shrink-0">
+      <span className="text-xs sm:text-sm font-bold text-amber-300 tracking-wide">
+        {selectedSubjectForAction || 'No Subject Assigned'}
+      </span>
+      <span className="text-amber-500/40 font-light">|</span>
+      <span className="text-xs sm:text-sm font-medium text-gray-200">
+        {selectedClassForAction || 'No Class Assigned'}
+      </span>
+    </div>
+  </div>
+
+  {/* Bottom Tier: Full-Width Emerald Instruction Callout */}
+  <div className="mt-4 rounded-xl bg-gradient-to-r from-emerald-950/50 via-emerald-900/20 to-transparent border border-emerald-500/25 border-l-4 border-l-emerald-400 p-4 shadow-inner">
+    <div className="flex items-start gap-3">
+      <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 text-xs font-bold">
+        ✦
+      </div>
+      <div className="space-y-1.5 text-xs sm:text-sm text-gray-300 leading-relaxed">
+        <p className="font-semibold text-emerald-300 tracking-wide uppercase text-[11px]">
+          Submission & Department Guidelines
+        </p>
+        <ul className="space-y-1 text-gray-300/95">
+          <li>
+            <strong className="text-white font-semibold">Technical & Commercial Specialties:</strong>{' '}
+            If you teach a specialty subject, select the specific <span className="text-emerald-300 font-medium">Trade / Specialty</span> first to load your students.
+          </li>
+          <li>
+            <strong className="text-white font-semibold">Instant Report Card Sync:</strong>{' '}
+            Verify all scores carefully before submitting—once submitted, marks go straight to <span className="text-emerald-300 font-medium">School Administrators</span> and update <span className="text-emerald-300 font-medium">Student Report Cards</span> immediately.
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
 </div>
-            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
               <div>
