@@ -1320,49 +1320,31 @@ if (!editFormData?.residence || !editFormData.residence.trim()) {
           .eq('id', studentId)
           .eq('school_id', targetSchoolId)
           .select();
-const targetClass = editFormData?.classLevel || editFormData?.class_level || '';
-    const targetSec = editFormData?.section || '';
-    const targetTrade = GENERAL_LOWER_CLASSES.includes(targetClass) ? 'N/A' : (editFormData?.trades_series || 'N/A');
-
-    // 1. Strict Sixth Class Trade Validation Guard
-    const isSixthClass = targetClass.includes('Sixth') || targetClass.includes('L6') || targetClass.includes('U6');
-    if (isSixthClass && (!targetTrade || targetTrade === 'N/A' || targetTrade === '-- Select Trade / Series --')) {
-      alert(`Update Rejected: Student "${editFormData?.fullName}" is in class "${targetClass}" which is a sixth class. You MUST select a valid Trade or Series!`);
-      return;
-    }
-
-    // 2. Dynamic Unique Code Regeneration if Section or Class changes
-    let finalUniqueCode = editFormData?.unique_code || '';
-    const originalSec = editFormData?.original_section || '';
-    if (!finalUniqueCode || originalSec !== targetSec || !finalUniqueCode.includes(targetClass.substring(0, 3).toUpperCase())) {
-      finalUniqueCode = generateStudentId(
-        activeSchool?.school_name || activeSchool?.name || "School",
-        targetSec,
-        editFormData?.fullName || 'Student',
-        targetClass,
-        editFormData?.age || 15,
-        editFormData?.gender || 'Male'
-      );
-    }
-        if (!error && data && data.length > 0) {
-          // Clear queue item if cloud update succeeded
-          await db.pendingSyncQueue
-            .where('payload.id')
-            .equals(studentId)
-            .delete();
-        } else if (error) {
-          console.error("Supabase Save Error:", error);
-          alert(`Supabase Error: ${error.message}`);
-        }
-      } catch (err) {
-        console.warn("Remote edit delayed. Action queued in local storage.", err);
+if (!error && data && data.length > 0) {
+        // Clear queue item if cloud update succeeded
+        await db.pendingSyncQueue
+          .where('payload.id')
+          .equals(studentId)
+          .delete();
+      } else if (error) {
+        console.error("Supabase Save Error:", error);
+        alert(`Supabase Error: ${error.message}`);
       }
+    } catch (err) {
+      console.warn("Remote edit delayed. Action queued in local storage.", err);
     }
+  }
 
-    // 3. UPDATE LOCAL UI STATE IMMEDIATELY
-    setStudentsList((prev) =>
-      prev.map((s) => (s.id === studentId ? payloadToSave : s))
-    );
+  // 3. UPDATE LOCAL UI STATE IMMEDIATELY (Strictly match ONLY the edited student)
+  const targetUniqueCode = editFormData?.unique_code || editFormData?.matricule;
+  setStudentsList((prev) =>
+    prev.map((s) => {
+      const isMatch =
+        (studentId && s.id && s.id === studentId) ||
+        (!studentId && targetUniqueCode && (s.unique_code === targetUniqueCode || s.matricule === targetUniqueCode));
+      return isMatch ? { ...s, ...payloadToSave } : s;
+    })
+  );
 
     setEditingStudent(null);
   };
@@ -5219,10 +5201,12 @@ const handleUpdatePersonnel = async (e) => {
               INDUSTRIAL_TRADE_SERIES.map((t, i) => (
                 <option key={i} value={t}>{t}</option>
               ))
-            ) : editFormData.classLevel?.toLowerCase().includes('sixth') || editFormData.class_level?.toLowerCase().includes('sixth') ? (
-              [...(GENERAL_SERIES_CATALOG.ARTS || []), ...(GENERAL_SERIES_CATALOG.SCIENCE || [])].map((s, i) => (
-                <option key={i} value={s.code}>{s.code} - {s.subjects?.join(', ')}</option>
-              ))
+           ) : editFormData.classLevel?.toLowerCase().includes('sixth') || editFormData.class_level?.toLowerCase().includes('sixth') ? (
+  [...(GENERAL_SERIES_CATALOG.ARTS || []), ...(GENERAL_SERIES_CATALOG.SCIENCE || [])].map((s, i) => {
+    const label = typeof s === 'string' ? s : `${s.code} - ${s.subjects?.join(', ')}`;
+    const val = typeof s === 'string' ? s : s.code;
+    return <option key={i} value={val}>{label}</option>;
+  })
             ) : (
               <option value="N/A">N/A - General Education</option>
             )}
