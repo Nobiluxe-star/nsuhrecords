@@ -263,6 +263,7 @@ export const ALL_SUBJECTS_LIST = [
   { name: "English Language", category: "General Core Subjects" },
   { name: "Literature", category: "General Core Subjects" },
   { name: "Food Science", category: "General Core Subjects" },
+  { name: "Food & Nutrition", category: "General Core Subjects" },
   { name: "French Language", category: "General Core Subjects" },
   { name: "Further Mathematics", category: "General Core Subjects" },
   { name: "Geography", category: "General Core Subjects" },
@@ -5202,11 +5203,20 @@ const handleUpdatePersonnel = async (e) => {
                 <option key={i} value={t}>{t}</option>
               ))
            ) : editFormData.classLevel?.toLowerCase().includes('sixth') || editFormData.class_level?.toLowerCase().includes('sixth') ? (
-  [...(GENERAL_SERIES_CATALOG.ARTS || []), ...(GENERAL_SERIES_CATALOG.SCIENCE || [])].map((s, i) => {
-    const label = typeof s === 'string' ? s : `${s.code} - ${s.subjects?.join(', ')}`;
-    const val = typeof s === 'string' ? s : s.code;
-    return <option key={i} value={val}>{label}</option>;
-  })
+  (() => {
+    const cls = (editFormData.classLevel || editFormData.class_level || '').toLowerCase();
+    const list = cls.includes('arts')
+      ? (GENERAL_SERIES_CATALOG.ARTS || [])
+      : cls.includes('science')
+      ? (GENERAL_SERIES_CATALOG.SCIENCE || [])
+      : [...(GENERAL_SERIES_CATALOG.ARTS || []), ...(GENERAL_SERIES_CATALOG.SCIENCE || [])];
+
+    return list.map((s, i) => {
+      const label = typeof s === 'string' ? s : `${s.code} - ${s.subjects?.join(', ')}`;
+      const val = typeof s === 'string' ? s : s.code;
+      return <option key={i} value={val}>{label}</option>;
+    });
+  })()
             ) : (
               <option value="N/A">N/A - General Education</option>
             )}
