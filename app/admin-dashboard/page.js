@@ -261,7 +261,7 @@ export const ALL_SUBJECTS_LIST = [
   { name: "Economics", category: "General Core Subjects" },
   { name: "Economic Geography", category: "General Core Subjects" },
   { name: "English Language", category: "General Core Subjects" },
-  { name: "Literature", category: "General Core Subjects" },
+  { name: "Literature in English", category: "General Core Subjects" },
   { name: "Food Science", category: "General Core Subjects" },
   { name: "Food & Nutrition", category: "General Core Subjects" },
   { name: "French Language", category: "General Core Subjects" },
