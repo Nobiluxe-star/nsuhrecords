@@ -333,71 +333,73 @@ const handleDeleteTeacher = async (teacherIdToDelete) => {
 
     // --- 2. DUPLICATE & CLASS SUBJECT ASSIGNMENT CHECKS ---
     const currentSchoolId = activeSchool?.school_id || activeSchool?.id || (typeof window !== 'undefined' ? localStorage.getItem('active_school_id') : null);
-    if (currentSchoolId) {
-      const currentSchoolTeachers = (teachersList || []).filter(t => String(t.school_id || t.schoolId) === String(currentSchoolId));
-      const editingId = teacherToEdit?.teacher_id || teacherToEdit?.id;
-
-     
-
-            if (conflictTeacher) {
-              const confirmClassConflict = window.confirm(
-                `Notice: '${subjectKey}' for '${targetClass}' is already assigned to ${conflictTeacher.name}. Do you want to assign it to ${teacherName} as well?`
-              );
-              if (!confirmClassConflict) {
-                setIsSubmittingTeacher(false);
-                return;
-              }// Duplicate Teacher Name / Phone / Email Check (only match non-empty phone/email)
-      const existingTeacher = currentSchoolTeachers.find(t => {
-        const isSelf = editingId && (t.teacher_id === editingId || t.id === editingId);
-        if (isSelf) return false;
-        const cleanName = teacherName.trim().toLowerCase();
-        const cleanPhone = teacherPhone.trim();
-        const cleanEmail = teacherEmail.trim().toLowerCase();
-
-        const sameName = Boolean(cleanName) && t.name?.trim().toLowerCase() === cleanName;
-        const samePhone = Boolean(cleanPhone) && (t.contact || t.phone)?.trim() === cleanPhone;
-        const sameEmail = Boolean(cleanEmail) && t.email?.trim().toLowerCase() === cleanEmail;
-        return sameName || samePhone || sameEmail;
-      });
-
-      if (existingTeacher) {
-        const confirmDuplicate = window.confirm(
-          `A teacher matching '${teacherName}' is already assigned in this school. Do you want to duplicate this teacher entry?`
+   if (currentSchoolId) {
+        const currentSchoolTeachers = (teachersList || []).filter(
+          (t) => String(t.school_id || t.schoolId) === String(currentSchoolId)
         );
-        if (!confirmDuplicate) {
-          setIsSubmittingTeacher(false);
-          return;
+        const editingId = teacherToEdit?.teacher_id || teacherToEdit?.id;
+
+        // Duplicate Teacher Name / Phone / Email Check (only match non-empty phone/email)
+        const existingTeacher = currentSchoolTeachers.find((t) => {
+          const isSelf = editingId && (t.teacher_id === editingId || t.id === editingId);
+          if (isSelf) return false;
+          const cleanName = teacherName.trim().toLowerCase();
+          const cleanPhone = teacherPhone.trim();
+          const cleanEmail = teacherEmail.trim().toLowerCase();
+
+          const sameName = Boolean(cleanName) && t.name?.trim().toLowerCase() === cleanName;
+          const samePhone = Boolean(cleanPhone) && (t.contact || t.phone)?.trim() === cleanPhone;
+          const sameEmail = Boolean(cleanEmail) && t.email?.trim().toLowerCase() === cleanEmail;
+          return sameName || samePhone || sameEmail;
+        });
+
+        if (existingTeacher) {
+          const confirmDuplicate = window.confirm(
+            `A teacher matching '${teacherName}' is already assigned in this school. Do you want to duplicate this teacher?`
+          );
+          if (!confirmDuplicate) {
+            setIsSubmittingTeacher(false);
+            return;
+          }
         }
-      }
 
-      // Subject for Class & Trade/Series Already Assigned Warning
-      for (const [subjectKey, slots] of Object.entries(subjectClassSchedules || {})) {
-        if (Array.isArray(slots)) {
-          for (const slot of slots) {
-            const targetClass = slot.className || slot.classLevel;
-            const targetTrade = (slot.tradeSeries || '').trim();
-            if (!targetClass) continue;
+        // Subject for Class & Trade/Series Already Assigned Warning
+        for (const [subjectKey, slots] of Object.entries(subjectClassSchedules || {})) {
+          if (Array.isArray(slots)) {
+            for (const slot of slots) {
+              const targetClass = slot.className || slot.classLevel;
+              const targetTrade = (slot.tradeSeries || '').trim();
+              if (!targetClass) continue;
 
-            const conflictTeacher = currentSchoolTeachers.find(t => {
-              const isSelf = editingId && (t.teacher_id === editingId || t.id === editingId);
-              if (isSelf) return false;
+              const conflictTeacher = currentSchoolTeachers.find((t) => {
+                const isSelf = editingId && (t.teacher_id === editingId || t.id === editingId);
+                if (isSelf) return false;
 
-              const tSchedules = t.schedules || {};
-              const tSlots = tSchedules[subjectKey];
-              if (Array.isArray(tSlots)) {
-                return tSlots.some(s => {
-                  const sameCls = (s.className || s.classLevel) === targetClass;
-                  const existingTrade = (s.tradeSeries || '').trim();
-                  return sameCls && existingTrade === targetTrade;
-                });
+                const tSchedules = t.schedules || {};
+                const tSlots = tSchedules[subjectKey];
+                if (Array.isArray(tSlots)) {
+                  return tSlots.some((s) => {
+                    const sameCls = (s.className || s.classLevel) === targetClass;
+                    const existingTrade = (s.tradeSeries || '').trim();
+                    return sameCls && existingTrade === targetTrade;
+                  });
+                }
+                return false;
+              });
+
+              if (conflictTeacher) {
+                const confirmClassConflict = window.confirm(
+                  `Notice: '${subjectKey}' for '${targetClass}' is already assigned to ${conflictTeacher.name}. Do you want to continue?`
+                );
+                if (!confirmClassConflict) {
+                  setIsSubmittingTeacher(false);
+                  return;
+                }
               }
-              return false;
-            });
             }
           }
         }
       }
-    }
 
     const currentSchoolTitle = activeSchool?.name || schoolName || 'Virgin Island';
     const teacherId = teacherToEdit?.teacher_id || teacherToEdit?.id || generateTeacherId(
@@ -1016,6 +1018,9 @@ return (
               {selectedTeacherSubjects.length > 0 && (
                 <div className="space-y-4 pt-2 border-t border-gray-800">
                   <h3 className="text-sm font-bold text-amber-200">Configure Class Forms & Schedule (Day, Start Time, End Time) per Subject</h3>
+      <div className="rounded-lg border border-amber-500/30 bg-[#1f2937]/90 px-3.5 py-2.5 text-xs text-gray-200 leading-relaxed">
+        <strong className="text-amber-300">Notice:</strong> If a subject is only for a specific trade or series, select it here so the teacher first sees only students from that trade. Leave it on <strong>All Trades / Series (Default)</strong> if the whole class takes the subject. This is the case for General education teachers who teach both departments.
+      </div>
                   {selectedTeacherSubjects.map((subject, subIdx) => {
                     const rows = subjectSchedules[subject] || [];
                     return (
