@@ -9,8 +9,11 @@ const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.
 
 import { 
   GENERAL_CLASSES_CATALOG, 
+  GENERAL_SERIES_CATALOG,
+  COMMERCIAL_TRADE_SERIES,
   TECHNICAL_COMMERCIAL_CATALOG, 
-  TECHNICAL_INDUSTRIAL_CATALOG 
+  TECHNICAL_INDUSTRIAL_CATALOG,
+  INDUSTRIAL_TRADE_SERIES
 } from '../page';
 
 export default function TeacherAssignment({
@@ -334,13 +337,26 @@ const handleDeleteTeacher = async (teacherIdToDelete) => {
       const currentSchoolTeachers = (teachersList || []).filter(t => String(t.school_id || t.schoolId) === String(currentSchoolId));
       const editingId = teacherToEdit?.teacher_id || teacherToEdit?.id;
 
-      // Duplicate Teacher Name / Phone / Email Check
+     
+
+            if (conflictTeacher) {
+              const confirmClassConflict = window.confirm(
+                `Notice: '${subjectKey}' for '${targetClass}' is already assigned to ${conflictTeacher.name}. Do you want to assign it to ${teacherName} as well?`
+              );
+              if (!confirmClassConflict) {
+                setIsSubmittingTeacher(false);
+                return;
+              }// Duplicate Teacher Name / Phone / Email Check (only match non-empty phone/email)
       const existingTeacher = currentSchoolTeachers.find(t => {
         const isSelf = editingId && (t.teacher_id === editingId || t.id === editingId);
         if (isSelf) return false;
-        const sameName = t.name?.trim().toLowerCase() === teacherName.trim().toLowerCase();
-        const samePhone = (t.contact || t.phone) === teacherPhone.trim();
-        const sameEmail = t.email?.trim().toLowerCase() === teacherEmail.trim().toLowerCase();
+        const cleanName = teacherName.trim().toLowerCase();
+        const cleanPhone = teacherPhone.trim();
+        const cleanEmail = teacherEmail.trim().toLowerCase();
+
+        const sameName = Boolean(cleanName) && t.name?.trim().toLowerCase() === cleanName;
+        const samePhone = Boolean(cleanPhone) && (t.contact || t.phone)?.trim() === cleanPhone;
+        const sameEmail = Boolean(cleanEmail) && t.email?.trim().toLowerCase() === cleanEmail;
         return sameName || samePhone || sameEmail;
       });
 
@@ -354,11 +370,12 @@ const handleDeleteTeacher = async (teacherIdToDelete) => {
         }
       }
 
-      // Subject for Class Already Assigned Warning
+      // Subject for Class & Trade/Series Already Assigned Warning
       for (const [subjectKey, slots] of Object.entries(subjectClassSchedules || {})) {
         if (Array.isArray(slots)) {
           for (const slot of slots) {
             const targetClass = slot.className || slot.classLevel;
+            const targetTrade = (slot.tradeSeries || '').trim();
             if (!targetClass) continue;
 
             const conflictTeacher = currentSchoolTeachers.find(t => {
@@ -368,19 +385,14 @@ const handleDeleteTeacher = async (teacherIdToDelete) => {
               const tSchedules = t.schedules || {};
               const tSlots = tSchedules[subjectKey];
               if (Array.isArray(tSlots)) {
-                return tSlots.some(s => (s.className || s.classLevel) === targetClass);
+                return tSlots.some(s => {
+                  const sameCls = (s.className || s.classLevel) === targetClass;
+                  const existingTrade = (s.tradeSeries || '').trim();
+                  return sameCls && existingTrade === targetTrade;
+                });
               }
               return false;
             });
-
-            if (conflictTeacher) {
-              const confirmClassConflict = window.confirm(
-                `Notice: '${subjectKey}' for '${targetClass}' is already assigned to ${conflictTeacher.name}. Do you want to assign it to ${teacherName} as well?`
-              );
-              if (!confirmClassConflict) {
-                setIsSubmittingTeacher(false);
-                return;
-              }
             }
           }
         }
@@ -539,7 +551,8 @@ if (teacherToEdit) {
     setTeacherQualification('');
     setSelectedTeacherSubjects([]);
     setSubjectSchedules({});
-
+    const draftSchoolId = activeSchool?.school_id || activeSchool?.id || localStorage.getItem('active_school_id') || 'default';
+    localStorage.removeItem(`teacher_assignment_draft_${draftSchoolId}`);
     // 3. Call parent close handler if provided
     if (typeof onClose === 'function') onClose();
   };
@@ -678,16 +691,75 @@ useEffect(() => {
       setSubjectSchedules(normalizedSchedules);
     }
   } else {
-    // Reset back to blank registration defaults
-    if (typeof setTeacherName === 'function') setTeacherName('');
-    if (typeof setTeacherPhone === 'function') setTeacherPhone('');
-    if (typeof setTeacherEmail === 'function') setTeacherEmail('');
-    if (typeof setTeacherResidence === 'function') setTeacherResidence('');
-    if (typeof setTeacherQualification === 'function') setTeacherQualification('');
-    if (typeof setSelectedTeacherSubjects === 'function') setSelectedTeacherSubjects([]);
-    if (typeof setSubjectSchedules === 'function') setSubjectSchedules({});
+    // Restore saved in-progress registration draft for this school if available
+    const draftSchoolId = activeSchool?.school_id || activeSchool?.id || (typeof window !== 'undefined' ? localStorage.getItem('active_school_id') : null) || 'default';
+    const rawDraft = typeof window !== 'undefined' ? localStorage.getItem(`teacher_assignment_draft_${draftSchoolId}`) : null;
+
+    if (rawDraft) {
+      try {
+        const draft = JSON.parse(rawDraft);
+        if (typeof setTeacherName === 'function') setTeacherName(draft.teacherName || '');
+        if (typeof setTeacherPhone === 'function') setTeacherPhone(draft.teacherPhone || '');
+        if (typeof setTeacherEmail === 'function') setTeacherEmail(draft.teacherEmail || '');
+        if (typeof setTeacherResidence === 'function') setTeacherResidence(draft.teacherResidence || '');
+        if (typeof setTeacherQualification === 'function') setTeacherQualification(draft.teacherQualification || '');
+        if (draft.teacherSection) {
+          if (typeof setTeacherSection === 'function') setTeacherSection(draft.teacherSection);
+          if (typeof setSelectedSection === 'function') setSelectedSection(draft.teacherSection);
+        }
+        if (typeof setSelectedTeacherSubjects === 'function') setSelectedTeacherSubjects(draft.selectedTeacherSubjects || []);
+        if (typeof setSubjectSchedules === 'function') setSubjectSchedules(draft.subjectSchedules || {});
+      } catch (e) {
+        console.warn('Could not parse teacher draft:', e);
+      }
+    } else {
+      if (typeof setTeacherName === 'function') setTeacherName('');
+      if (typeof setTeacherPhone === 'function') setTeacherPhone('');
+      if (typeof setTeacherEmail === 'function') setTeacherEmail('');
+      if (typeof setTeacherResidence === 'function') setTeacherResidence('');
+      if (typeof setTeacherQualification === 'function') setTeacherQualification('');
+      if (typeof setSelectedTeacherSubjects === 'function') setSelectedTeacherSubjects([]);
+      if (typeof setSubjectSchedules === 'function') setSubjectSchedules({});
+    }
   }
-}, [teacherToEdit]);
+}, [teacherToEdit, activeSchool]);
+
+// Auto-save in-progress new teacher registration so switching tabs or reloading never loses work
+useEffect(() => {
+  if (teacherToEdit || typeof window === 'undefined') return;
+  const draftSchoolId = activeSchool?.school_id || activeSchool?.id || localStorage.getItem('active_school_id') || 'default';
+  const hasAnyData = Boolean(
+    teacherName || teacherPhone || teacherEmail || teacherResidence || teacherQualification || selectedTeacherSubjects.length > 0
+  );
+
+  if (hasAnyData) {
+    localStorage.setItem(
+      `teacher_assignment_draft_${draftSchoolId}`,
+      JSON.stringify({
+        teacherName,
+        teacherPhone,
+        teacherEmail,
+        teacherResidence,
+        teacherQualification,
+        teacherSection: teacherSection || selectedSection,
+        selectedTeacherSubjects,
+        subjectSchedules
+      })
+    );
+  }
+}, [
+  teacherToEdit,
+  activeSchool,
+  teacherName,
+  teacherPhone,
+  teacherEmail,
+  teacherResidence,
+  teacherQualification,
+  teacherSection,
+  selectedSection,
+  selectedTeacherSubjects,
+  subjectSchedules
+]);
 return (
 <div className={`p-3 sm:p-6 rounded-2xl w-full max-w-full shadow-2xl space-y-6 transition-colors duration-300 ${isEditing ? 'bg-[#FDFBF7] text-gray-900 border border-gray-300' : 'bg-gray-900 text-white'}`}>
     <h2 className={`text-lg font-bold border-b pb-3 ${isEditing ? 'text-emerald-900 border-gray-300' : 'text-white border-gray-800'}`}>
@@ -983,6 +1055,34 @@ return (
     </option>
   );
 })}
+                                </select>
+                              </div>
+                              <div className="flex-1 w-full">
+                                <label className="block text-[10px] uppercase text-gray-400 mb-1">
+                                  Indicate Trade / Series (Optional)
+                                </label>
+                                <select
+                                  value={row.tradeSeries || ''}
+                                  onChange={(e) => handleSchedulerRowChange(subject, rIdx, 'tradeSeries', e.target.value)}
+                                  className="w-full bg-[#1f2937] border border-gray-700 rounded p-2 text-xs text-emerald-300"
+                                >
+                                  <option value="">All Trades / Series (Default)</option>
+                                  {(() => {
+                                    const cls = String(row.className || row.classLevel || '').toLowerCase();
+                                    let options = [];
+                                    if (cls.includes('comm') || cls.includes('stt')) {
+                                      options = COMMERCIAL_TRADE_SERIES || [];
+                                    } else if (cls.includes('ind') || cls.includes('tech')) {
+                                      options = INDUSTRIAL_TRADE_SERIES || [];
+                                    } else if (cls.includes('sixth') || cls.includes('l6') || cls.includes('u6')) {
+                                      options = [...(GENERAL_SERIES_CATALOG?.ARTS || []), ...(GENERAL_SERIES_CATALOG?.SCIENCE || [])];
+                                    }
+                                    return options.map((opt, idx) => {
+                                      const val = typeof opt === 'string' ? opt : opt.code;
+                                      const label = typeof opt === 'string' ? opt : `${opt.code} - ${opt.name}`;
+                                      return <option key={idx} value={val}>{label}</option>;
+                                    });
+                                  })()}
                                 </select>
                               </div>
                               <div className="w-full md:w-36">

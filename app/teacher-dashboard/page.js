@@ -611,6 +611,19 @@ export default function TeacherDashboardPage() {
       }
     }
   }, [teacherProfile?.schedules, teacherProfile?.subjects, selectedSubjectForAction]);
+useEffect(() => {
+    if (!teacherProfile?.schedules || !selectedSubjectForAction || !selectedClassForAction) {
+      setSelectedTrade('ALL');
+      return;
+    }
+
+    const slots = teacherProfile.schedules[selectedSubjectForAction] || [];
+    const matchedSlot = slots.find(
+      (s) => (s.className || s.classLevel)?.trim() === selectedClassForAction.trim()
+    );
+
+    setSelectedTrade(matchedSlot?.tradeSeries || 'ALL');
+  }, [teacherProfile?.schedules, selectedSubjectForAction, selectedClassForAction]);
 
   const fetchClassLogs = async () => {
     if (!selectedClassLog) return;
@@ -1026,7 +1039,7 @@ const visibleStudents = useMemo(() => {
     const currentDayStr = today.toLocaleDateString('en-US', { weekday: 'long' });
     const currentTimeStr = today.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-    const recordsToInsert = classStudents.map((student) => ({
+    const recordsToInsert = visibleStudents.map((student) => ({
       id: crypto.randomUUID ? crypto.randomUUID() : `ATT_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
       school_id: activeSchoolId,
       teacher_id: teacherId,
@@ -1106,7 +1119,7 @@ const visibleStudents = useMemo(() => {
     const resolvedSubjectName = selectedSubjectForAction;
 
     const uniqueStudents = Array.from(
-      new Map((classStudents || []).map((s) => [s.id, s])).values()
+      new Map((visibleStudents || []).map((s) => [s.id, s])).values()
     );
 
     const recordsToInsert = uniqueStudents.map((student) => {
@@ -1988,7 +2001,7 @@ const visibleStudents = useMemo(() => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-800">
-                    {classStudents.map((stu, index) => {
+                    {visibleStudents.map((stu, index) => {
                         const currentStatus = attendanceRecords[stu.id] || 'Present';
                         return (
                           <tr key={stu.id} className="hover:bg-slate-800/50 border-b border-slate-700/60 transition-colors">
