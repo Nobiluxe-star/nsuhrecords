@@ -32,7 +32,39 @@ export default function LandingPage() {
 
   // Dynamic Assigned Schools (Fetched from Master Admin / Supabase assignments)
   const [assignedSchools, setAssignedSchools] = useState([]);
+// Forceful App Download Pop-Up State
+  const [showDownloadPopup, setShowDownloadPopup] = useState(false);
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState(null);
 
+  useEffect(() => {
+    const isStandalone =
+      typeof window !== 'undefined' &&
+      (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true);
+
+    if (!isStandalone) {
+      setShowDownloadPopup(true);
+    }
+
+    const onBeforeInstall = (e) => {
+      e.preventDefault();
+      setDeferredInstallPrompt(e);
+      setShowDownloadPopup(true);
+    };
+
+    window.addEventListener('beforeinstallprompt', onBeforeInstall);
+    return () => window.removeEventListener('beforeinstallprompt', onBeforeInstall);
+  }, []);
+
+  const handleDirectInstall = async () => {
+    if (deferredInstallPrompt) {
+      deferredInstallPrompt.prompt();
+      await deferredInstallPrompt.userChoice;
+      setDeferredInstallPrompt(null);
+      setShowDownloadPopup(false);
+    } else {
+      window.location.href = '/download';
+    }
+  };
   // Fetch assigned schools on load
   React.useEffect(() => {
     const fetchAssignedSchools = async () => {
@@ -351,7 +383,15 @@ export default function LandingPage() {
     setStaffPassword('');
     setActiveModal('staff');
   };
-
+useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedTeacherId = localStorage.getItem('active_teacher_id') || localStorage.getItem('teacher_id');
+      const savedSchoolId = localStorage.getItem('active_school_id');
+      if (savedTeacherId && savedSchoolId) {
+        window.location.replace('/teacher-dashboard');
+      }
+    }
+  }, []);
   return (
     <div className="min-h-screen bg-[#0b132b] text-white flex flex-col justify-between selection:bg-blue-600 selection:text-white">
       {/* Top Header */}
@@ -374,6 +414,12 @@ export default function LandingPage() {
           >
             ABOUT
           </button>
+          <a
+            href="/download"
+            className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black px-3 py-1.5 rounded-lg transition shadow"
+          >
+            DOWNLOAD APP
+          </a>
           <button
             onClick={() => setActiveModal('contact')}
             className="text-slate-300 hover:text-blue-400 transition cursor-pointer"
@@ -784,6 +830,60 @@ export default function LandingPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* FORCEFUL APP DOWNLOAD POP-UP */}
+      {showDownloadPopup && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border-2 border-emerald-500 rounded-3xl p-6 sm:p-7 max-w-md w-full text-center space-y-5 shadow-2xl">
+            <div className="flex items-center justify-center gap-3">
+              <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center font-black text-xl text-white shadow-lg">
+                CLs
+              </div>
+              <img
+                src="/cls-logo.png"
+                alt="ClassLogs Logo"
+                className="w-14 h-14 rounded-2xl bg-white p-1 object-contain shadow"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <span className="text-[11px] font-black uppercase tracking-wider text-emerald-400">
+                Action Required • Official ClassLogs App
+              </span>
+              <h3 className="text-2xl font-black text-white">
+                Download & Install ClassLogs Now
+              </h3>
+              <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                Install the ClassLogs app on your phone or computer now for instant live schedule updates with sound, faster login, and zero manual page refreshes.
+              </p>
+            </div>
+
+            <div className="space-y-2.5">
+              <button
+                type="button"
+                onClick={handleDirectInstall}
+                className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black py-3 rounded-xl text-sm transition shadow-lg"
+              >
+                Install App Now (1-Tap)
+              </button>
+
+              <a
+                href="/download"
+                className="block w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-xs sm:text-sm transition"
+              >
+                Open Download Page / Android APK
+              </a>
+
+              <button
+                type="button"
+                onClick={() => setShowDownloadPopup(false)}
+                className="w-full text-slate-400 hover:text-slate-200 text-xs font-semibold pt-1 transition"
+              >
+                Continue to Web Login
+              </button>
+            </div>
           </div>
         </div>
       )}

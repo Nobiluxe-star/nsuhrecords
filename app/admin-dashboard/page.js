@@ -428,6 +428,91 @@ const [activeTimetableDay, setActiveTimetableDay] = useState(() => {
   const [selectedTeacherForLogs, setSelectedTeacherForLogs] = useState(null);
   const [fetchedLessonLogs, setFetchedLessonLogs] = useState([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+  const [adminSubmissionAlerts, setAdminSubmissionAlerts] = useState([]);
+  const submissionTemplateIndexRef = useRef(0);
+
+  const pickSubmissionMessage = (teacherName, itemType, className, subjectName) => {
+    const templates = [
+      `${teacherName} just submitted ${itemType} for ${className} (${subjectName}).`,
+      `New ${itemType} received: ${teacherName} completed ${subjectName} in ${className}.`,
+      `Submission alert — ${teacherName} logged ${itemType} for ${className} • ${subjectName}.`,
+      `${className} (${subjectName}) now has fresh ${itemType} submitted by ${teacherName}.`,
+      `Update from ${teacherName}: ${itemType} posted for ${className} — ${subjectName}.`,
+      `${teacherName} finished uploading ${itemType} for ${subjectName} (${className}).`,
+      `Heads up! ${teacherName} submitted ${itemType} covering ${className}, ${subjectName}.`,
+      `Registry update: ${teacherName} turned in ${itemType} for ${className} (${subjectName}).`,
+      `Fresh ${itemType} in ${className} (${subjectName}) — submitted by ${teacherName}.`,
+    ];
+    const idx = submissionTemplateIndexRef.current % templates.length;
+    submissionTemplateIndexRef.current += 1;
+    return templates[idx];
+  };
+  const triggerAdminSubmissionAlert = ({ teacherName, itemType, className, subjectName }) => {
+    const cleanTeacher = teacherName || 'A Teacher';
+    const cleanType = itemType || 'marks';
+    const cleanClass = className || 'Assigned Class';
+    const cleanSubject = subjectName || 'Assigned Subject';
+    const message = pickSubmissionMessage(cleanTeacher, cleanType, cleanClass, cleanSubject);
+
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(660, ctx.currentTime);
+      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.14);
+      gain.gain.setValueAtTime(0.18, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.36);
+    } catch (_) {}
+
+    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+      try {
+        new Notification('CLs • Teacher Submission', {
+          body: message,
+          icon: '/cls-logo.png',
+        });
+      } catch (_) {}
+    }
+
+    setAdminSubmissionAlerts((prev) => [
+      { id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, message, time: new Date().toLocaleTimeString() },
+      ...prev.slice(0, 7),
+    ]);
+  };
+  useEffect(() => {
+    const schoolId =
+      activeSchool?.school_id ||
+      activeSchool?.id ||
+      (typeof window !== 'undefined' ? localStorage.getItem('active_school_id') : null);
+    if (!schoolId) return;
+
+    const channel = supabase
+      .channel(`admin_submissions_${schoolId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', filter: `school_id=eq.${schoolId}` },
+        (payload) => {
+          const row = payload?.new || {};
+          const itemType =
+            row.attendance_status || row.status ? 'attendance' : 'marks';
+          triggerAdminSubmissionAlert({
+            teacherName: row.teacher_name || row.submitted_by || 'A Teacher',
+            itemType,
+            className: row.class_name || row.class_level || 'Assigned Class',
+            subjectName: row.subject_name || row.subject || 'Assigned Subject',
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeSchool?.school_id, activeSchool?.id]);
   const [teacherSearchQuery, setTeacherSearchQuery] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPdfModal, setShowPdfModal] = useState(false);
@@ -2767,7 +2852,21 @@ const handleUpdatePersonnel = async (e) => {
             </div>
         </div>
       </header>
-
+{adminSubmissionAlerts.length > 0 && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-8 pt-3 space-y-2">
+          {adminSubmissionAlerts.map((alert) => (
+            <div
+              key={alert.id}
+              className="flex items-center justify-between bg-[#1b4332] text-[#FDFBF7] px-4 py-2.5 rounded-xl border border-[#2d6a4f] shadow text-xs sm:text-sm"
+            >
+              <span>
+                <strong className="font-bold">CLs Live Alert:</strong> {alert.message}
+              </span>
+              <span className="text-[11px] opacity-80 ml-3 shrink-0">{alert.time}</span>
+            </div>
+          ))}
+        </div>
+      )}
     {/* Responsive Horizontal Tab Navigation */}
     <nav className="w-full bg-[#080d1a] border-b border-slate-800/80 px-3 sm:px-6 overflow-x-auto whitespace-nowrap">
       <div className="flex items-center space-x-1.5 sm:space-x-2 py-2 min-w-max">
@@ -4502,15 +4601,19 @@ const handleUpdatePersonnel = async (e) => {
         return;
       }
 
-      setTeachersList((prev) => {
-        const updated = prev.filter((t) => (t.teacher_id || t.id) !== targetId);
-        localStorage.setItem('teachers_list_cache', JSON.stringify(updated));
-        return updated;
-      });
-
-      setDeleteBanner({ type: 'success', message: `${teacher.name} has been permanently deleted.` });
       setConfirmDeleteId(null);
-      setTimeout(() => setDeleteBanner(null), 4000);
+              setTimeout(() => {
+                setTeachersList((prev) => {
+                  const updated = prev.filter((t) => (t.teacher_id || t.id) !== targetId);
+                  if (currentSchoolId) {
+                    localStorage.setItem(`teachers_list_cache_${currentSchoolId}`, JSON.stringify(updated));
+                  }
+                  localStorage.setItem('teachers_list_cache', JSON.stringify(updated));
+                  return updated;
+                });
+                setDeleteBanner({ type: 'success', message: `${teacher.name} has been permanently deleted.` });
+                setTimeout(() => setDeleteBanner(null), 4000);
+              }, 50);
     }}                                                                                                                                                                                                                                                                                                                 
         className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs py-1 px-2.5 rounded transition-all"
       >

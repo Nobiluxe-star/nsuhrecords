@@ -7,7 +7,12 @@ import { toast } from 'react-hot-toast';
 import { getTeacherLockStatus } from '../../lib/markLockService';
 import { db } from '../../lib/db';
 import { syncOfflineQueueToSupabase, downloadFullSchoolData } from '../../lib/offlineSync';
-
+import {
+  playTimetableUpdateSound,
+  buildScheduleChangeMessage,
+  requestAlertPermission,
+  showSystemAlertNotification,
+} from '../../lib/notifyTeacherUpdate';
 
 import { 
   GENERAL_LOWER_CLASSES,
@@ -102,6 +107,7 @@ const RenderFormattedLogContent = ({ content, mediaUrls }) => {
 
 export default function TeacherDashboardPage() {
   // All state hooks declared upfront at the root of component
+  const latestSchedulesRef = useRef(null);
   const [teacherProfile, setTeacherProfile] = useState({
     school_id: '',
     id: '',
@@ -169,7 +175,70 @@ export default function TeacherDashboardPage() {
   const [lastSavedTime, setLastSavedTime] = useState('');
   const [isDrawing, setIsDrawing] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
+const [isRefreshing, setIsRefreshing] = useState(false);
 
+  const handleManualRefresh = async () => {
+    const activeSchoolId = typeof window !== 'undefined' ? localStorage.getItem('active_school_id') : null;
+    const teacherId = typeof window !== 'undefined' ? (localStorage.getItem('active_teacher_id') || localStorage.getItem('teacher_id')) : null;
+    if (!activeSchoolId || !teacherId) return;
+
+    setIsRefreshing(true);
+    try {
+      const [{ data: freshTeacher }, { data: freshSchool }] = await Promise.all([
+        supabase
+          .from('teachers')
+          .select('*')
+          .eq('teacher_id', teacherId)
+          .eq('school_id', activeSchoolId)
+          .maybeSingle(),
+        supabase
+          .from('school_details')
+          .select('*')
+          .eq('school_id', activeSchoolId)
+          .maybeSingle(),
+      ]);
+
+      if (freshTeacher) {
+        const normalizedTeacher = {
+          ...freshTeacher,
+          subjects: freshTeacher.subjects || Object.keys(freshTeacher.schedules || {}),
+          schedules: freshTeacher.schedules || {},
+        };
+        setTeacherProfile(normalizedTeacher);
+        setIsMarkEntryAuthorized(!freshTeacher.is_marks_locked);
+        localStorage.setItem(`teacher_profile_cache_${activeSchoolId}_${teacherId}`, JSON.stringify(normalizedTeacher));
+      }
+
+      if (freshSchool) {
+        setSchoolDetails(freshSchool);
+        const resolvedName = freshSchool.name || freshSchool.school_name || 'Assigned School';
+        setSchoolName(resolvedName);
+        localStorage.setItem(`active_school_name_${activeSchoolId}`, resolvedName);
+      }
+
+      await downloadFullSchoolData(activeSchoolId);
+      await syncOfflineQueueToSupabase();
+      toast.success('Dashboard synced with latest school updates!');
+    } catch (err) {
+      toast.error('Unable to refresh right now. Check connection.');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const handleTeacherLogout = () => {
+    if (typeof window !== 'undefined') {
+      const activeSchoolId = localStorage.getItem('active_school_id');
+      const teacherId = localStorage.getItem('active_teacher_id') || localStorage.getItem('teacher_id');
+      if (activeSchoolId && teacherId) {
+        localStorage.removeItem(`teacher_profile_cache_${activeSchoolId}_${teacherId}`);
+      }
+      localStorage.removeItem('active_teacher_id');
+      localStorage.removeItem('teacher_id');
+      localStorage.removeItem('teacher_session');
+      window.location.href = '/';
+    }
+  };
   const [submissionStatus, setSubmissionStatus] = useState({
     attendanceSubmitted: false,
     marksSubmitted: false,
@@ -799,14 +868,98 @@ useEffect(() => {
       supabase.removeChannel(channel);
     };
   }, []);
+// Recurring phone/device pop-up reminder: no marks submitted yet OR some students still have missing marks
+  useEffect(() => {
+    const reminderInterval = setInterval(async () => {
+      const activeSchoolId = typeof window !== 'undefined' ? localStorage.getItem('active_school_id') : null;
+      const teacherId =
+        typeof window !== 'undefined'
+          ? localStorage.getItem('active_teacher_id') || localStorage.getItem('teacher_id')
+          : null;
+      if (!activeSchoolId || !teacherId) return;
 
+      try {
+        const [{ data: students }, { data: marks }] = await Promise.all([
+          supabase.from('students').select('id, student_id, full_name, name').eq('school_id', activeSchoolId),
+          supabase.from('marks').select('*').eq('school_id', activeSchoolId).eq('teacher_id', teacherId),
+        ]);
+
+        if (!Array.isArray(students) || students.length === 0) return;
+
+        const validMarks = Array.isArray(marks)
+          ? marks.filter((m) => m.score !== null && m.score !== undefined && String(m.score).trim() !== '')
+          : [];
+
+        let body = '';
+        if (validMarks.length === 0) {
+          body = `No marks submitted yet (${students.length} student(s) in school). Please submit marks.`;
+        } else {
+          const submittedIds = new Set(
+            validMarks.map((m) => String(m.student_id ?? m.student_uuid ?? ''))
+          );
+          const missingStudents = students.filter((s) => {
+            const sid = String(s.student_id ?? s.id ?? '');
+            return sid && !submittedIds.has(sid);
+          });
+
+          if (missingStudents.length > 0) {
+            const sampleNames = missingStudents
+              .slice(0, 3)
+              .map((s) => s.full_name || s.name || 'Student')
+              .join(', ');
+            body = `${missingStudents.length} student(s) still have no marks (${sampleNames}). Please complete them.`;
+          }
+        }
+
+        if (body) {
+          try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(740, ctx.currentTime);
+            osc.frequency.setValueAtTime(554, ctx.currentTime + 0.14);
+            gain.gain.setValueAtTime(0.16, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.34);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start();
+            osc.stop(ctx.currentTime + 0.35);
+          } catch (_) {}
+
+          if (typeof window !== 'undefined' && 'Notification' in window) {
+            if (Notification.permission === 'default') {
+              await Notification.requestPermission();
+            }
+            if (Notification.permission === 'granted') {
+              new Notification('ClassLogs • Marks Reminder', {
+                body,
+                icon: '/cls-logo.png',
+                tag: `marks-reminder-${activeSchoolId}-${teacherId}`,
+              });
+            }
+          }
+        }
+      } catch (_) {}
+    }, 60000);
+
+    return () => clearInterval(reminderInterval);
+  }, []);
+  
  useEffect(() => {
     const fetchTeacherAndSchool = async () => {
       const activeSchoolId = typeof window !== 'undefined' ? localStorage.getItem('active_school_id') : null;
       const teacherId = typeof window !== 'undefined' ? (localStorage.getItem('active_teacher_id') || localStorage.getItem('teacher_id')) : null;
 
       if (!activeSchoolId || !teacherId) return;
-
+   try {
+        const cached = localStorage.getItem(`teacher_profile_cache_${activeSchoolId}_${teacherId}`);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          setTeacherProfile(parsed);
+          setIsMarkEntryAuthorized(!parsed.is_marks_locked);
+        }
+      } catch (_) {}
       // 1. Fetch teacher record STRICTLY locked to the active school
       const { data: teacherData, error: teacherErr } = await supabase
         .from('teachers')
@@ -844,6 +997,98 @@ useEffect(() => {
     fetchTeacherAndSchool();
   }, []);
 
+  // 2-Second Live Data Sync (refreshes teacher profile/schedule/lock status without wiping typed inputs)
+  useEffect(() => {
+    const syncInterval = setInterval(async () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      const activeSchoolId = typeof window !== 'undefined' ? localStorage.getItem('active_school_id') : null;
+      const teacherId =
+        typeof window !== 'undefined'
+          ? localStorage.getItem('active_teacher_id') || localStorage.getItem('teacher_id')
+          : null;
+      if (!activeSchoolId || !teacherId) return;
+
+      try {
+        const { data: freshTeacher, error } = await supabase
+          .from('teachers')
+          .select('*')
+          .eq('teacher_id', teacherId)
+          .eq('school_id', activeSchoolId)
+          .maybeSingle();
+
+        if (!error && freshTeacher) {
+          setTeacherProfile((prev) => {
+            const prevStr = JSON.stringify(prev || {});
+            const nextStr = JSON.stringify(freshTeacher);
+            return prevStr === nextStr ? prev : freshTeacher;
+          });
+          setIsMarkEntryAuthorized(!freshTeacher.is_marks_locked);
+        }
+      } catch (_) {}
+    }, 2000);
+
+    return () => clearInterval(syncInterval);
+  }, []);
+
+useEffect(() => {
+    if (teacherProfile?.schedules) {
+      latestSchedulesRef.current = teacherProfile.schedules;
+    }
+  }, [teacherProfile?.schedules]);
+
+  useEffect(() => {
+    const activeSchoolId = typeof window !== 'undefined' ? localStorage.getItem('active_school_id') : null;
+    const teacherId = typeof window !== 'undefined' ? (localStorage.getItem('active_teacher_id') || localStorage.getItem('teacher_id')) : null;
+
+    if (!activeSchoolId || !teacherId) return;
+
+    const channel = supabase
+      .channel(`realtime_teacher_schedule_${teacherId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'teachers',
+          filter: `teacher_id=eq.${teacherId}`
+        },
+        (payload) => {
+          const updated = payload.new;
+          if (!updated) return;
+
+          const oldSchedStr = JSON.stringify(latestSchedulesRef.current || {});
+          const newSchedStr = JSON.stringify(updated.schedules || {});
+
+          if (oldSchedStr !== newSchedStr) {
+            const changeMsg = buildScheduleChangeMessage(
+              latestSchedulesRef.current,
+              updated.schedules || {}
+            );
+
+            latestSchedulesRef.current = updated.schedules || {};
+            setTeacherProfile((prev) => ({
+              ...prev,
+              ...updated,
+              subjects: updated.subjects || Object.keys(updated.schedules || {}),
+              schedules: updated.schedules || {}
+            }));
+
+            setLiveScheduleAlert({
+              message: changeMsg,
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            });
+
+            playTimetableUpdateSound();
+showSystemAlertNotification('ClassLogs (CLs) Update', changeMsg, '/icon-192x192.png');
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
   const getActiveSeqKeys = (term) => {
     if (term === 'Term 2') return { key1: 'seq3_mark', key2: 'seq4_mark', label1: 'SEQ 3', label2: 'SEQ 4' };
     if (term === 'Term 3') return { key1: 'seq5_mark', key2: 'seq6_mark', label1: 'SEQ 5', label2: 'SEQ 6' };
@@ -1178,7 +1423,7 @@ const visibleStudents = useMemo(() => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900 font-sans">
+    <div className="min-h-screen w-full max-w-[100vw] overflow-x-hidden touch-pan-y bg-slate-100 text-slate-900 font-sans">
       <header className="bg-white border-b-2 border-slate-200 px-4 sm:px-8 py-4 shadow-md relative z-30">
       <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
         
@@ -1231,7 +1476,7 @@ const visibleStudents = useMemo(() => {
             {submissionStatus?.marksSubmitted ? 'Uploaded' : 'Pending Entry'}
           </span>
         </div>
-
+         
       </div>
     </header>
 
@@ -1290,17 +1535,50 @@ const visibleStudents = useMemo(() => {
     </div>
   </div>
 
-  <div className="flex items-center gap-3 bg-slate-900 px-4 py-2.5 rounded-lg border border-slate-700 w-full md:w-auto justify-between md:justify-start">
-    <div>
+  <div className="flex flex-col sm:flex-row sm:items-center gap-3 bg-slate-900 px-4 py-3 rounded-xl border border-slate-700 w-full md:w-auto">
+    <div className="flex items-center justify-between sm:block border-b sm:border-b-0 border-slate-800 pb-2 sm:pb-0">
       <span className="block text-[10px] text-slate-400 uppercase font-semibold tracking-wider">Teacher ID</span>
       <span className="text-xs font-mono font-bold text-emerald-400">{teacherProfile?.teacher_id || 'ID Pending'}</span>
     </div>
-    <button
-      onClick={() => navigator.clipboard.writeText(teacherProfile?.teacher_id || '')}
-      className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs px-3 py-1.5 rounded-lg transition-all shadow-sm active:scale-95"
-    >
-      Copy ID
-    </button>
+
+    <div className="grid grid-cols-2 sm:flex sm:flex-nowrap items-center gap-2 w-full sm:w-auto">
+      <button
+        type="button"
+        onClick={() => navigator.clipboard.writeText(teacherProfile?.teacher_id || '')}
+        className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs px-3 py-2 rounded-lg whitespace-nowrap text-center"
+      >
+        Copy ID
+      </button>
+      <button
+        type="button"
+        onClick={() => window.location.reload()}
+        className="bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-600 font-semibold text-xs px-3 py-2 rounded-lg whitespace-nowrap text-center"
+      >
+        Refresh
+      </button>
+      <button
+        type="button"
+        onClick={requestAlertPermission}
+        className="bg-blue-950/90 hover:bg-blue-900 text-blue-300 border border-blue-700/60 font-semibold text-xs px-3 py-2 rounded-lg whitespace-nowrap text-center"
+      >
+        Enable Alerts
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          const sid = localStorage.getItem('active_school_id');
+          const tid = localStorage.getItem('active_teacher_id') || localStorage.getItem('teacher_id');
+          if (sid && tid) localStorage.removeItem(`teacher_profile_cache_${sid}_${tid}`);
+          localStorage.removeItem('active_teacher_id');
+          localStorage.removeItem('teacher_id');
+          localStorage.removeItem('teacher_session');
+          window.location.href = '/';
+        }}
+        className="bg-rose-950/90 hover:bg-rose-900 text-rose-300 border border-rose-700/60 font-semibold text-xs px-3 py-2 rounded-lg whitespace-nowrap text-center"
+      >
+        Log Out
+      </button>
+    </div>
   </div>
 </div>
 
