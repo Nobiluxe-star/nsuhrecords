@@ -55,16 +55,17 @@ export default function LandingPage() {
     return () => window.removeEventListener('beforeinstallprompt', onBeforeInstall);
   }, []);
 
-  const handleDirectInstall = async () => {
-    if (deferredInstallPrompt) {
-      deferredInstallPrompt.prompt();
-      await deferredInstallPrompt.userChoice;
-      setDeferredInstallPrompt(null);
-      setShowDownloadPopup(false);
-    } else {
-      window.location.href = '/download';
-    }
-  };
+ const handleDirectInstall = async () => {
+  if (deferredInstallPrompt) {
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice;
+    setDeferredInstallPrompt(null);
+    setShowDownloadPopup(false);
+  } else {
+    alert('To install ClassLogs on your phone:\n\n• Android (Chrome): Tap the 3 dots (⋮) at the top right → "Install app" or "Add to Home screen".\n• iPhone (Safari): Tap the Share icon (↑) at the bottom → "Add to Home Screen".');
+    setShowDownloadPopup(false);
+  }
+};
   // Fetch assigned schools on load
   React.useEffect(() => {
     const fetchAssignedSchools = async () => {
@@ -383,15 +384,7 @@ export default function LandingPage() {
     setStaffPassword('');
     setActiveModal('staff');
   };
-useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const savedTeacherId = localStorage.getItem('active_teacher_id') || localStorage.getItem('teacher_id');
-      const savedSchoolId = localStorage.getItem('active_school_id');
-      if (savedTeacherId && savedSchoolId) {
-        window.location.replace('/teacher-dashboard');
-      }
-    }
-  }, []);
+
   return (
     <div className="min-h-screen bg-[#0b132b] text-white flex flex-col justify-between selection:bg-blue-600 selection:text-white">
       {/* Top Header */}
@@ -414,12 +407,13 @@ useEffect(() => {
           >
             ABOUT
           </button>
-          <a
-            href="/download"
-            className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black px-3 py-1.5 rounded-lg transition shadow"
+          <button
+            type="button"
+            onClick={handleDirectInstall}
+            className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black px-3 py-1.5 rounded-lg transition shadow cursor-pointer"
           >
             DOWNLOAD APP
-          </a>
+          </button>
           <button
             onClick={() => setActiveModal('contact')}
             className="text-slate-300 hover:text-blue-400 transition cursor-pointer"
@@ -868,13 +862,6 @@ useEffect(() => {
               >
                 Install App Now (1-Tap)
               </button>
-
-              <a
-                href="/download"
-                className="block w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-xs sm:text-sm transition"
-              >
-                Open Download Page / Android APK
-              </a>
 
               <button
                 type="button"

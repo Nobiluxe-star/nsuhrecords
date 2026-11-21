@@ -67,10 +67,10 @@ export default function DownloadPage() {
         )}
 
         <a
-          href="/teacher-dashboard"
+          href="/"
           className="block w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-2.5 rounded-xl text-xs transition"
         >
-          Open Teacher Dashboard in Browser
+          Go to Login Portal
         </a>
 
         {installed && (
