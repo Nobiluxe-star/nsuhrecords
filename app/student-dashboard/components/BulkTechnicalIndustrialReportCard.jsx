@@ -233,10 +233,36 @@ export default function BulkTechnicalIndustrialReportCard({
       const fetchedSchoolData = schoolRes.data || {};
       setSchoolData(fetchedSchoolData);
 
-      const targetClassClean = selectedClass.trim().toLowerCase();
+      const targetClassExact = selectedClass.trim().toLowerCase();
+      const targetClassNorm = normalizeClass(targetClassExact);
+
+      const isClassMatch = (rawCls) => {
+        if (!rawCls) return false;
+        const rawLower = String(rawCls).trim().toLowerCase();
+        const norm = normalizeClass(rawLower);
+        return (
+          rawLower === targetClassExact ||
+          (norm && (norm === targetClassNorm || norm.includes(targetClassNorm) || targetClassNorm.includes(norm)))
+        );
+      };
+
+      const matchesSubjectName = (candidateSub, targetSub) => {
+        const a = String(candidateSub || '').toLowerCase().trim();
+        const b = String(targetSub || '').toLowerCase().trim();
+        if (!a || !b) return false;
+        return a === b || a.includes(b) || b.includes(a);
+      };
+
+      const matchesTradeOrSeries = (candidateTrade, requiredTrade) => {
+        if (!requiredTrade || requiredTrade === 'all' || requiredTrade === 'n/a') return true;
+        const cand = String(candidateTrade || '').toLowerCase().trim();
+        if (!cand) return true;
+        return cand === requiredTrade || cand.includes(requiredTrade) || requiredTrade.includes(cand);
+      };
+
       let filteredStudents = (allStudentsRes.data || []).filter((s) => {
         const sClass = (s.classLevel || s.class_grade || s.class_level || s.class_name || s.class || '').trim().toLowerCase();
-        return sClass === targetClassClean;
+        return isClassMatch(sClass);
       });
 
       if (selectedTrade && selectedTrade !== 'ALL' && selectedTrade !== 'N/A') {
@@ -256,52 +282,36 @@ export default function BulkTechnicalIndustrialReportCard({
       }
 
       const studentIds = filteredStudents.map((s) => s.id).filter(Boolean);
-
-      let loadedSubjects = [];
       const teachersData = teachersRes.data || [];
       const allCoeffRows = coeffRes.data || [];
 
-      const matchedCoeffRow = allCoeffRows.find(row => {
-        const rClass = (row.classLevel || row.class_level || row.class_name || row.class || '').trim().toLowerCase();
-        const rTrade = (row.trades_series || row.series || row.trade || row.specialty || '').trim().toLowerCase();
-        
-        const isClassMatch = rClass === targetClassClean;
-        const isTradeMatch = selectedTrade === 'ALL' || !rTrade || rTrade === selectedTrade.trim().toLowerCase();
-
-        return isClassMatch && isTradeMatch;
-      }) || allCoeffRows.find(row => {
-        const rClass = (row.classLevel || row.class_level || row.class_name || row.class || '').trim().toLowerCase();
-        return rClass === targetClassClean;
-      });
-
-      
-     // STRICT SCHEDULES & CLASS-AWARE TEACHER MAPPING FUNCTION (EXACT GENERAL BULK ENGINE)
+      // STRICT SCHEDULES & CLASS-AWARE TEACHER MAPPING FUNCTION
       const getTeacherForSubject = (subjectName, tradeName = null) => {
         if (!subjectName) return '—';
-        const cleanSub = subjectName.toLowerCase().trim();
-        const targetTrade = tradeName 
-          ? tradeName.toLowerCase().trim() 
-          : (selectedTrade && selectedTrade !== 'ALL' && selectedTrade !== 'N/A' 
-              ? selectedTrade.toLowerCase().trim() 
+        const targetTrade = tradeName
+          ? String(tradeName).toLowerCase().trim()
+          : (selectedTrade && selectedTrade !== 'ALL' && selectedTrade !== 'N/A'
+              ? String(selectedTrade).toLowerCase().trim()
               : null);
 
         const match = teachersData.find((t) => {
           // 1. Strict Schedule/Timetable Slot Check
-          const schedules = t.schedules || t.schedule || t.timetable || {};
-          for (const [key, slots] of Object.entries(schedules)) {
-            const keySub = key.toLowerCase().trim();
-            if (keySub === cleanSub || cleanSub.includes(keySub) || keySub.includes(cleanSub)) {
-              if (Array.isArray(slots)) {
+          let schedules = t.schedules || t.schedule || t.timetable || {};
+          if (typeof schedules === 'string') {
+            try { schedules = JSON.parse(schedules); } catch (e) { schedules = {}; }
+          }
+          if (schedules && typeof schedules === 'object') {
+            for (const [key, slots] of Object.entries(schedules)) {
+              if (matchesSubjectName(key, subjectName) && Array.isArray(slots)) {
                 const hasMatchingClassSlot = slots.some((slot) => {
-                  const slotClass = normalizeClass(slot.className || slot.classLevel || slot.class || slot.class_name || '');
-                  const slotTrade = String(slot.trade || slot.trades_series || slot.series || slot.specialty || '').toLowerCase().trim();
-                  
-                  const classMatch = slotClass && (slotClass === targetClassClean || slotClass.includes(targetClassClean) || targetClassClean.includes(slotClass));
-                  if (!classMatch) return false;
+                  if (!slot || typeof slot !== 'object') return false;
+                  const slotClass = slot.className || slot.classLevel || slot.class || slot.class_name || slot.class_grade || '';
+                  const slotSub = slot.subject || slot.subject_name || key;
+                  const slotTrade = slot.trade || slot.trades_series || slot.series || slot.specialty || slot.option || '';
 
-                  if (targetTrade && targetTrade !== 'all' && targetTrade !== 'n/a') {
-                    if (slotTrade && slotTrade !== targetTrade) return false;
-                  }
+                  if (!isClassMatch(slotClass)) return false;
+                  if (!matchesSubjectName(slotSub, subjectName) && !matchesSubjectName(key, subjectName)) return false;
+                  if (!matchesTradeOrSeries(slotTrade, targetTrade)) return false;
 
                   return true;
                 });
@@ -311,22 +321,20 @@ export default function BulkTechnicalIndustrialReportCard({
           }
 
           // 2. Strict Assignments Array Check
-          const assignments = t.assignments || t.class_assignments || t.assigned_classes || [];
+          let assignments = t.assignments || t.class_assignments || t.assigned_classes || t.subject_assignments || [];
+          if (typeof assignments === 'string') {
+            try { assignments = JSON.parse(assignments); } catch (e) { assignments = []; }
+          }
           if (Array.isArray(assignments) && assignments.length > 0) {
             const hasValidAssignment = assignments.some((item) => {
-              if (typeof item === 'string') return false;
-              const itemSub = String(item.subject || item.subject_name || item.name || '').toLowerCase().trim();
-              const itemClass = normalizeClass(item.class || item.class_level || item.classLevel || '');
-              const itemTrade = String(item.trade || item.trades_series || item.series || item.specialty || '').toLowerCase().trim();
+              if (!item || typeof item === 'string') return false;
+              const itemSub = item.subject || item.subject_name || item.name || '';
+              const itemClass = item.class || item.class_level || item.classLevel || item.class_name || item.class_grade || '';
+              const itemTrade = item.trade || item.trades_series || item.series || item.specialty || item.option || '';
 
-              const subMatch = itemSub === cleanSub || cleanSub.includes(itemSub);
-              const classMatch = itemClass && (itemClass === targetClassClean || itemClass.includes(targetClassClean) || targetClassClean.includes(itemClass));
-              
-              if (!subMatch || !classMatch) return false;
-
-              if (targetTrade && targetTrade !== 'all' && targetTrade !== 'n/a') {
-                if (itemTrade && itemTrade !== targetTrade) return false;
-              }
+              if (!matchesSubjectName(itemSub, subjectName)) return false;
+              if (!isClassMatch(itemClass)) return false;
+              if (!matchesTradeOrSeries(itemTrade, targetTrade)) return false;
 
               return true;
             });
@@ -340,29 +348,62 @@ export default function BulkTechnicalIndustrialReportCard({
         return match ? (match.name || match.fullName || match.full_name || '—') : '—';
       };
 
-      if (matchedCoeffRow) {
-        let rawSubs = matchedCoeffRow.subject_coefficients;
+      // BUILD INDEPENDENT SUBJECT & COEFFICIENT LISTS PER TRADE FOR THE SELECTED CLASS
+      const tradeCoeffMap = {};
+      const orderedTradesSeen = [];
+
+      allCoeffRows.forEach((row) => {
+        const rClass = (row.classLevel || row.class_level || row.class_name || row.class || '').trim().toLowerCase();
+        if (!isClassMatch(rClass)) return;
+
+        const rTradeKey = String(
+          row.trades_series || row.series || row.trade || row.specialty || 'default'
+        ).trim().toLowerCase();
+
+        let rawSubs = row.subject_coefficients;
         if (typeof rawSubs === 'string') {
           try { rawSubs = JSON.parse(rawSubs); } catch (e) { rawSubs = null; }
         }
 
         if (Array.isArray(rawSubs) && rawSubs.length > 0) {
-          rawSubs.forEach((item, idx) => {
+          if (!orderedTradesSeen.includes(rTradeKey)) {
+            orderedTradesSeen.push(rTradeKey);
+          }
+          const tradeForLookup = rTradeKey !== 'default' ? rTradeKey : null;
+          tradeCoeffMap[rTradeKey] = rawSubs.map((item, idx) => {
             const sName = item.name || item.subject_name || item.subject_code || `Subject ${idx + 1}`;
             const coefVal = Number(item.coefficient || item.coeff || item.coef || item.weight || 1);
             const categoryVal = item.category || item.group || 'Industrial Practical & Theory';
-            const instructorName = getTeacherForSubject(sName);
 
-            loadedSubjects.push({
-              id: item.id || `sub_${idx}`,
+            return {
+              id: item.id || `sub_${rTradeKey}_${idx}`,
               subject_name: sName,
               category: categoryVal,
               coefficient: coefVal,
-              resolved_instructor: instructorName
-            });
+              trade_key: rTradeKey,
+              resolved_instructor: getTeacherForSubject(sName, tradeForLookup)
+            };
           });
         }
+      });
+
+      let loadedSubjects = [];
+      if (selectedTrade && selectedTrade !== 'ALL' && selectedTrade !== 'N/A') {
+        const tradeKey = selectedTrade.trim().toLowerCase();
+        loadedSubjects = tradeCoeffMap[tradeKey] || tradeCoeffMap['default'] || Object.values(tradeCoeffMap)[0] || [];
+      } else {
+        const seenSubjectKeys = new Set();
+        orderedTradesSeen.forEach((tKey) => {
+          (tradeCoeffMap[tKey] || []).forEach((sub) => {
+            const uniqueKey = `${tKey}::${sub.subject_name.toLowerCase().trim()}`;
+            if (!seenSubjectKeys.has(uniqueKey)) {
+              seenSubjectKeys.add(uniqueKey);
+              loadedSubjects.push(sub);
+            }
+          });
+        });
       }
+
       setSubjectsList(loadedSubjects);
 
       const termNumeric = selectedTerm.replace(/[^0-9]/g, '') || '1';
@@ -417,6 +458,7 @@ export default function BulkTechnicalIndustrialReportCard({
       filteredStudents.forEach((st) => {
         const sId = st.id;
         const sCode = st.unique_code || st.code || st.student_id;
+        const stTrade = String(st.trades_series || st.series || st.trade || st.specialty || '').trim().toLowerCase();
 
         const stMarks = classMarksList.filter(
           (m) =>
@@ -424,12 +466,18 @@ export default function BulkTechnicalIndustrialReportCard({
             (sCode && (m.unique_code === sCode || m.code === sCode))
         );
 
+        const studentSubjects =
+          (stTrade && tradeCoeffMap[stTrade]) ||
+          (selectedTrade !== 'ALL' && loadedSubjects.length > 0 ? loadedSubjects : null) ||
+          tradeCoeffMap['default'] ||
+          loadedSubjects;
+
         const scoreMap = {};
         let totalPts = 0;
         let totalCoef = 0;
         let hasMarks = false;
 
-        loadedSubjects.forEach((sub) => {
+        studentSubjects.forEach((sub) => {
           const subKey = sub.subject_name.toLowerCase().trim();
           const match = stMarks.find(
             (m) => (m.subject_name || m.subject_code || '').toLowerCase().trim() === subKey
@@ -463,9 +511,9 @@ export default function BulkTechnicalIndustrialReportCard({
         );
 
         studentAttLogs.forEach((rec) => {
-          const st = String(rec.status || '').toLowerCase().trim();
-          if (st === 'absent' || st === 'unjustified') liveAbsences += 1;
-          if (st === 'late' || st === 'tardy' || st === 'tardiness') liveTardiness += 1;
+          const stStat = String(rec.status || '').toLowerCase().trim();
+          if (stStat === 'absent' || stStat === 'unjustified') liveAbsences += 1;
+          if (stStat === 'late' || stStat === 'tardy' || stStat === 'tardiness') liveTardiness += 1;
         });
 
         const mergedDiscipline = {
@@ -483,7 +531,8 @@ export default function BulkTechnicalIndustrialReportCard({
           termStatus: termAvg !== null ? (termAvg >= 10 ? 'Passed' : 'Failed') : null,
           feesRecord: feeRec || null,
           disciplineRecord: mergedDiscipline,
-          adminRemarks: remRec || null
+          adminRemarks: remRec || null,
+          studentSubjects: studentSubjects
         };
       });
 
@@ -599,6 +648,7 @@ export default function BulkTechnicalIndustrialReportCard({
         const stData = processedDataMap[sId] || {};
         const marksMap = stData.marksMap || {};
         const subjectRanks = stData.subjectRanks || {};
+        const studentSubs = stData.studentSubjects || subjectsList;
 
         const sName = student.fullName || student.full_name || student.name || `${student.first_name || ''} ${student.last_name || ''}`.trim();
         const sMatricule = student.unique_code || student.code || student.student_id || student.matricule || '—';
@@ -687,7 +737,7 @@ export default function BulkTechnicalIndustrialReportCard({
         });
 
         // Marks Table
-        const tableData = subjectsList.map((sub) => {
+        const tableData = studentSubs.map((sub) => {
           const subKey = sub.subject_name.toLowerCase().trim();
           const score = marksMap[subKey];
           const coef = Number(sub.coefficient || 1);
@@ -839,6 +889,7 @@ export default function BulkTechnicalIndustrialReportCard({
     const stData = processedDataMap[sId] || {};
     const marksMap = stData.marksMap || {};
     const subjectRanks = stData.subjectRanks || {};
+    const studentSubs = stData.studentSubjects || subjectsList;
 
     const sName = student.fullName || student.full_name || student.name || `${student.first_name || ''} ${student.last_name || ''}`.trim();
     const sMatricule = student.unique_code || student.code || student.student_id || student.matricule || '—';
@@ -996,14 +1047,14 @@ export default function BulkTechnicalIndustrialReportCard({
               </tr>
             </thead>
             <tbody className="divide-y divide-orange-100 bg-white">
-              {subjectsList.length === 0 ? (
+              {studentSubs.length === 0 ? (
                 <tr>
                   <td colSpan="8" className="p-3 text-center text-red-600 font-bold bg-red-50 italic">
                     No configured subjects found for this class in class_coefficients table.
                   </td>
                 </tr>
               ) : (
-                subjectsList.map((sub, idx) => {
+                studentSubs.map((sub, idx) => {
                   const subKey = sub.subject_name.toLowerCase().trim();
                   const score = marksMap[subKey];
                   const coef = Number(sub.coefficient || 1);

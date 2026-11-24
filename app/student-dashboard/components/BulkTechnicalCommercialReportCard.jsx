@@ -144,6 +144,7 @@ export default function BulkTechnicalCommercialReportCard({
 
   useEffect(() => {
     if (isOpen) {
+      setSelectedTrack('commercial');
       if (activeClass) setSelectedClass(activeClass);
       if (activeTrade && !activeTrade.startsWith('Term')) {
         setSelectedTrade(activeTrade);
@@ -161,9 +162,9 @@ export default function BulkTechnicalCommercialReportCard({
   }, []);
 
   const handleTrackSelect = (newTrack) => {
-    setSelectedTrack(newTrack);
+    setSelectedTrack('commercial');
     if (onTrackChange) {
-      onTrackChange(newTrack);
+      onTrackChange('commercial');
     }
   };
 
@@ -233,10 +234,16 @@ export default function BulkTechnicalCommercialReportCard({
       const fetchedSchoolData = schoolRes.data || {};
       setSchoolData(fetchedSchoolData);
 
-      const targetClassClean = selectedClass.trim().toLowerCase();
+      const targetClassClean = normalizeClass(selectedClass);
+      const targetClassExact = selectedClass.trim().toLowerCase();
+
       let filteredStudents = (allStudentsRes.data || []).filter((s) => {
-        const sClass = (s.classLevel || s.class_grade || s.class_level || s.class_name || s.class || '').trim().toLowerCase();
-        return sClass === targetClassClean;
+        const sClassRaw = (s.classLevel || s.class_grade || s.class_level || s.class_name || s.class || '').trim().toLowerCase();
+        const sClassNorm = normalizeClass(sClassRaw);
+        return (
+          sClassRaw === targetClassExact ||
+          (sClassNorm && (sClassNorm === targetClassClean || sClassNorm.includes(targetClassClean) || targetClassClean.includes(sClassNorm)))
+        );
       });
 
       if (selectedTrade && selectedTrade !== 'ALL' && selectedTrade !== 'N/A') {
@@ -256,69 +263,202 @@ export default function BulkTechnicalCommercialReportCard({
       }
 
       const studentIds = filteredStudents.map((s) => s.id).filter(Boolean);
-
-      let loadedSubjects = [];
       const teachersData = teachersRes.data || [];
       const allCoeffRows = coeffRes.data || [];
 
-      const matchedCoeffRow = allCoeffRows.find(row => {
-        const rClass = (row.classLevel || row.class_level || row.class_name || row.class || '').trim().toLowerCase();
-        const rTrade = (row.trades_series || row.series || row.trade || row.specialty || '').trim().toLowerCase();
-        
-        const isClassMatch = rClass === targetClassClean;
-        const isTradeMatch = selectedTrade === 'ALL' || !rTrade || rTrade === selectedTrade.trim().toLowerCase();
+      const isClassMatch = (rawCls) => {
+        if (!rawCls) return false;
+        const rawLower = String(rawCls).trim().toLowerCase();
+        const norm = normalizeClass(rawLower);
+        return (
+          rawLower === targetClassExact ||
+          (norm && (norm === targetClassClean || norm.includes(targetClassClean) || targetClassClean.includes(norm)))
+        );
+      };
 
-        return isClassMatch && isTradeMatch;
-      }) || allCoeffRows.find(row => {
-        const rClass = (row.classLevel || row.class_level || row.class_name || row.class || '').trim().toLowerCase();
-        return rClass === targetClassClean;
-      });
+      const matchesSubjectName = (candidateSub, targetSub) => {
+        const a = String(candidateSub || '').toLowerCase().trim();
+        const b = String(targetSub || '').toLowerCase().trim();
+        if (!a || !b) return false;
+        return a === b || a.includes(b) || b.includes(a);
+      };
 
-      // Strict Teacher-to-Class Assignment lookup
-      const getTeacherForSubject = (subjectName) => {
+      const matchesTradeOrSeries = (candidateTrade, requiredTrade) => {
+        if (!requiredTrade || requiredTrade === 'all' || requiredTrade === 'n/a') return true;
+        const cand = String(candidateTrade || '').toLowerCase().trim();
+        if (!cand) return true;
+        return cand === requiredTrade || cand.includes(requiredTrade) || requiredTrade.includes(cand);
+      };
+
+      // STRICT CLASS-AWARE TEACHER LOOKUP (ONLY FOR THE SPECIFIC CLASS BEING VIEWED)
+      const getTeacherForSubject = (subjectName, tradeOrSeriesName = null) => {
         if (!subjectName) return '—';
-        const cleanSub = subjectName.toLowerCase().trim();
+        const targetTrade = tradeOrSeriesName
+          ? String(tradeOrSeriesName).toLowerCase().trim()
+          : (selectedTrade && selectedTrade !== 'ALL' && selectedTrade !== 'N/A'
+              ? String(selectedTrade).toLowerCase().trim()
+              : null);
+
         const match = teachersData.find((t) => {
-          const tClass = (t.classLevel || t.class_level || t.class_name || t.class || '').trim().toLowerCase();
-          const matchesClass = !tClass || tClass === targetClassClean;
-
-          if (!matchesClass) return false;
-
-          const rawSubs = t.subjects || t.subject || [];
-          if (Array.isArray(rawSubs)) {
-            return rawSubs.some((s) => typeof s === 'string' && s.toLowerCase().trim() === cleanSub);
+          let schedules = t.schedules || t.schedule || t.timetable || {};
+          if (typeof schedules === 'string') {
+            try { schedules = JSON.parse(schedules); } catch (e) { schedules = {}; }
           }
+          if (schedules && typeof schedules === 'object') {
+            for (const [key, slots] of Object.entries(schedules)) {
+              if (matchesSubjectName(key, subjectName) && Array.isArray(slots)) {
+                const hasMatchingSlot = slots.some((slot) => {
+                  if (!slot || typeof slot !== 'object') return false;
+                  const slotClass = slot.className || slot.classLevel || slot.class || slot.class_name || slot.class_grade || '';
+                  const slotSub = slot.subject || slot.subject_name || key;
+                  const slotTrade = slot.trades_series || slot.series || slot.trade || slot.specialty || slot.option || '';
+
+                  if (!isClassMatch(slotClass)) return false;
+                  if (!matchesSubjectName(slotSub, subjectName) && !matchesSubjectName(key, subjectName)) return false;
+                  if (!matchesTradeOrSeries(slotTrade, targetTrade)) return false;
+                  return true;
+                });
+                if (hasMatchingSlot) return true;
+              }
+            }
+          }
+
+          let assignments = t.assignments || t.class_assignments || t.assigned_classes || t.subject_assignments || [];
+          if (typeof assignments === 'string') {
+            try { assignments = JSON.parse(assignments); } catch (e) { assignments = []; }
+          }
+          if (Array.isArray(assignments) && assignments.length > 0) {
+            const hasValidAssignment = assignments.some((item) => {
+              if (!item || typeof item === 'string') return false;
+              const itemSub = item.subject || item.subject_name || item.name || '';
+              const itemClass = item.class || item.class_level || item.classLevel || item.class_name || item.class_grade || '';
+              const itemTrade = item.trades_series || item.series || item.trade || item.specialty || item.option || '';
+
+              if (!matchesSubjectName(itemSub, subjectName)) return false;
+              if (!isClassMatch(itemClass)) return false;
+              if (!matchesTradeOrSeries(itemTrade, targetTrade)) return false;
+              return true;
+            });
+            if (hasValidAssignment) return true;
+          }
+
+          let teacherClasses = [];
+          const directClassFields = [t.classLevel, t.class_level, t.class_name, t.class, t.class_grade];
+          directClassFields.forEach((c) => {
+            if (typeof c === 'string' && c.trim()) {
+              c.split(',').forEach((part) => teacherClasses.push(part.trim()));
+            }
+          });
+
+          const classArrayFields = [t.classes, t.teaching_classes, t.assigned_class_levels];
+          classArrayFields.forEach((arr) => {
+            let parsedArr = arr;
+            if (typeof parsedArr === 'string') {
+              try { parsedArr = JSON.parse(parsedArr); } catch (e) { parsedArr = parsedArr.split(','); }
+            }
+            if (Array.isArray(parsedArr)) {
+              parsedArr.forEach((entry) => {
+                if (typeof entry === 'string') {
+                  teacherClasses.push(entry.trim());
+                } else if (entry && typeof entry === 'object') {
+                  const eClass = entry.class || entry.class_level || entry.classLevel || entry.class_name || entry.name || '';
+                  const eSub = entry.subject || entry.subject_name || '';
+                  if (eClass && !eSub) teacherClasses.push(eClass);
+                }
+              });
+            }
+          });
+
+          const teachesThisSpecificClass = teacherClasses.some((clsEntry) => isClassMatch(clsEntry));
+          if (!teachesThisSpecificClass) return false;
+
+          const tTrade = t.trades_series || t.series || t.trade || t.specialty || '';
+          if (!matchesTradeOrSeries(tTrade, targetTrade)) return false;
+
+          let rawSubs = t.subjects || t.subject || t.assigned_subjects || [];
           if (typeof rawSubs === 'string') {
-            return rawSubs.toLowerCase().trim() === cleanSub;
+            try { rawSubs = JSON.parse(rawSubs); } catch (e) { rawSubs = rawSubs.split(','); }
           }
+          if (Array.isArray(rawSubs)) {
+            return rawSubs.some((s) => {
+              if (typeof s === 'string') return matchesSubjectName(s, subjectName);
+              if (s && typeof s === 'object') {
+                const subName = s.subject || s.subject_name || s.name || '';
+                const subClass = s.class || s.class_level || s.classLevel || s.class_name || '';
+                if (!matchesSubjectName(subName, subjectName)) return false;
+                if (subClass && !isClassMatch(subClass)) return false;
+                return true;
+              }
+              return false;
+            });
+          }
+
           return false;
         });
+
         return match ? (match.name || match.fullName || match.full_name || '—') : '—';
       };
 
-      if (matchedCoeffRow) {
-        let rawSubs = matchedCoeffRow.subject_coefficients;
-        if (typeof rawSubs === 'string') {
-          try { rawSubs = JSON.parse(rawSubs); } catch (e) { rawSubs = null; }
-        }
+      const tradeCoeffMap = {};
+      const orderedTradesSeen = [];
 
-        if (Array.isArray(rawSubs) && rawSubs.length > 0) {
-          rawSubs.forEach((item, idx) => {
-            const sName = item.name || item.subject_name || item.subject_code || `Subject ${idx + 1}`;
-            const coefVal = Number(item.coefficient || item.coeff || item.coef || item.weight || 1);
-            const categoryVal = item.category || item.group || 'Commercial Subjects';
-            const instructorName = item.instructor || item.teacher_name || getTeacherForSubject(sName);
+      allCoeffRows.forEach((row) => {
+        const rClassRaw = (row.classLevel || row.class_level || row.class_name || row.class || '').trim().toLowerCase();
+        const rClassNorm = normalizeClass(rClassRaw);
+        const matchesRowClass =
+          rClassRaw === targetClassExact ||
+          (rClassNorm && (rClassNorm === targetClassClean || rClassNorm.includes(targetClassClean) || targetClassClean.includes(rClassNorm)));
 
-            loadedSubjects.push({
-              id: item.id || `sub_${idx}`,
-              subject_name: sName,
-              category: categoryVal,
-              coefficient: coefVal,
-              resolved_instructor: instructorName
+        if (matchesRowClass) {
+          const rTradeKey = String(
+            row.trades_series || row.series || row.trade || row.specialty || 'default'
+          ).trim().toLowerCase();
+
+          let rawSubs = row.subject_coefficients;
+          if (typeof rawSubs === 'string') {
+            try { rawSubs = JSON.parse(rawSubs); } catch (e) { rawSubs = null; }
+          }
+
+          if (Array.isArray(rawSubs) && rawSubs.length > 0) {
+            if (!orderedTradesSeen.includes(rTradeKey)) {
+              orderedTradesSeen.push(rTradeKey);
+            }
+            tradeCoeffMap[rTradeKey] = rawSubs.map((item, idx) => {
+              const sName = item.name || item.subject_name || item.subject_code || `Subject ${idx + 1}`;
+              const coefVal = Number(item.coefficient || item.coeff || item.coef || item.weight || 1);
+              const categoryVal = item.category || item.group || 'Commercial Subjects';
+              const tradeForLookup = rTradeKey !== 'default' ? rTradeKey : null;
+
+              return {
+                id: item.id || `sub_${rTradeKey}_${idx}`,
+                subject_name: sName,
+                category: categoryVal,
+                coefficient: coefVal,
+                trade_key: rTradeKey,
+                resolved_instructor: getTeacherForSubject(sName, tradeForLookup)
+              };
             });
-          });
+          }
         }
+      });
+
+      let loadedSubjects = [];
+      if (selectedTrade && selectedTrade !== 'ALL' && selectedTrade !== 'N/A') {
+        const tradeKey = selectedTrade.trim().toLowerCase();
+        loadedSubjects = tradeCoeffMap[tradeKey] || tradeCoeffMap['default'] || Object.values(tradeCoeffMap)[0] || [];
+      } else {
+        const seenSubjectKeys = new Set();
+        orderedTradesSeen.forEach((tKey) => {
+          (tradeCoeffMap[tKey] || []).forEach((sub) => {
+            const uniqueKey = `${tKey}::${sub.subject_name.toLowerCase().trim()}`;
+            if (!seenSubjectKeys.has(uniqueKey)) {
+              seenSubjectKeys.add(uniqueKey);
+              loadedSubjects.push(sub);
+            }
+          });
+        });
       }
+
       setSubjectsList(loadedSubjects);
 
       const termNumeric = selectedTerm.replace(/[^0-9]/g, '') || '1';
@@ -373,6 +513,7 @@ export default function BulkTechnicalCommercialReportCard({
       filteredStudents.forEach((st) => {
         const sId = st.id;
         const sCode = st.unique_code || st.code || st.student_id;
+        const stTrade = String(st.trades_series || st.series || st.trade || st.specialty || '').trim().toLowerCase();
 
         const stMarks = classMarksList.filter(
           (m) =>
@@ -380,12 +521,18 @@ export default function BulkTechnicalCommercialReportCard({
             (sCode && (m.unique_code === sCode || m.code === sCode))
         );
 
+        const studentSubjects =
+          (stTrade && tradeCoeffMap[stTrade]) ||
+          (selectedTrade !== 'ALL' && loadedSubjects.length > 0 ? loadedSubjects : null) ||
+          tradeCoeffMap['default'] ||
+          loadedSubjects;
+
         const scoreMap = {};
         let totalPts = 0;
         let totalCoef = 0;
         let hasMarks = false;
 
-        loadedSubjects.forEach((sub) => {
+        studentSubjects.forEach((sub) => {
           const subKey = sub.subject_name.toLowerCase().trim();
           const match = stMarks.find(
             (m) => (m.subject_name || m.subject_code || '').toLowerCase().trim() === subKey
@@ -410,7 +557,6 @@ export default function BulkTechnicalCommercialReportCard({
         const discRec = (discRes.data || []).find((d) => String(d.student_id) === String(sId) || (sCode && d.unique_code === sCode));
         const remRec = (remRes.data || []).find((r) => String(r.student_id) === String(sId) || (sCode && r.unique_code === sCode));
 
-        // Live Attendance Processing (Count in 'times')
         let liveAbsences = 0;
         let liveTardiness = 0;
 
@@ -420,9 +566,9 @@ export default function BulkTechnicalCommercialReportCard({
         );
 
         studentAttLogs.forEach((rec) => {
-          const st = String(rec.status || '').toLowerCase().trim();
-          if (st === 'absent' || st === 'unjustified') liveAbsences += 1;
-          if (st === 'late' || st === 'tardy' || st === 'tardiness') liveTardiness += 1;
+          const stStat = String(rec.status || '').toLowerCase().trim();
+          if (stStat === 'absent' || stStat === 'unjustified') liveAbsences += 1;
+          if (stStat === 'late' || stStat === 'tardy' || stStat === 'tardiness') liveTardiness += 1;
         });
 
         const mergedDiscipline = {
@@ -440,7 +586,8 @@ export default function BulkTechnicalCommercialReportCard({
           termStatus: termAvg !== null ? (termAvg >= 10 ? 'Passed' : 'Failed') : null,
           feesRecord: feeRec || null,
           disciplineRecord: mergedDiscipline,
-          adminRemarks: remRec || null
+          adminRemarks: remRec || null,
+          studentSubjects: studentSubjects
         };
       });
 
@@ -482,7 +629,6 @@ export default function BulkTechnicalCommercialReportCard({
 
       setProcessedDataMap(studentMap);
 
-      // SAFE LOCALSTORAGE & INDEXEDDB CACHING WRITER
       if (typeof window !== 'undefined') {
         const payload = {
           schoolData: fetchedSchoolData,
@@ -548,7 +694,8 @@ export default function BulkTechnicalCommercialReportCard({
 
       const schoolTitle = (schoolData.name || schoolData.institution_name || schoolInfo?.name || 'COLLEGE NAME').toUpperCase();
       const regionText = schoolData.region ? `REGIONAL DELEGATION FOR SECONDARY EDUCATION FOR THE ${schoolData.region.toUpperCase()}` : 'REGIONAL DELEGATION FOR SECONDARY EDUCATION';
-      const mottoText = schoolData.motto || schoolInfo?.motto ? `Motto: "${schoolData.motto || schoolInfo?.motto}"` : '';
+      const rawMotto = schoolData.motto || schoolData.school_motto || schoolInfo?.motto || '';
+      const mottoBannerText = rawMotto ? `Motto: "${rawMotto}"` : '';
 
       studentsList.forEach((student, index) => {
         if (index > 0) pdf.addPage('a4', 'portrait');
@@ -557,6 +704,7 @@ export default function BulkTechnicalCommercialReportCard({
         const stData = processedDataMap[sId] || {};
         const marksMap = stData.marksMap || {};
         const subjectRanks = stData.subjectRanks || {};
+        const studentSubs = stData.studentSubjects || subjectsList;
 
         const sName = student.fullName || student.full_name || student.name || `${student.first_name || ''} ${student.last_name || ''}`.trim();
         const sMatricule = student.unique_code || student.code || student.student_id || student.matricule || '—';
@@ -567,53 +715,55 @@ export default function BulkTechnicalCommercialReportCard({
         const displayPaid = paidAmount > 0 ? `${paidAmount.toLocaleString()} FCFA` : '—';
         const displayBalance = paidAmount > 0 ? `${balanceAmount.toLocaleString()} FCFA` : '—';
 
-        // 1. Header Box (Forest Green Theme)
+        // 1. Header Box (Forest Green Theme + Executive Serif Crest Typography + Larger Logo)
         pdf.setDrawColor(216, 243, 220);
         pdf.setFillColor(244, 249, 244);
-        pdf.roundedRect(10, 8, 190, 26, 3, 3, 'FD');
+        pdf.roundedRect(10, 8, 190, 29, 3, 3, 'FD');
 
         if (base64Logo) {
           try {
-            pdf.addImage(base64Logo, 'PNG', 13, 10, 20, 22);
+            pdf.addImage(base64Logo, 'PNG', 12.5, 9.5, 24, 26);
           } catch (imgErr) {
             console.warn('Could not render logo in PDF:', imgErr);
           }
         }
 
-        pdf.setFont('helvetica', 'bold');
-        pdf.setFontSize(14);
+        pdf.setFont('times', 'bold');
+        pdf.setFontSize(15.5);
         pdf.setTextColor(27, 67, 50);
-        pdf.text(schoolTitle, 105, 14, { align: 'center' });
+        pdf.text(schoolTitle, 114, 14.5, { align: 'center', charSpace: 0.4 });
 
         pdf.setFontSize(8.5);
         pdf.setFont('helvetica', 'normal');
         pdf.setTextColor(45, 106, 79);
-        pdf.text(`Academic Year: ${schoolData.academic_year || '2026/2027'}`, 105, 18.5, { align: 'center' });
+        pdf.text(`Academic Year: ${schoolData.academic_year || '2026/2027'}`, 114, 19.5, { align: 'center' });
 
         pdf.setFont('helvetica', 'bold');
         pdf.setFontSize(8);
         pdf.setTextColor(27, 67, 50);
-        pdf.text(regionText, 105, 22.5, { align: 'center' });
+        pdf.text(regionText, 114, 24, { align: 'center' });
 
         pdf.setFont('helvetica', 'bold');
         pdf.setFontSize(8);
         pdf.setTextColor(15, 23, 42);
-        pdf.text(`Phone: ${schoolData.contact_line || schoolData.phone || schoolInfo?.phone || '—'}  |  Email: ${schoolData.official_email || schoolData.email || schoolInfo?.email || '—'}  |  Location: ${schoolData.address_location || schoolInfo?.address || '—'}`, 105, 28, { align: 'center' });
+        pdf.text(`Phone: ${schoolData.contact_line || schoolData.phone || schoolInfo?.phone || '—'}  |  Email: ${schoolData.official_email || schoolData.email || schoolInfo?.email || '—'}  |  Location: ${schoolData.address_location || schoolInfo?.address || '—'}`, 114, 30.5, { align: 'center' });
 
-        if (mottoText) {
-          pdf.setFillColor(244, 249, 244);
-          pdf.roundedRect(10, 36, 190, 6, 2, 2, 'F');
-          pdf.setFont('helvetica', 'italic');
-          pdf.setFontSize(8.5);
+        let nextBannerY = 39;
+        if (mottoBannerText) {
+          pdf.setFillColor(232, 245, 233);
+          pdf.roundedRect(10, nextBannerY, 190, 7, 2, 2, 'F');
+          pdf.setFont('times', 'bolditalic');
+          pdf.setFontSize(9.5);
           pdf.setTextColor(27, 67, 50);
-          pdf.text(mottoText, 105, 40, { align: 'center' });
+          pdf.text(mottoBannerText, 105, nextBannerY + 4.8, { align: 'center' });
+          nextBannerY += 8.5;
         }
 
         // 2. Report Card Title
-        const titleY = mottoText ? 44 : 36;
+        const titleY = nextBannerY;
         pdf.setFillColor(232, 245, 233);
         pdf.roundedRect(10, titleY, 190, 7, 2, 2, 'F');
-        pdf.setFont('helvetica', 'bold');
+        pdf.setFont('times', 'bolditalic');
         pdf.setFontSize(9.5);
         pdf.setTextColor(27, 67, 50);
         const termTitle = `TECHNICAL COMMERCIAL (STT) — ${getOrdinalTermWord(selectedTerm.replace(/[^0-9]/g, '') || 1).toUpperCase()} REPORT CARD`;
@@ -645,7 +795,7 @@ export default function BulkTechnicalCommercialReportCard({
         });
 
         // 4. Marks Table
-        const tableData = subjectsList.map((sub) => {
+        const tableData = studentSubs.map((sub) => {
           const subKey = sub.subject_name.toLowerCase().trim();
           const score = marksMap[subKey];
           const coef = Number(sub.coefficient || 1);
@@ -791,12 +941,14 @@ export default function BulkTechnicalCommercialReportCard({
   if (!isOpen) return null;
 
   const currentStudent = studentsList[currentIndex] || {};
+  const mottoValue = schoolData.motto || schoolData.school_motto || schoolInfo?.motto || '';
 
   const renderSingleCard = (student, index) => {
     const sId = student.id;
     const stData = processedDataMap[sId] || {};
     const marksMap = stData.marksMap || {};
     const subjectRanks = stData.subjectRanks || {};
+    const studentSubs = stData.studentSubjects || subjectsList;
 
     const sName = student.fullName || student.full_name || student.name || `${student.first_name || ''} ${student.last_name || ''}`.trim();
     const sMatricule = student.unique_code || student.code || student.student_id || student.matricule || '—';
@@ -816,14 +968,14 @@ export default function BulkTechnicalCommercialReportCard({
         key={sId || index}
         className="bulk-student-a4-page bg-[#fdfbf7] text-[#2d3748] p-3 sm:p-5 rounded-2xl shadow-xl border border-[#d8f3dc] max-w-4xl w-full mx-auto space-y-2.5 text-xs print:p-0 print:border-none print:shadow-none print:rounded-none print:space-y-2.5 print:max-w-full print:bg-white mb-6"
       >
-        {/* HEADER BRANDING WITH FORCED LOGO CONTAINER */}
-        <div className="border border-[#d8f3dc] bg-[#f4f9f4] rounded-xl p-2.5 flex flex-col sm:flex-row items-center gap-3">
-          <div className="w-20 h-20 border-2 border-[#1b4332]/20 rounded-xl bg-white flex items-center justify-center shrink-0 overflow-hidden p-1 shadow-inner">
+        {/* HEADER BRANDING WITH LARGER CHARMING LOGO & INTERNATIONAL EDITORIAL HEADING */}
+        <div className="border border-[#d8f3dc] bg-[#f4f9f4] rounded-xl p-2.5 sm:p-3 flex flex-col sm:flex-row items-center gap-3.5">
+          <div className="w-24 h-24 sm:w-28 sm:h-28 border-2 border-[#1b4332]/30 rounded-2xl bg-white flex items-center justify-center shrink-0 overflow-hidden p-1.5 shadow-md ring-4 ring-[#d8f3dc]/60">
             {logoSrc ? (
               <img
                 src={logoSrc}
                 alt="School Logo"
-                className="w-full h-full object-contain"
+                className="w-full h-full object-contain rounded-xl"
                 onError={(e) => {
                   e.currentTarget.style.display = 'none';
                   if (e.currentTarget.nextSibling) e.currentTarget.nextSibling.style.display = 'flex';
@@ -831,7 +983,7 @@ export default function BulkTechnicalCommercialReportCard({
               />
             ) : null}
             <div className={`flex-col items-center justify-center text-[#1b4332] p-1 text-center ${logoSrc ? 'hidden' : 'flex'}`}>
-              <svg className="w-8 h-8 text-[#1b4332] mb-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-9 h-9 text-[#1b4332] mb-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 14l9-5-9-5-9 5 9 5z" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0112 20.055a11.952 11.952 0 01-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" />
               </svg>
@@ -840,11 +992,11 @@ export default function BulkTechnicalCommercialReportCard({
           </div>
 
           <div className="flex-1 w-full border border-[#d8f3dc] rounded-lg bg-white divide-y divide-[#d8f3dc] text-center">
-            <div className="p-1">
-              <h1 className="text-base sm:text-xl font-black text-[#1b4332] uppercase tracking-tight break-words">
+            <div className="p-1.5">
+              <h1 className="text-lg sm:text-2xl font-serif font-black text-[#1b4332] uppercase tracking-wider break-words">
                 {schoolData.name || schoolData.institution_name || schoolInfo?.name || 'COLLEGE NAME'}
               </h1>
-              <p className="text-[10px] sm:text-xs font-semibold text-[#2d6a4f]">
+              <p className="text-[10px] sm:text-xs font-semibold text-[#2d6a4f] mt-0.5">
                 Academic Year: {schoolData.academic_year || '2026/2027'}
               </p>
             </div>
@@ -867,12 +1019,12 @@ export default function BulkTechnicalCommercialReportCard({
           </div>
         </div>
 
-        {/* MOTTO BANNER WITH MATCHED REPORT CARD STYLE */}
-        {(schoolData.motto || schoolInfo?.motto) && (
-          <div className="p-1.5 bg-[#f4f9f4] border border-[#d8f3dc] rounded-xl text-center shadow-sm">
-            <p className="text-xs sm:text-sm font-serif italic font-extrabold text-[#1b4332] tracking-wide">
-              Motto: "{schoolData.motto || schoolInfo?.motto}"
-            </p>
+        {/* MOTTO LINE (EXACT SAME DESIGN AS TERM REPORT HEADER) */}
+        {mottoValue && (
+          <div className="p-1 bg-[#e8f5e9] border border-[#d8f3dc] rounded-xl text-center">
+            <h2 className="text-xs sm:text-sm font-serif italic font-black text-[#1b4332] uppercase tracking-wider">
+              Motto: "{mottoValue}"
+            </h2>
           </div>
         )}
 
@@ -956,14 +1108,14 @@ export default function BulkTechnicalCommercialReportCard({
               </tr>
             </thead>
             <tbody className="divide-y divide-[#d8f3dc] bg-white">
-              {subjectsList.length === 0 ? (
+              {studentSubs.length === 0 ? (
                 <tr>
                   <td colSpan="8" className="p-3 text-center text-red-600 font-bold bg-red-50 italic">
                     No configured subjects found for this class in class_coefficients table.
                   </td>
                 </tr>
               ) : (
-                subjectsList.map((sub, idx) => {
+                studentSubs.map((sub, idx) => {
                   const subKey = sub.subject_name.toLowerCase().trim();
                   const score = marksMap[subKey];
                   const coef = Number(sub.coefficient || 1);
@@ -1072,7 +1224,7 @@ export default function BulkTechnicalCommercialReportCard({
 
         <div className="flex items-center gap-2 flex-wrap text-xs">
 
-          {/* INTERNAL TRACK SWITCHER */}
+          {/* TECHNICAL COMMERCIAL TRACK LOCKED */}
           <div className="flex flex-col gap-0.5">
             <label className="text-[10px] text-[#b7e4c7] font-medium">Education Track</label>
             <select
@@ -1080,9 +1232,7 @@ export default function BulkTechnicalCommercialReportCard({
               onChange={(e) => handleTrackSelect(e.target.value)}
               className="bg-[#2d6a4f] border border-[#d8f3dc]/30 rounded-lg px-2.5 py-1.5 text-white font-medium focus:border-amber-300 focus:outline-none max-w-[140px] sm:max-w-[170px] truncate"
             >
-              <option value="general">General Education</option>
               <option value="commercial">Technical Commercial (STT)</option>
-              <option value="industrial">Technical Industrial (IND)</option>
             </select>
           </div>
 
