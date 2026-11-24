@@ -1,4 +1,7 @@
 'use client';
+
+import { COMMERCIAL_TRADE_SERIES, TECHNICAL_COMMERCIAL_CATALOG, ALL_SUBJECTS_LIST } from '../../lib/academicCatalog';
+export { COMMERCIAL_TRADE_SERIES, TECHNICAL_COMMERCIAL_CATALOG, ALL_SUBJECTS_LIST };
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import { APP_BASE_URL } from '../lib/classlogsConfig';
@@ -67,15 +70,7 @@ export const GENERAL_CLASSES_CATALOG = [
   'Upper Sixth Science (U6S)',
 ];
 
-export const TECHNICAL_COMMERCIAL_CATALOG = [
-  'Form One Commercial (F1COM)',
-  'Form Two Commercial (F2COM)',
-  'Form Three Commercial (F3COM)',
-  'Form Four Commercial (F4COM)',
-  'Form Five Commercial (F5COM)',
-  'Lower Sixth Commercial (L6COM)',
-  'Upper Sixth Commercial (U6COM)',
-];
+// Moved to lib/academicCatalog.js: TECHNICAL_COMMERCIAL_CATALOG
 
 export const TECHNICAL_INDUSTRIAL_CATALOG = [
   'First Year Industrial (Y1Ind)',
@@ -112,23 +107,7 @@ export const GENERAL_SERIES_CATALOG = {
   }
 };
 
-export const COMMERCIAL_TRADE_SERIES = [
-  'FOUNDATIONAL',
-  'G1 - Secretarial Studies',
-  'G2 - Accounting and Management',
-  'G3 - Commercial Action / Marketing',
-  'FIG - Taxation and Management Information Systems',
-  'ACA - Administrative Action and Communication',
-  'HE - Home Economics',
-  'HOT - Hotel Management',
-  'TO - Tourism',
-  'BO - Bakery and Pastry',
-  'ACC - Accounting',
-  'BF - Banking and Finance',
-  'INS - Insurance',
-  'TLM - Transport and Logistics Management',
-  'ICT - Administrative and Communication Techniques'
-];
+// Moved to lib/academicCatalog.js: COMMERCIAL_TRADE_SERIES
 
 // Trade Series mapping for Technical Industrial
 export const INDUSTRIAL_TRADE_SERIES = [
@@ -249,123 +228,7 @@ const getSectionClasses = (section) => {
   return GENERAL_CLASSES_CATALOG || [];
 };
 // Master Subjects Database List
-export const ALL_SUBJECTS_LIST = [
-  // General Core Subjects
-  { name: "Additional Mathematics", category: "General Core Subjects" },
-  { name: "Artistic Education", category: "General Core Subjects" },
-  { name: "Biology", category: "General Core Subjects" },
-  { name: "Chemistry", category: "General Core Subjects" },
-  { name: "Citizenship Education / Moral Education", category: "General Core Subjects" },
-  { name: "Computer Sciences", category: "General Core Subjects" },
-  { name: "Information & Communication Technology", category: "General Core Subjects" },
-  { name: "Economics", category: "General Core Subjects" },
-  { name: "Economic Geography", category: "General Core Subjects" },
-  { name: "English Language", category: "General Core Subjects" },
-  { name: "Literature in English", category: "General Core Subjects" },
-  { name: "Food Science", category: "General Core Subjects" },
-  { name: "Food & Nutrition", category: "General Core Subjects" },
-  { name: "French Language", category: "General Core Subjects" },
-  { name: "Further Mathematics", category: "General Core Subjects" },
-  { name: "Geography", category: "General Core Subjects" },
-  { name: "Geology", category: "General Core Subjects" },
-  { name: "History", category: "General Core Subjects" },
-  { name: "Home Economics", category: "General Core Subjects" },
-  { name: "Human Biology", category: "General Core Subjects" },
-  { name: "Law", category: "General Core Subjects" },
-  { name: "Law and Government", category: "General Core Subjects" },
-  { name: "Manual Labour", category: "General Core Subjects" },
-  { name: "Mathematics", category: "General Core Subjects" },
-  { name: "Natural Science", category: "General Core Subjects" },
-  { name: "Philosophy", category: "General Core Subjects" },
-  { name: "Physics", category: "General Core Subjects" },
-  { name: "Pure Mathematics with Mechanics", category: "General Core Subjects" },
-  { name: "Pure Mathematics with Statistics", category: "General Core Subjects" },
-  { name: "Religious Studies", category: "General Core Subjects" },
-  { name: "School Orientation", category: "General Core Subjects" },
-  { name: "Sports & Physical Education", category: "General Core Subjects" },
-
-// Commercial Subjects
-  { name: "Application of Management Software", category: "Commercial Subjects" },
-  { name: "Accounting", category: "Commercial Subjects" },
-  { name: "Business Communication", category: "Commercial Subjects" },
-  { name: "Business Management", category: "Commercial Subjects" },
-  { name: "Business Mathematics", category: "Commercial Subjects" },
-  { name: "Commerce", category: "Commercial Subjects" },
-  { name: "Computer-Aided Accounting", category: "Commercial Subjects" },
-  { name: "Corporate Accounting", category: "Commercial Subjects" },
-  { name: "Cost and Management Accounting", category: "Commercial Subjects" },
-  { name: "Digital Marketing", category: "Commercial Subjects" },
-  { name: "Entrepreneurship", category: "Commercial Subjects" },
-  { name: "Family Life Education and Gerontology", category: "Commercial Subjects" },
-  { name: "Food Nutrition & Health", category: "Commercial Subjects" },
-  { name: "Information Processing", category: "Commercial Subjects" },
-  { name: "International Financial Accounting", category: "Commercial Subjects" },
-  { name: "Introduction to Marketing", category: "Commercial Subjects" },
-  { name: "Introductory Accounting", category: "Commercial Subjects" },
-  { name: "Legislation", category: "Commercial Subjects" },
-  { name: "Management Accounting", category: "Commercial Subjects" },
-  { name: "Marketing", category: "Commercial Subjects" },
-  { name: "Marketing Skills", category: "Commercial Subjects" },
-  { name: "Office Practice", category: "Commercial Subjects" },
-  { name: "OHADA Financial Accounting", category: "Commercial Subjects" },
-  { name: "OHADA Fin. Reporting - Year-End Accounting", category: "Commercial Subjects" },
-  { name: "Principles of Accounts", category: "Commercial Subjects" },
-  { name: "Product Mastery", category: "Commercial Subjects" },
-  { name: "Professional Communication Techniques", category: "Commercial Subjects" },
-  { name: "Resource Management on Home Studies", category: "Commercial Subjects" },
-  { name: "Professional Marketing Practice", category: "Commercial Subjects" },
-  { name: "Sales Method", category: "Commercial Subjects" },
-  { name: "Science / Hygiene", category: "Commercial Subjects" },
-  { name: "Shorthand (Stenography symbols)", category: "Commercial Subjects" },
-
-  // Industrial Subjects
-  { name: "Applied Mechanics", category: "Industrial Subjects" },
-  { name: "Automobile Electricity", category: "Industrial Subjects" },
-  { name: "Building Technology", category: "Industrial Subjects" },
-  { name: "Construction Drawing", category: "Industrial Subjects" },
-  { name: "Construction Materials", category: "Industrial Subjects" },
-  { name: "Construction Processes", category: "Industrial Subjects" },
-  { name: "Construction Technology", category: "Industrial Subjects" },
-  { name: "Construction Technology Practice", category: "Industrial Subjects" },
-  { name: "Decorative Arts", category: "Industrial Subjects" },
-  { name: "Electrical and Electronic Technology", category: "Industrial Subjects" },
-  { name: "Electrical Circuits", category: "Industrial Subjects" },
-  { name: "Electrical Diagrams", category: "Industrial Subjects" },
-  { name: "Electrical Machines", category: "Industrial Subjects" },
-  { name: "Electrical Tests & Measurements", category: "Industrial Subjects" },
-  { name: "Engineering Drawing", category: "Industrial Subjects" },
-  { name: "Engineering Science", category: "Industrial Subjects" },
-  { name: "Fashion Illustration", category: "Industrial Subjects" },
-  { name: "Fashion and Fabric Design", category: "Industrial Subjects" },
-  { name: "Garment Construction", category: "Industrial Subjects" },
-  { name: "Industrial Computing", category: "Industrial Subjects" },
-  { name: "Material Technology and Workshop Process", category: "Industrial Subjects" },
-  { name: "Materials", category: "Industrial Subjects" },
-  { name: "Mech. Const. Tech. & Drawing", category: "Industrial Subjects" },
-  { name: "Mechanical Construction Drawing", category: "Industrial Subjects" },
-  { name: "Mechanical Technology", category: "Industrial Subjects" },
-  { name: "Mechanical Technology Practice", category: "Industrial Subjects" },
-  { name: "Pattern Drafting", category: "Industrial Subjects" },
-  { name: "Practicals", category: "Industrial Subjects" },
-  { name: "Health, Safety, and Environment (HSE)", category: "Industrial Subjects" },
-  { name: "Quantities & Estimates", category: "Industrial Subjects" },
-  { name: "Sewing", category: "Industrial Subjects" },
-  { name: "Site Management", category: "Industrial Subjects" },
-  { name: "Soils & Mechanics", category: "Industrial Subjects" },
-  { name: "Soil Mechanics & Materials", category: "Industrial Subjects" },
-  { name: "Materials and Soils ", category: "Industrial Subjects" },
-  { name: "Surveys", category: "Industrial Subjects" },
-  { name: "Technical Drawing", category: "Industrial Subjects" },
-  { name: "Technology", category: "Industrial Subjects" },
-  { name: "Technology of Materials", category: "Industrial Subjects" },
-  { name: "Textile and Hardware Technology", category: "Industrial Subjects" },
-  { name: "Work Organization", category: "Industrial Subjects" },
-  { name: "Workshop Practicals", category: "Industrial Subjects" },
-  { name: "Building Practicals", category: "Industrial Subjects" },
-  { name: "Mechanical Practicals", category: "Industrial Subjects" },
-  { name: "Trade and Training", category: "Industrial Subjects" },
-  { name: "Electrical Practicals", category: "Industrial Subjects" }
-];
+// Moved to lib/academicCatalog.js: ALL_SUBJECTS_LIST
 
 // Helper to dynamically organize subjects based on selected section
 const getFilteredSubjects = (section) => {

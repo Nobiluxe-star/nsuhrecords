@@ -7,7 +7,7 @@ import {
   COMMERCIAL_TRADE_SERIES,
   TECHNICAL_COMMERCIAL_CATALOG,
   ALL_SUBJECTS_LIST
-} from '../../../app/admin-dashboard/page';
+} from '../../../lib/academicCatalog';
 import { calculateGradeFrom100, isPassingGrade } from './mockExamService';
 
 const IDB_NAME = 'ClassLogsTechnicalCommercialMockDB_v2';
