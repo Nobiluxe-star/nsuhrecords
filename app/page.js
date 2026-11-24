@@ -57,14 +57,36 @@ export default function LandingPage() {
       setShowDownloadPopup(true);
     }
 
-    const onBeforeInstall = (e) => {
+  const onBeforeInstall = (e) => {
       e.preventDefault();
       setDeferredInstallPrompt(e);
-      setShowDownloadPopup(true);
+
+      const alreadyInstalled =
+        window.matchMedia('(display-mode: standalone)').matches ||
+        window.navigator.standalone === true ||
+        localStorage.getItem('classlogs_app_installed') === 'true';
+
+      if (alreadyInstalled) {
+        const installAgain = window.confirm(
+          'ClassLogs is already downloaded on this device. Do you want to install it again?'
+        );
+        setShowDownloadPopup(installAgain);
+      } else {
+        setShowDownloadPopup(true);
+      }
+    };
+
+    const onAppInstalled = () => {
+      localStorage.setItem('classlogs_app_installed', 'true');
+      setShowDownloadPopup(false);
     };
 
     window.addEventListener('beforeinstallprompt', onBeforeInstall);
-    return () => window.removeEventListener('beforeinstallprompt', onBeforeInstall);
+    window.addEventListener('appinstalled', onAppInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', onBeforeInstall);
+      window.removeEventListener('appinstalled', onAppInstalled);
+    };
   }, []);
 
   // Load saved recent Teacher ID on mount
@@ -77,14 +99,33 @@ export default function LandingPage() {
     }
   }, []);
 
-  const handleDirectInstall = async () => {
+ const handleDirectInstall = async () => {
+    const alreadyInstalled =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      window.navigator.standalone === true ||
+      localStorage.getItem('classlogs_app_installed') === 'true';
+
+  if (alreadyInstalled) {
+      const installAgain = window.confirm(
+        'ClassLogs is already downloaded on this device. Do you want to install it again?'
+      );
+      if (!installAgain) {
+        setShowDownloadPopup(false);
+        return;
+      }
+    }
+
     if (deferredInstallPrompt) {
       deferredInstallPrompt.prompt();
-      await deferredInstallPrompt.userChoice;
+      const { outcome } = await deferredInstallPrompt.userChoice;
+      if (outcome === 'accepted') {
+        localStorage.setItem('classlogs_app_installed', 'true');
+      }
       setDeferredInstallPrompt(null);
       setShowDownloadPopup(false);
     } else {
-      alert('To install ClassLogs on your phone:\n\n• Android (Chrome): Tap the 3 dots (⋮) at the top right → "Install app" or "Add to Home screen".\n• iPhone (Safari): Tap the Share icon (↑) at the bottom → "Add to Home Screen".');
+      localStorage.setItem('classlogs_app_installed', 'true');
+      alert('To install ClassLogs on your phone:\n\n• Android (Chrome): Tap the 3 dots (⋮) at the top right → "Install app" or "Add to Home screen".\n• iPhone (Safari): Tap Share → "Add to Home Screen".');
       setShowDownloadPopup(false);
     }
   };
@@ -1143,11 +1184,7 @@ export default function LandingPage() {
               <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center font-black text-xl text-white shadow-lg">
                 CLs
               </div>
-              <img
-                src="/cls-logo.png"
-                alt="ClassLogs Logo"
-                className="w-14 h-14 rounded-2xl bg-white p-1 object-contain shadow"
-              />
+             
             </div>
 
             <div className="space-y-2">
