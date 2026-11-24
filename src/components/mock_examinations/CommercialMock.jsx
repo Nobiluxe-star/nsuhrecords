@@ -97,36 +97,50 @@ function normalizeTrade(val) {
   return s;
 }
 
-// Single Source of Truth lookup map built directly from imported ALL_SUBJECTS_LIST
-const SUBJECT_CATALOG_MAP = (() => {
+// Lazy getters to avoid circular-import TDZ during Next.js static prerendering
+let _cachedSubjectCatalogMap = null;
+function getSubjectCatalogMap() {
+  if (_cachedSubjectCatalogMap) return _cachedSubjectCatalogMap;
   const map = new Map();
-  if (Array.isArray(ALL_SUBJECTS_LIST)) {
-    ALL_SUBJECTS_LIST.forEach((item) => {
-      if (item?.name) {
-        map.set(String(item.name).toLowerCase().trim(), String(item.category || '').trim());
-      }
-    });
+  try {
+    if (Array.isArray(ALL_SUBJECTS_LIST)) {
+      ALL_SUBJECTS_LIST.forEach((item) => {
+        if (item?.name) {
+          map.set(String(item.name).toLowerCase().trim(), String(item.category || '').trim());
+        }
+      });
+      _cachedSubjectCatalogMap = map;
+    }
+  } catch (_) {
+    // Ignore until module initialization completes
   }
   return map;
-})();
+}
 
-const COMMERCIAL_CATALOG_SET = (() => {
+let _cachedCommercialCatalogSet = null;
+function getCommercialCatalogSet() {
+  if (_cachedCommercialCatalogSet) return _cachedCommercialCatalogSet;
   const set = new Set();
-  if (Array.isArray(TECHNICAL_COMMERCIAL_CATALOG)) {
-    TECHNICAL_COMMERCIAL_CATALOG.forEach((c) => {
-      if (c) {
-        set.add(String(c).toLowerCase().trim());
-        set.add(normalizeClassName(c));
-      }
-    });
+  try {
+    if (Array.isArray(TECHNICAL_COMMERCIAL_CATALOG)) {
+      TECHNICAL_COMMERCIAL_CATALOG.forEach((c) => {
+        if (c) {
+          set.add(String(c).toLowerCase().trim());
+          set.add(normalizeClassName(c));
+        }
+      });
+      _cachedCommercialCatalogSet = set;
+    }
+  } catch (_) {
+    // Ignore until module initialization completes
   }
   return set;
-})();
+}
 
 function classifyCommercialSubject(subjectName, coeff = 1) {
   const cleanName = String(subjectName || '').toLowerCase().trim();
   const numCoeff = Number(coeff) || 1;
-  const catalogCategory = SUBJECT_CATALOG_MAP.get(cleanName) || '';
+  const catalogCategory = getSubjectCatalogMap().get(cleanName) || '';
 
   if (catalogCategory === 'Commercial Subjects') {
     return 'SPECIALTY';
@@ -155,7 +169,8 @@ function isCommercialExamClass(clsName) {
     return false;
   }
 
-  if (COMMERCIAL_CATALOG_SET.has(raw) || COMMERCIAL_CATALOG_SET.has(norm)) {
+  const catalogSet = getCommercialCatalogSet();
+  if (catalogSet.has(raw) || catalogSet.has(norm)) {
     return true;
   }
 
@@ -1207,7 +1222,6 @@ export default function CommercialMock({
     const tenantIdSet = new Set(allowedTenantIds);
     if (tenantIdSet.size === 0) return [];
 
-    // Prefer live DB-verified `dbStudents` for this school_id; fallback to prop `studentsList` only if all belong to this school_id
     const rawList =
       Array.isArray(dbStudents) && dbStudents.length > 0
         ? dbStudents
