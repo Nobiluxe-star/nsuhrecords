@@ -28,19 +28,19 @@ function calculateGrade(score, isSixthForm) {
   const s = Number(score);
 
   if (isSixthForm) {
-    if (s >= 15) return 'A';
-    if (s >= 13) return 'B';
-    if (s >= 11) return 'C';
-    if (s >= 9)  return 'D';
-    if (s >= 7)  return 'E';
-    if (s >= 6)  return 'O';
+    if (s >= 16.5) return 'A';
+    if (s >= 14) return 'B';
+    if (s >= 10) return 'C';
+    if (s >= 8)  return 'D';
+    if (s >= 6)  return 'E';
+    if (s >= 5)  return 'O';
     return 'F';
   } else {
-    if (s >= 15) return 'A';
-    if (s >= 13.1) return 'B';
-    if (s >= 11) return 'C';
-    if (s >= 9)  return 'D';
-    if (s >= 5)  return 'E';
+    if (s >= 16.5) return 'A';
+    if (s >= 14) return 'B';
+    if (s >= 10) return 'C';
+    if (s >= 8)  return 'D';
+    if (s >= 6)  return 'E';
     return 'U';
   }
 }
@@ -48,6 +48,12 @@ function calculateGrade(score, isSixthForm) {
 function normalizeClass(cls) {
   if (!cls) return '';
   return cls.toLowerCase().replace(/\(.*?\)/g, '').trim();
+}
+
+function parseValidMark(val) {
+  if (val === undefined || val === null || String(val).trim() === '') return NaN;
+  const num = Number(val);
+  return isNaN(num) ? NaN : num;
 }
 
 // ==============================================================================
@@ -129,6 +135,9 @@ export default function BulkGeneralReportCard({
   const [viewMode, setViewMode] = useState('all');
   const [currentIndex, setCurrentIndex] = useState(0);
 
+  // Per-school, per-student highlighted (excluded from print) subjects state
+  const [hiddenSubjectsMap, setHiddenSubjectsMap] = useState({});
+
   useEffect(() => {
     if (activeClass) {
       setSelectedClass(activeClass);
@@ -143,9 +152,8 @@ export default function BulkGeneralReportCard({
 
   const [studentsList, setStudentsList] = useState([]);
   const [subjectsList, setSubjectsList] = useState([]);
-  const [processedDataMap, setProcessedDataMap] = useState({});
+  const [rawProcessedDataMap, setRawProcessedDataMap] = useState({});
   const [schoolData, setSchoolData] = useState({});
-  const [classAverage, setClassAverage] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
@@ -167,16 +175,59 @@ export default function BulkGeneralReportCard({
     return schoolInfo?.school_id || schoolInfo?.id || schoolInfo?.active_school_id || '';
   }, [schoolInfo]);
 
-useEffect(() => {
-  if (activeClass) {
-    setSelectedClass(activeClass);
-  }
-  if (activeTerm) {
-    setSelectedTerm(activeTerm);
-  }
-  setSelectedSeries('ALL');
-  setCurrentIndex(0);
-}, [isOpen, activeClass, activeTerm]);
+  const hiddenStorageKey = useMemo(() => {
+    if (!effectiveSchoolId || !selectedTerm) return null;
+    return `classlogs_hidden_subjects_${effectiveSchoolId}_${selectedTerm}`;
+  }, [effectiveSchoolId, selectedTerm]);
+
+  useEffect(() => {
+    if (!hiddenStorageKey || typeof window === 'undefined') return;
+    try {
+      const saved = localStorage.getItem(hiddenStorageKey);
+      setHiddenSubjectsMap(saved ? JSON.parse(saved) : {});
+    } catch (e) {
+      setHiddenSubjectsMap({});
+    }
+  }, [hiddenStorageKey]);
+
+  const toggleHighlightSubject = useCallback((studentId, subjectName) => {
+    if (!studentId || !subjectName) return;
+    const cleanSub = subjectName.toLowerCase().trim();
+    setHiddenSubjectsMap((prev) => {
+      const existing = prev[studentId] || [];
+      const isAlreadyHidden = existing.includes(cleanSub);
+      const updatedList = isAlreadyHidden
+        ? existing.filter((s) => s !== cleanSub)
+        : [...existing, cleanSub];
+
+      const nextMap = { ...prev };
+      if (updatedList.length > 0) {
+        nextMap[studentId] = updatedList;
+      } else {
+        delete nextMap[studentId];
+      }
+
+      if (hiddenStorageKey && typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(hiddenStorageKey, JSON.stringify(nextMap));
+        } catch (e) {
+          // Safe fallback if storage quota is full
+        }
+      }
+      return nextMap;
+    });
+  }, [hiddenStorageKey]);
+
+  useEffect(() => {
+    if (activeClass) {
+      setSelectedClass(activeClass);
+    }
+    if (activeTerm) {
+      setSelectedTerm(activeTerm);
+    }
+    setSelectedSeries('ALL');
+    setCurrentIndex(0);
+  }, [isOpen, activeClass, activeTerm]);
 
   const availableSeriesList = useMemo(() => {
     const clsLower = selectedClass.toLowerCase();
@@ -203,19 +254,25 @@ useEffect(() => {
     const cacheKey = `bg_cache_${effectiveSchoolId}_${normalizeClass(selectedClass)}_${selectedTerm}_${selectedSeries}`;
 
     if (typeof window !== 'undefined') {
-      let cachedData = localStorage.getItem(cacheKey);
+      let cachedData = null;
+      try {
+        cachedData = localStorage.getItem(cacheKey);
+      } catch (e) {
+        cachedData = null;
+      }
       if (!cachedData) {
         cachedData = await getIDBCache(cacheKey);
       }
       if (cachedData) {
         try {
           const parsed = typeof cachedData === 'string' ? JSON.parse(cachedData) : cachedData;
-          setSchoolData(parsed.schoolData || {});
-          setStudentsList(parsed.studentsList || []);
-          setSubjectsList(parsed.subjectsList || []);
-          setProcessedDataMap(parsed.processedDataMap || {});
-          setClassAverage(parsed.classAverage || null);
-          setIsLoading(false);
+          if (parsed.rawProcessedDataMap) {
+            setSchoolData(parsed.schoolData || {});
+            setStudentsList(parsed.studentsList || []);
+            setSubjectsList(parsed.subjectsList || []);
+            setRawProcessedDataMap(parsed.rawProcessedDataMap || {});
+            setIsLoading(false);
+          }
         } catch (e) {
           console.warn('Cache parsing error:', e);
         }
@@ -278,7 +335,7 @@ useEffect(() => {
 
       if (filteredStudents.length === 0) {
         setSubjectsList([]);
-        setProcessedDataMap({});
+        setRawProcessedDataMap({});
         setIsLoading(false);
         return;
       }
@@ -293,7 +350,6 @@ useEffect(() => {
         const targetSeries = seriesName ? seriesName.toLowerCase().trim() : (selectedSeries && selectedSeries !== 'ALL' && selectedSeries !== 'N/A' ? selectedSeries.toLowerCase().trim() : null);
 
         const match = teachersData.find((t) => {
-          // 1. Strict Schedule/Timetable Slot Check
           const schedules = t.schedules || t.schedule || t.timetable || {};
           for (const [key, slots] of Object.entries(schedules)) {
             const keySub = key.toLowerCase().trim();
@@ -317,7 +373,6 @@ useEffect(() => {
             }
           }
 
-          // 2. Strict Assignments Array Check
           const assignments = t.assignments || t.class_assignments || t.assigned_classes || [];
           if (Array.isArray(assignments) && assignments.length > 0) {
             const hasValidAssignment = assignments.some((item) => {
@@ -347,7 +402,6 @@ useEffect(() => {
         return match ? (match.name || match.fullName || match.full_name || '—') : '—';
       };
 
-      // Build series coefficient map for student-specific loading with strict instructor targeting
       const allCoeffRows = coeffRes.data || [];
       const seriesCoeffMap = {};
 
@@ -428,8 +482,7 @@ useEffect(() => {
         return mTerm === String(termNumeric);
       });
 
-      const studentAverages = [];
-      const studentMap = {};
+      const baseStudentMap = {};
 
       filteredStudents.forEach((st) => {
         const sId = st.id;
@@ -441,14 +494,10 @@ useEffect(() => {
             (sCode && (m.unique_code === sCode || m.code === sCode))
         );
 
-        // Get student-specific subjects based on series
         const stSeries = String(st.trades_series || st.series || '').trim().toLowerCase();
         const studentSubjects = seriesCoeffMap[stSeries] || loadedSubjects;
 
         const scoreMap = {};
-        let totalPts = 0;
-        let totalCoef = 0;
-        let hasMarks = false;
 
         studentSubjects.forEach((sub) => {
           const subKey = sub.subject_name.toLowerCase().trim();
@@ -458,8 +507,8 @@ useEffect(() => {
           
           let scoreVal = NaN;
           if (match) {
-            const seq1 = Number(match.sequence_1 ?? match.seq1 ?? match.seq_1);
-            const seq2 = Number(match.sequence_2 ?? match.seq2 ?? match.seq_2);
+            const seq1 = parseValidMark(match.sequence_1 ?? match.seq1 ?? match.seq_1);
+            const seq2 = parseValidMark(match.sequence_2 ?? match.seq2 ?? match.seq_2);
             
             const hasSeq1 = !isNaN(seq1);
             const hasSeq2 = !isNaN(seq2);
@@ -471,29 +520,19 @@ useEffect(() => {
             } else if (hasSeq2) {
               scoreVal = seq2;
             } else {
-              scoreVal = Number(match.term_score ?? match.score ?? match.mark ?? match.marks);
+              scoreVal = parseValidMark(match.term_score ?? match.score ?? match.mark ?? match.marks);
             }
           }
 
           if (!isNaN(scoreVal)) {
-            hasMarks = true;
             scoreMap[subKey] = scoreVal;
-            totalPts += scoreVal * sub.coefficient;
-            totalCoef += sub.coefficient;
           }
         });
-
-        const termAvg = hasMarks && totalCoef > 0 ? totalPts / totalCoef : null;
-
-        if (termAvg !== null) {
-          studentAverages.push({ studentId: sId, avg: termAvg });
-        }
 
         const feeRec = (feesRes.data || []).find((f) => String(f.student_id) === String(sId) || (sCode && f.unique_code === sCode));
         const discRec = (discRes.data || []).find((d) => String(d.student_id) === String(sId) || (sCode && d.unique_code === sCode));
         const remRec = (remRes.data || []).find((r) => String(r.student_id) === String(sId) || (sCode && r.unique_code === sCode));
 
-        // LIVE ATTENDANCE PARSING (UNJUSTIFIED ABSENCES & TARDINESS)
         let liveAbsences = 0;
         let liveTardiness = 0;
 
@@ -515,12 +554,8 @@ useEffect(() => {
           punishments: discRec?.punishments || null
         };
 
-        studentMap[sId] = {
+        baseStudentMap[sId] = {
           marksMap: scoreMap,
-          totalPoints: totalPts,
-          totalCoef: totalCoef,
-          termAverage: termAvg !== null ? termAvg.toFixed(2) : null,
-          termStatus: termAvg !== null ? (termAvg >= 10 ? 'Passed' : 'Failed') : null,
           feesRecord: feeRec || null,
           disciplineRecord: mergedDiscipline,
           adminRemarks: remRec || null,
@@ -528,54 +563,21 @@ useEffect(() => {
         };
       });
 
-      let calculatedAvg = null;
-      if (studentAverages.length > 0) {
-        const totalAvgSum = studentAverages.reduce((sum, item) => sum + item.avg, 0);
-        calculatedAvg = (totalAvgSum / studentAverages.length).toFixed(2);
-        setClassAverage(calculatedAvg);
-
-        studentAverages.sort((a, b) => b.avg - a.avg);
-        studentAverages.forEach((item, index) => {
-          if (studentMap[item.studentId]) {
-            studentMap[item.studentId].rank = index + 1;
-          }
-        });
-      } else {
-        setClassAverage(null);
-      }
-
-      loadedSubjects.forEach((sub) => {
-        const subKey = sub.subject_name.toLowerCase().trim();
-        const subScores = [];
-
-        filteredStudents.forEach((st) => {
-          const sVal = studentMap[st.id]?.marksMap[subKey];
-          if (sVal !== undefined && !isNaN(sVal)) {
-            subScores.push({ studentId: st.id, score: sVal });
-          }
-        });
-
-        subScores.sort((a, b) => b.score - a.score);
-        subScores.forEach((item, idx) => {
-          if (!studentMap[item.studentId].subjectRanks) {
-            studentMap[item.studentId].subjectRanks = {};
-          }
-          studentMap[item.studentId].subjectRanks[subKey] = idx + 1;
-        });
-      });
-
-      setProcessedDataMap(studentMap);
+      setRawProcessedDataMap(baseStudentMap);
 
       if (typeof window !== 'undefined') {
         const payload = {
           schoolData: fetchedSchoolData,
           studentsList: filteredStudents,
           subjectsList: loadedSubjects,
-          processedDataMap: studentMap,
-          classAverage: calculatedAvg
+          rawProcessedDataMap: baseStudentMap
         };
-        localStorage.setItem(cacheKey, JSON.stringify(payload));
         setIDBCache(cacheKey, payload);
+        try {
+          localStorage.setItem(cacheKey, JSON.stringify(payload));
+        } catch (storageErr) {
+          // QuotaExceededError safely ignored because IndexedDB handles full payloads
+        }
       }
 
     } catch (err) {
@@ -588,6 +590,93 @@ useEffect(() => {
   useEffect(() => {
     fetchAndCalculateBulkData();
   }, [fetchAndCalculateBulkData]);
+
+  // ==============================================================================
+  // DYNAMICALLY COMPUTED PER-STUDENT TOTAL COEFFICIENTS, AVERAGES & RANKS
+  // ==============================================================================
+  const { processedDataMap, classAverage } = useMemo(() => {
+    const computedMap = {};
+    const studentAverages = [];
+
+    studentsList.forEach((st) => {
+      const sId = st.id;
+      const base = rawProcessedDataMap[sId];
+      if (!base) return;
+
+      const hiddenList = hiddenSubjectsMap[sId] || [];
+      const visibleSubjects = (base.studentSubjects || []).filter(
+        (sub) => !hiddenList.includes(sub.subject_name.toLowerCase().trim())
+      );
+
+      let totalPts = 0;
+      let totalCoef = 0;
+      let hasMarks = false;
+
+      // Only subjects where a mark was entered (and not highlighted/hidden) count toward this student's totalCoef
+      visibleSubjects.forEach((sub) => {
+        const subKey = sub.subject_name.toLowerCase().trim();
+        const scoreVal = base.marksMap[subKey];
+        if (scoreVal !== undefined && scoreVal !== null && !isNaN(scoreVal)) {
+          hasMarks = true;
+          totalPts += scoreVal * sub.coefficient;
+          totalCoef += sub.coefficient;
+        }
+      });
+
+      const termAvg = hasMarks && totalCoef > 0 ? totalPts / totalCoef : null;
+      if (termAvg !== null) {
+        studentAverages.push({ studentId: sId, avg: termAvg });
+      }
+
+      computedMap[sId] = {
+        ...base,
+        visibleSubjects,
+        hiddenList,
+        totalPoints: totalPts,
+        totalCoef,
+        termAverage: termAvg !== null ? termAvg.toFixed(2) : null,
+        termStatus: termAvg !== null ? (termAvg >= 10 ? 'Passed' : 'Failed') : null,
+        subjectRanks: {}
+      };
+    });
+
+    let calculatedAvg = null;
+    if (studentAverages.length > 0) {
+      const totalAvgSum = studentAverages.reduce((sum, item) => sum + item.avg, 0);
+      calculatedAvg = (totalAvgSum / studentAverages.length).toFixed(2);
+
+      studentAverages.sort((a, b) => b.avg - a.avg);
+      studentAverages.forEach((item, index) => {
+        if (computedMap[item.studentId]) {
+          computedMap[item.studentId].rank = index + 1;
+        }
+      });
+    }
+
+    subjectsList.forEach((sub) => {
+      const subKey = sub.subject_name.toLowerCase().trim();
+      const subScores = [];
+
+      studentsList.forEach((st) => {
+        const hiddenList = hiddenSubjectsMap[st.id] || [];
+        if (hiddenList.includes(subKey)) return;
+
+        const sVal = computedMap[st.id]?.marksMap[subKey];
+        if (sVal !== undefined && !isNaN(sVal)) {
+          subScores.push({ studentId: st.id, score: sVal });
+        }
+      });
+
+      subScores.sort((a, b) => b.score - a.score);
+      subScores.forEach((item, idx) => {
+        if (computedMap[item.studentId]) {
+          computedMap[item.studentId].subjectRanks[subKey] = idx + 1;
+        }
+      });
+    });
+
+    return { processedDataMap: computedMap, classAverage: calculatedAvg };
+  }, [studentsList, subjectsList, rawProcessedDataMap, hiddenSubjectsMap]);
 
   // ==============================================================================
   // DIRECT VECTOR PDF ENGINE (WITH LOGO & BASE64 SUPPORT)
@@ -622,7 +711,7 @@ useEffect(() => {
         const stData = processedDataMap[sId] || {};
         const marksMap = stData.marksMap || {};
         const subjectRanks = stData.subjectRanks || {};
-        const studentSubs = stData.studentSubjects || [];
+        const studentSubs = stData.visibleSubjects || [];
 
         const activeClassName = (student.classLevel || student.class_level || selectedClass || '').toLowerCase().trim();
         const isLowerClass = GENERAL_LOWER_CLASSES.some(c => c.toLowerCase().trim() === activeClassName || activeClassName.includes(c.toLowerCase().trim()));
@@ -864,7 +953,8 @@ useEffect(() => {
     const stData = processedDataMap[sId] || {};
     const marksMap = stData.marksMap || {};
     const subjectRanks = stData.subjectRanks || {};
-    const studentSubs = stData.studentSubjects || [];
+    const allStudentSubs = stData.studentSubjects || [];
+    const hiddenList = stData.hiddenList || [];
 
     const activeClassName = (student.classLevel || student.class_level || selectedClass || '').toLowerCase().trim();
     const isLowerClass = GENERAL_LOWER_CLASSES.some(c => c.toLowerCase().trim() === activeClassName || activeClassName.includes(c.toLowerCase().trim()));
@@ -995,11 +1085,12 @@ useEffect(() => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 bg-white text-[10px]">
-              {studentSubs.length === 0 ? (
+              {allStudentSubs.length === 0 ? (
                 <tr><td colSpan="7" className="p-2.5 text-center text-slate-400 italic">No subject coefficients configured for this series/class.</td></tr>
               ) : (
-                studentSubs.map((sub, idx) => {
+                allStudentSubs.map((sub, idx) => {
                   const subKey = sub.subject_name.toLowerCase().trim();
+                  const isHighlightedHidden = hiddenList.includes(subKey);
                   const score = marksMap[subKey];
                   const coef = Number(sub.coefficient || 1);
 
@@ -1013,8 +1104,28 @@ useEffect(() => {
                   const rawRank = subjectRanks[subKey];
 
                   return (
-                    <tr key={`subj_row_${student.id || index}_${idx}_${sub.subject_name}`} className="hover:bg-slate-50">
-                      <td className="p-1 font-bold text-slate-900">{sub.subject_name}</td>
+                    <tr
+                      key={`subj_row_${student.id || index}_${idx}_${sub.subject_name}`}
+                      onClick={() => toggleHighlightSubject(sId, sub.subject_name)}
+                      title={
+                        isHighlightedHidden
+                          ? 'Highlighted (will NOT print) — Click to unhighlight'
+                          : 'Click to highlight & exclude from print'
+                      }
+                      className={
+                        isHighlightedHidden
+                          ? 'no-print bg-amber-200/90 text-amber-950 line-through decoration-red-600 cursor-pointer transition-colors'
+                          : 'hover:bg-slate-100 cursor-pointer transition-colors'
+                      }
+                    >
+                      <td className="p-1 font-bold text-slate-900">
+                        <span>{sub.subject_name}</span>
+                        {isHighlightedHidden && (
+                          <span className="ml-1.5 px-1.5 py-0.5 rounded bg-red-600 text-white text-[8px] font-black uppercase no-underline inline-block">
+                            Hidden from Print
+                          </span>
+                        )}
+                      </td>
                       <td className="p-1 text-center font-bold">{coef}</td>
                       <td className={`p-1 text-center ${scoreTextColor}`}>{isScoreValid ? score : '—'}</td>
                       <td className={`p-1 text-center font-black ${scoreTextColor}`}>
@@ -1071,8 +1182,7 @@ useEffect(() => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-start overflow-y-auto p-2 sm:p-4 print:p-0 print:bg-white print:overflow-visible">
-      
+<div className="fixed inset-0 z-50 bg-slate-950/95 flex flex-col items-center justify-start overflow-y-auto p-2 sm:p-4 print:p-0 print:bg-white print:overflow-visible">      
       <style jsx global>{`
         @media print {
           body * {
@@ -1119,12 +1229,15 @@ useEffect(() => {
 
       {/* TOOLBAR CONTROLS */}
       <div className="no-print w-full max-w-5xl bg-slate-900 border border-slate-700 rounded-2xl p-3 sm:p-4 mb-4 flex flex-wrap items-center justify-between gap-3 sm:gap-4 text-white sticky top-2 z-10 shadow-2xl">
-        <div>
+       <div>
           <h2 className="text-base sm:text-lg font-bold text-emerald-400 flex items-center gap-2">
             📄 Bulk General Education — <span className="text-white">{selectedClass}</span>
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
             Class Enrolment: <span className="text-emerald-400 font-bold">{studentsList.length} Students</span> | Term: <span className="text-white font-medium">{selectedTerm}</span>
+          </p>
+          <p className="text-[11px] text-amber-300/90 mt-1">
+            <strong>Note:</strong> Total points and averages reflect only the subjects a student offers. To exclude an unoffered subject from printing, click its row to highlight it; click again to unhighlight.
           </p>
         </div>
 
@@ -1133,8 +1246,8 @@ useEffect(() => {
             <label className="text-[10px] text-slate-400 font-medium">Class Level</label>
             <select
               value={selectedClass}
-              onChange={(e) => { setSelectedClass(e.target.value); setCurrentIndex(0); }}
-              className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-medium focus:border-emerald-500 focus:outline-none max-w-[140px] sm:max-w-[170px] truncate"
+              onChange={(e) => { setSelectedClass(e.target.value); setSelectedSeries('ALL'); setCurrentIndex(0); }}
+              className="cursor-pointer relative z-20 bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-medium focus:border-emerald-500 focus:outline-none max-w-[140px] sm:max-w-[170px] truncate"
             >
               {(GENERAL_CLASSES_CATALOG || []).map((cls) => (
                 <option key={cls} value={cls}>{cls}</option>

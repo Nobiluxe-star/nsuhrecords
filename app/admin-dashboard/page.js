@@ -14,6 +14,7 @@ import TechnicalCommercialMarkSheet from './components/mark-sheets/TechnicalComm
 import TechnicalIndustrialMarkSheet from './components/mark-sheets/TechnicalIndustrialMarkSheet';
 import SubjectCoefficientsManager from './components/SubjectCoefficientsManager';
 import TeacherAssignment from './components/TeacherAssignment';
+import ClassSubjectAllocationModal from './components/ClassSubjectAllocationModal';
 import SchoolSettings from './components/SchoolSettings';
 import { downloadFullSchoolData, syncOfflineQueueToSupabase } from '../../lib/offlineSync';
 import { db } from '../../lib/db'; 
@@ -383,6 +384,7 @@ const [activeTimetableDay, setActiveTimetableDay] = useState(() => {
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [registrationMode, setRegistrationMode] = useState('single'); // 'single' or 'bulk'
   const [teacherSubTab, setTeacherSubTab] = useState('assigned');
+  const [showAllocationSheet, setShowAllocationSheet] = useState(false);
   const [schoolLogo, setSchoolLogo] = useState('');
   const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
   
@@ -4253,7 +4255,20 @@ const handleUpdatePersonnel = async (e) => {
         >
           Assigned Teachers
         </button>
+<button
+           type="button"
+           onClick={() => setShowAllocationSheet(true)}
+           className="px-4 py-2 text-sm font-bold rounded-lg transition bg-emerald-600 hover:bg-emerald-500 text-white shadow"
+         >
+           Assigned Subjects &amp; Classes
+         </button>
 
+         <ClassSubjectAllocationModal
+           isOpen={showAllocationSheet}
+           onClose={() => setShowAllocationSheet(false)}
+           teachers={teachersList}
+           schoolName={activeSchool?.name || 'School Subject Allocation Sheet'}
+         />
         </div>
 
         {/* 1. ASSIGNED TEACHERS SUB-TAB */}

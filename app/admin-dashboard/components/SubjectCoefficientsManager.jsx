@@ -41,6 +41,10 @@ export default function SubjectCoefficientsManager({ activeSchool }) {
 
   // Active Subject List State
   const [assignedSubjects, setAssignedSubjects] = useState([]);
+
+  // Drag & Drop Reorder State
+  const [draggedIndex, setDraggedIndex] = useState(null);
+  const [dragOverIndex, setDragOverIndex] = useState(null);
   
   // Custom Subject Modal State (Upgraded to multi-row batch state)
   const [showCustomModal, setShowCustomModal] = useState(false);
@@ -364,6 +368,54 @@ const { masterSubjects } = useAcademicConfigs();
     setAssignedSubjects(prev => prev.filter((_, i) => i !== index));
   };
 
+  // Drag & Drop + Step Reorder Handlers
+  const moveSubjectPosition = (fromIndex, toIndex) => {
+    if (
+      fromIndex === null ||
+      toIndex === null ||
+      fromIndex === toIndex ||
+      fromIndex < 0 ||
+      toIndex < 0 ||
+      fromIndex >= assignedSubjects.length ||
+      toIndex >= assignedSubjects.length
+    ) {
+      return;
+    }
+    setAssignedSubjects(prev => {
+      const updated = [...prev];
+      const [movedItem] = updated.splice(fromIndex, 1);
+      updated.splice(toIndex, 0, movedItem);
+      return updated;
+    });
+  };
+
+  const handleDragStart = (e, index) => {
+    setDraggedIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(index));
+  };
+
+  const handleDragOver = (e, index) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverIndex !== index) {
+      setDragOverIndex(index);
+    }
+  };
+
+  const handleDrop = (e, targetIndex) => {
+    e.preventDefault();
+    const sourceIndex = draggedIndex !== null ? draggedIndex : Number(e.dataTransfer.getData('text/plain'));
+    moveSubjectPosition(sourceIndex, targetIndex);
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
+
   // Save Configuration to Supabase with Mandatory School ID
   const handleSave = async () => {
     setStatusMessage({ type: '', text: '' });
@@ -653,8 +705,49 @@ const { masterSubjects } = useAcademicConfigs();
               </tr>
             ) : (
               assignedSubjects.map((sub, idx) => (
-                <tr key={`${sub.name}-${idx}`} className="hover:bg-gray-800/30 transition">
-                  <td className="p-3 font-mono text-gray-500">{idx + 1}</td>
+                <tr
+                  key={`${sub.name}-${idx}`}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, idx)}
+                  onDragOver={(e) => handleDragOver(e, idx)}
+                  onDrop={(e) => handleDrop(e, idx)}
+                  onDragEnd={handleDragEnd}
+                  className={`transition cursor-grab active:cursor-grabbing ${
+                    draggedIndex === idx
+                      ? 'opacity-40 bg-amber-500/10'
+                      : dragOverIndex === idx
+                      ? 'border-t-2 border-t-amber-400 bg-gray-800/60'
+                      : 'hover:bg-gray-800/30'
+                  }`}
+                >
+                  <td className="p-3 font-mono text-gray-500">
+                    <div className="flex items-center gap-1.5">
+                      <span title="Hold and drag to reorder" className="text-gray-500 hover:text-amber-400 select-none text-sm leading-none">
+                        ⋮⋮
+                      </span>
+                      <span>{idx + 1}</span>
+                      <div className="flex flex-col ml-1">
+                        <button
+                          type="button"
+                          onClick={() => moveSubjectPosition(idx, idx - 1)}
+                          disabled={idx === 0}
+                          className="text-[9px] leading-none text-gray-500 hover:text-amber-400 disabled:opacity-20"
+                          title="Move up"
+                        >
+                          ▲
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moveSubjectPosition(idx, idx + 1)}
+                          disabled={idx === assignedSubjects.length - 1}
+                          className="text-[9px] leading-none text-gray-500 hover:text-amber-400 disabled:opacity-20"
+                          title="Move down"
+                        >
+                          ▼
+                        </button>
+                      </div>
+                    </div>
+                  </td>
                   <td className="p-3 font-semibold text-white">{sub.name}</td>
                   <td className="p-3 text-gray-400">{sub.category}</td>
                   <td className="p-3 text-center">
